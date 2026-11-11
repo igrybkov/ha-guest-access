@@ -9,6 +9,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -220,6 +221,16 @@ type Template struct {
 	// in this template's group. Entities not listed follow, by name. An id
 	// that no longer resolves is skipped.
 	EntityOrder []string `yaml:"entity_order,omitempty" json:"entity_order,omitempty"`
+}
+
+// MarshalJSON writes rules as [] when there are none. Go writes a nil
+// slice as null, and clients expect a list.
+func (t Template) MarshalJSON() ([]byte, error) {
+	type plain Template
+	if t.Rules == nil {
+		t.Rules = []Rule{}
+	}
+	return json.Marshal(plain(t))
 }
 
 // Validate checks the template's shape.

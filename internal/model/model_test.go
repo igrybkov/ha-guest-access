@@ -678,3 +678,17 @@ func TestTimeZoneName(t *testing.T) {
 		}
 	}
 }
+
+func TestTemplateJSONEmptyRulesIsList(t *testing.T) {
+	b, err := json.Marshal(Template{ID: "empty", Name: "Empty"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"rules":[]`) {
+		t.Fatalf("rules not an empty list: %s", b)
+	}
+	var back Template
+	if err := json.Unmarshal(b, &back); err != nil || back.ID != "empty" {
+		t.Fatalf("round trip: %v %+v", err, back)
+	}
+}
