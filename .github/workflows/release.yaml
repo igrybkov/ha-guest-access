@@ -1,0 +1,142 @@
+name: Release
+
+# A release starts from main, never from a tag. When the version in
+# guest_access/config.yaml has no tag yet, this tests, builds and pushes the
+# image, and only then creates the tag and the GitHub release. A failed
+# build leaves no tag, so a tag always means a published release. Run it by
+# hand (workflow_dispatch) to retry a failed release of the same version.
+# A version with a -dev suffix is never released.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/igrybkov/ha-guest-access
+  SOURCE_URL: https://github.com/igrybkov/ha-guest-access
+
+jobs:
+  # plan reads the app version and decides whether it still needs a release.
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Read the version and look for its tag
+        id: version
+        run: |
+          if [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo "::error::releases run from main only, not $GITHUB_REF"
+            exit 1
+          fi
+          app=$(sed -n 's/^version: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' guest_access/config.yaml)
+          if [ -z "$app" ]; then
+            echo "::error::no version in guest_access/config.yaml"
+            exit 1
+          fi
+          echo "version=$app" >> "$GITHUB_OUTPUT"
+          if [ "${app%-dev}" != "$app" ]; then
+            echo "$app is a dev version; nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY" "refs/tags/v$app" >/dev/null; then
+            echo "v$app is already released; nothing to do."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # The same checks as CI.
+  test:
+    needs: plan
+    if: needs.plan.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Vet
+        run: make vet
+      - name: Test
+        run: make test
+      - name: Staticcheck
+        run: make lint
+      - name: UI tests
+        run: make test-ui
+
+  image:
+    needs: [plan, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: mode=max
+          build-args: VERSION=${{ needs.plan.outputs.version }}
+          tags: |
+            ${{ env.IMAGE }}:${{ needs.plan.outputs.version }}
+            ${{ env.IMAGE }}:latest
+          # GHCR reads the source link from the index of a multi-arch image.
+          annotations: |
+            index:org.opencontainers.image.source=${{ env.SOURCE_URL }}
+            index:org.opencontainers.image.description=Home Assistant app: share links that let guests control a few things at home
+            index:org.opencontainers.image.licenses=MIT
+            index:org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # The tag comes last: it exists only when the image is out.
+  github-release:
+    needs: [plan, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tag and create the GitHub release from CHANGELOG
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          # Section for this version: from "## X.Y.Z" up to the next "## ".
+          awk -v v="$VERSION" '
+            $0 == "## " v { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' guest_access/CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "Release $VERSION" > notes.md
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "v$VERSION" --notes-file notes.md

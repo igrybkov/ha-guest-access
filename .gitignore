@@ -1,0 +1,12 @@
+# Binaries
+/guest-access
+/bin/
+/dist/
+
+# Local env and secrets
+.env*
+
+# Scratch and local data dirs (make run-dev)
+/tmp/
+/data/
+/dev-config/

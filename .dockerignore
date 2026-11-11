@@ -1,0 +1,17 @@
+# Only Go sources, go.mod/go.sum and embedded files are needed to build.
+.git
+.github
+.env*
+.dockerignore
+Dockerfile
+docs/
+examples/
+guest_access/
+repository.yaml
+README.md
+data/
+dev-config/
+tmp/
+dist/
+bin/
+guest-access

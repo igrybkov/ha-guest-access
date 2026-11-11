@@ -1,0 +1,22 @@
+name: Guest Access
+slug: guest_access
+version: "0.1.0-dev"
+description: Share links that let guests control a few things at home
+url: https://github.com/igrybkov/ha-guest-access
+arch:
+  - amd64
+  - aarch64
+image: ghcr.io/igrybkov/ha-guest-access
+init: false
+homeassistant_api: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:account-key
+panel_title: Guest Access
+watchdog: http://[HOST]:[PORT:8099]/healthz
+# The guest port. The host port is not 8888 by default, so this app can run
+# next to the old Limited Guest Access add-on during the move.
+ports:
+  8888/tcp: 8898
+ports_description:
+  8888/tcp: Guest links. Point your reverse proxy here.

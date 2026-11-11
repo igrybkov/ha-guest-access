@@ -1,0 +1,2 @@
+network:
+  8888/tcp: Guest links. Point your reverse proxy here.

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "docker:pinDigests",
+    "helpers:pinGitHubActionDigests",
+    ":semanticCommits"
+  ],
+  "timezone": "America/Chicago",
+  "schedule": ["before 6am on monday"],
+  "minimumReleaseAge": "3 days",
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "description": "Merge non-major updates once CI passes. Renovate merges itself after every check is green; no branch protection needed.",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest", "pinDigest"],
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": false
+    },
+    {
+      "description": "One PR for Go modules.",
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["require", "indirect"],
+      "groupName": "go modules"
+    },
+    {
+      "description": "The Go version in go.mod and the golang build image move together.",
+      "matchDepNames": ["go", "golang"],
+      "groupName": "go toolchain"
+    },
+    {
+      "description": "One PR for GitHub Actions.",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    }
+  ]
+}
