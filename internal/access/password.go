@@ -1,9 +1,15 @@
 package access
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"errors"
-	"net/netip"
-	"time"
+	"fmt"
+	"strconv"
+	"strings"
+
+	"golang.org/x/crypto/argon2"
 
 	"github.com/igrybkov/ha-guest-access/internal/model"
 )
@@ -11,105 +17,137 @@ import (
 // ErrEmptyPassword is returned by HashPassword for "".
 var ErrEmptyPassword = errors.New("password is empty")
 
+// MaxPasswordLen caps password input in bytes, so a huge body can't keep
+// argon2 busy hashing it.
+const MaxPasswordLen = 1024
+
+// ErrPasswordTooLong is returned by HashPassword for input over
+// MaxPasswordLen bytes.
+var ErrPasswordTooLong = fmt.Errorf("password is longer than %d bytes", MaxPasswordLen)
+
+// Argon2id parameters for new hashes. OWASP's pick for a small box.
+const (
+	argonMemoryKiB = 19456
+	argonTime      = 2
+	argonThreads   = 1
+	argonSaltLen   = 16
+	argonKeyLen    = 32
+)
+
+// Caps on the parameters of a stored hash. A tampered links.yaml can't
+// make MatchPassword allocate more than this.
+const (
+	maxArgonMemoryKiB = 256 * 1024
+	maxArgonTime      = 10
+	maxArgonThreads   = 16
+	minArgonSaltLen   = 8
+	maxArgonSaltLen   = 64
+	minArgonKeyLen    = 16
+	maxArgonKeyLen    = 64
+)
+
+// deriveKey is argon2.IDKey. Tests swap it to count calls, and the fuzz
+// target swaps it so it does not spend real memory.
+var deriveKey = argon2.IDKey
+
+// b64 is the PHC base64: standard alphabet, no padding.
+var b64 = base64.RawStdEncoding.Strict()
+
 // HashPassword returns the argon2id PHC string of plain, as typed: no
-// trimming, no normalizing. Parameters follow OWASP for a small box: 19 MiB,
-// t=2, p=1, a 16-byte random salt and a 32-byte key
-// (golang.org/x/crypto/argon2). It refuses an empty password.
-//
-// TODO(wave 1): implement. The stub refuses every password.
+// trimming, no normalizing. The format is
+// $argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>, with a 16-byte random salt
+// and a 32-byte key (golang.org/x/crypto/argon2). It refuses an empty
+// password and one over MaxPasswordLen bytes.
 func HashPassword(plain string) (string, error) {
 	if plain == "" {
 		return "", ErrEmptyPassword
 	}
-	return "", errors.New("access: HashPassword not implemented")
+	if len(plain) > MaxPasswordLen {
+		return "", ErrPasswordTooLong
+	}
+	salt := make([]byte, argonSaltLen)
+	_, _ = rand.Read(salt) // crypto/rand.Read never fails
+	key := deriveKey([]byte(plain), salt, argonTime, argonMemoryKiB, argonThreads, argonKeyLen)
+	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
+		argon2.Version, argonMemoryKiB, argonTime, argonThreads,
+		b64.EncodeToString(salt), b64.EncodeToString(key)), nil
 }
 
 // MatchPassword compares plain, as typed, against every password of a link
-// and returns the id of the one it matches. It checks every entry, with no
-// early exit, so the time taken does not tell which one matched. An empty
-// plain or a hash that does not parse never matches.
-//
-// TODO(wave 1): implement. The stub matches nothing.
+// and returns the id of the one it matches. Each stored hash is checked
+// with its own parameters. It checks every entry, with no early exit, so
+// the time taken does not tell which one matched. If two entries match,
+// the first wins. An empty plain, one over MaxPasswordLen bytes, or a hash
+// that does not parse (or asks for more than the caps) never matches.
 func MatchPassword(pws []model.LinkPassword, plain string) (id string, ok bool) {
-	return "", false
-}
-
-// SignSession returns a session token for a guest who entered password
-// passwordID of linkID. It expires at exp. The caller must also check that
-// the password still exists on the link, so deleting it ends its sessions.
-//
-// TODO(wave 1): implement. The stub returns "".
-func (s *Signer) SignSession(linkID, passwordID string, exp time.Time) string {
-	return ""
-}
-
-// VerifySession checks a session token for linkID at now and returns the
-// password id it was signed for. Tokens of the location cookie never pass
-// here, and session tokens never pass Verify.
-//
-// TODO(wave 1): implement. The stub says no.
-func (s *Signer) VerifySession(linkID, token string, now time.Time) (passwordID string, ok bool) {
-	return "", false
-}
-
-// Password guard defaults.
-const (
-	GuardPerIPFails   = 5                // fails per link + client IP ...
-	GuardPerIPWindow  = 15 * time.Minute // ... in this window
-	GuardPerLinkFails = 30               // fails per link, from any IP ...
-	GuardPerLinkWin   = time.Hour        // ... in this window
-	GuardBlock        = time.Hour        // block length once over a limit
-)
-
-// GuardOptions set the PasswordGuard limits. Zero fields take the Guard*
-// defaults.
-type GuardOptions struct {
-	PerIPFails   int
-	PerIPWindow  time.Duration
-	PerLinkFails int
-	PerLinkWin   time.Duration
-	Block        time.Duration
-}
-
-// PasswordGuard locks the password form after too many wrong tries: per
-// link + client IP, and per link from any IP. Over either limit, the form is
-// blocked for Block. Safe for concurrent use.
-type PasswordGuard struct {
-	opts GuardOptions
-}
-
-// NewPasswordGuard returns a guard with o, defaults filled in.
-func NewPasswordGuard(o GuardOptions) *PasswordGuard {
-	if o.PerIPFails == 0 {
-		o.PerIPFails = GuardPerIPFails
+	if plain == "" || len(plain) > MaxPasswordLen {
+		return "", false
 	}
-	if o.PerIPWindow == 0 {
-		o.PerIPWindow = GuardPerIPWindow
+	for _, pw := range pws {
+		h, err := parsePHC(pw.Hash)
+		if err != nil {
+			continue
+		}
+		got := deriveKey([]byte(plain), h.salt, h.time, h.memory, h.threads, uint32(len(h.key)))
+		if subtle.ConstantTimeCompare(got, h.key) == 1 && !ok {
+			id, ok = pw.ID, true
+		}
 	}
-	if o.PerLinkFails == 0 {
-		o.PerLinkFails = GuardPerLinkFails
-	}
-	if o.PerLinkWin == 0 {
-		o.PerLinkWin = GuardPerLinkWin
-	}
-	if o.Block == 0 {
-		o.Block = GuardBlock
-	}
-	return &PasswordGuard{opts: o}
+	return id, ok
 }
 
-// Allow reports whether ip may try a password on linkID at now. When not,
-// retryAfter says how long the block still lasts.
-//
-// TODO(wave 1): implement. The stub blocks everything.
-func (g *PasswordGuard) Allow(linkID string, ip netip.Addr, now time.Time) (ok bool, retryAfter time.Duration) {
-	return false, g.opts.Block
+// phc is a parsed argon2id PHC string.
+type phc struct {
+	memory, time uint32
+	threads      uint8
+	salt, key    []byte
 }
 
-// Fail records a wrong password. lockedNow is true when this fail starts a
-// block, so the caller fires guest_access_lockout once per lockout.
-//
-// TODO(wave 1): implement. The stub never reports a lockout.
-func (g *PasswordGuard) Fail(linkID string, ip netip.Addr, now time.Time) (lockedNow bool) {
-	return false
+// parsePHC parses $argon2id$v=19$m=<m>,t=<t>,p=<p>$<salt>$<key> strictly:
+// fields in that order, decimal numbers, values within the caps.
+func parsePHC(s string) (phc, error) {
+	parts := strings.Split(s, "$")
+	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" {
+		return phc{}, errors.New("not an argon2id PHC string")
+	}
+	if parts[2] != "v="+strconv.Itoa(argon2.Version) {
+		return phc{}, errors.New("unsupported argon2 version")
+	}
+	params := strings.Split(parts[3], ",")
+	if len(params) != 3 {
+		return phc{}, errors.New("want m, t and p")
+	}
+	m, err1 := phcUint(params[0], "m=", maxArgonMemoryKiB)
+	t, err2 := phcUint(params[1], "t=", maxArgonTime)
+	p, err3 := phcUint(params[2], "p=", maxArgonThreads)
+	if err := errors.Join(err1, err2, err3); err != nil {
+		return phc{}, err
+	}
+	// argon2 needs at least 8 KiB of memory per thread.
+	if m < 8*p {
+		return phc{}, errors.New("memory too small for the thread count")
+	}
+	salt, err := b64.DecodeString(parts[4])
+	if err != nil || len(salt) < minArgonSaltLen || len(salt) > maxArgonSaltLen {
+		return phc{}, errors.New("bad salt")
+	}
+	key, err := b64.DecodeString(parts[5])
+	if err != nil || len(key) < minArgonKeyLen || len(key) > maxArgonKeyLen {
+		return phc{}, errors.New("bad key")
+	}
+	return phc{memory: uint32(m), time: uint32(t), threads: uint8(p), salt: salt, key: key}, nil
+}
+
+// phcUint parses "<prefix><n>" with 1 <= n <= limit. Only plain digits
+// count: no sign, no spaces.
+func phcUint(s, prefix string, limit uint64) (uint64, error) {
+	num, ok := strings.CutPrefix(s, prefix)
+	if !ok || num == "" || len(num) > 10 || strings.Trim(num, "0123456789") != "" {
+		return 0, fmt.Errorf("bad %q", prefix)
+	}
+	n, err := strconv.ParseUint(num, 10, 32)
+	if err != nil || n < 1 || n > limit {
+		return 0, fmt.Errorf("%s out of range", prefix)
+	}
+	return n, nil
 }

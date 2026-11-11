@@ -9,41 +9,10 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"math"
-	"net/http"
-	"net/netip"
-	"time"
+	"strings"
 )
-
-// Client is how the app sees one request.
-type Client struct {
-	// IP is the client address: the peer, or, when the peer is a trusted
-	// proxy, the right-most X-Forwarded-For entry that is not one.
-	IP netip.Addr
-	// HTTPS is true when the request came over TLS, directly or per the
-	// trusted proxy's X-Forwarded-Proto.
-	HTTPS bool
-	// ViaProxy is true when the forwarding headers were used.
-	ViaProxy bool
-}
-
-// ClientFrom derives the Client of r. Forwarding headers count only when
-// the peer (r.RemoteAddr) is in trusted. With trusted empty, the peer is
-// the client.
-//
-// TODO(wave 1): implement. The stub returns the zero Client, which is
-// never local.
-func ClientFrom(r *http.Request, trusted []netip.Prefix) Client {
-	return Client{}
-}
-
-// IsLocal reports whether ip is in one of nets. An invalid ip is never
-// local. IPv4-mapped IPv6 addresses count as their IPv4 address.
-//
-// TODO(wave 1): implement. The stub says no.
-func IsLocal(ip netip.Addr, nets []netip.Prefix) bool {
-	return false
-}
 
 // earthRadiusM is the mean Earth radius used by DistanceM.
 const earthRadiusM = 6_371_008.8
@@ -57,32 +26,6 @@ func DistanceM(lat1, lon1, lat2, lon2 float64) float64 {
 	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
 		math.Cos(lat1*rad)*math.Cos(lat2*rad)*math.Sin(dLon/2)*math.Sin(dLon/2)
 	return 2 * earthRadiusM * math.Asin(math.Sqrt(min(1, a)))
-}
-
-// Signer makes and checks the near-home cookie: an HMAC over the link id
-// and an expiry time.
-type Signer struct {
-	key []byte
-}
-
-// NewSigner returns a Signer with key. The key lives in /data.
-func NewSigner(key []byte) *Signer {
-	return &Signer{key: append([]byte(nil), key...)}
-}
-
-// Sign returns a token for linkID that expires at exp.
-//
-// TODO(wave 1): implement. The stub returns "".
-func (s *Signer) Sign(linkID string, exp time.Time) string {
-	return ""
-}
-
-// Verify reports whether token was signed for linkID and has not expired
-// at now. It compares in constant time.
-//
-// TODO(wave 1): implement. The stub says no.
-func (s *Signer) Verify(linkID, token string, now time.Time) bool {
-	return false
 }
 
 // slugBytes is the entropy of a random slug: 128 bits.
@@ -105,37 +48,32 @@ func HashSlug(s string) string {
 // ErrBadSlug is wrapped by ValidCustomSlug errors.
 var ErrBadSlug = errors.New("bad slug")
 
-// MinCustomSlugLen is the shortest custom slug accepted.
-const MinCustomSlugLen = 12
+// Custom slug lengths.
+const (
+	MinCustomSlugLen = 12
+	MaxCustomSlugLen = 64
+)
 
-// ValidCustomSlug checks a slug the admin typed: only a-z, 0-9 and "-", at
-// least MinCustomSlugLen characters. Uniqueness is the caller's check.
-//
-// TODO(wave 1): implement. The stub refuses every slug.
+// ValidCustomSlug checks a slug the admin typed: only a-z, 0-9 and "-",
+// MinCustomSlugLen to MaxCustomSlugLen characters, no "-" at either end and
+// no "--". The error wraps ErrBadSlug and says why. Uniqueness is the
+// caller's check.
 func ValidCustomSlug(s string) error {
-	return ErrBadSlug
-}
-
-// Limiter is a keyed token bucket. Each key (a client IP for slug misses,
-// link id plus client IP for actions, and so on) has its own bucket that
-// refills at rate tokens per second, up to burst. A key idle for idleTTL is
-// dropped, so memory stays bounded. Safe for concurrent use.
-type Limiter struct {
-	rate    float64
-	burst   int
-	idleTTL time.Duration
-}
-
-// NewLimiter returns a Limiter. rate is tokens per second (30 a minute is
-// 0.5), burst is the bucket size, idleTTL is how long an unused key is kept.
-func NewLimiter(rate float64, burst int, idleTTL time.Duration) *Limiter {
-	return &Limiter{rate: rate, burst: burst, idleTTL: idleTTL}
-}
-
-// Allow takes one token from key's bucket at now. When the bucket is empty,
-// ok is false and retryAfter says when the next token arrives.
-//
-// TODO(wave 1): implement. The stub refuses everything.
-func (l *Limiter) Allow(key string, now time.Time) (ok bool, retryAfter time.Duration) {
-	return false, time.Second
+	switch {
+	case len(s) < MinCustomSlugLen:
+		return fmt.Errorf("%w: shorter than %d characters", ErrBadSlug, MinCustomSlugLen)
+	case len(s) > MaxCustomSlugLen:
+		return fmt.Errorf("%w: longer than %d characters", ErrBadSlug, MaxCustomSlugLen)
+	case s[0] == '-' || s[len(s)-1] == '-':
+		return fmt.Errorf("%w: starts or ends with \"-\"", ErrBadSlug)
+	case strings.Contains(s, "--"):
+		return fmt.Errorf("%w: has \"--\"", ErrBadSlug)
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+			return fmt.Errorf("%w: %q is not allowed, use a-z, 0-9 and \"-\"", ErrBadSlug, rune(c))
+		}
+	}
+	return nil
 }

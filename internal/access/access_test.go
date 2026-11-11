@@ -1,11 +1,10 @@
 package access
 
 import (
+	"errors"
 	"math"
-	"net/http/httptest"
-	"net/netip"
+	"strings"
 	"testing"
-	"time"
 )
 
 func TestDistanceM(t *testing.T) {
@@ -55,22 +54,46 @@ func TestHashSlug(t *testing.T) {
 	}
 }
 
-// The stubs fail closed until wave 1 fills them. Replace this test with
-// real table tests when you implement them.
-func TestStubsFailClosed(t *testing.T) {
-	r := httptest.NewRequest("GET", "/", nil)
-	if c := ClientFrom(r, nil); IsLocal(c.IP, []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}) {
-		t.Error("stub client is local")
+func TestValidCustomSlug(t *testing.T) {
+	for _, tc := range []struct {
+		slug string
+		ok   bool
+		why  string // part of the error, when not ok
+	}{
+		{"guest-room-2025", true, ""},
+		{"abcdefghijkl", true, ""},          // exactly 12
+		{strings.Repeat("a", 64), true, ""}, // exactly 64
+		{"0123456789ab", true, ""},
+		{"a-b-c-d-e-f-g", true, ""},
+		{"abcdefghijk", false, "shorter"}, // 11
+		{"", false, "shorter"},
+		{strings.Repeat("a", 65), false, "longer"},
+		{"-guest-room-2025", false, "starts or ends"},
+		{"guest-room-2025-", false, "starts or ends"},
+		{"guest--room-2025", false, "--"},
+		{"Guest-room-2025", false, "not allowed"},
+		{"guest_room_2025", false, "not allowed"},
+		{"guest room 2025", false, "not allowed"},
+		{"guest.room.2025", false, "not allowed"},
+		{"guest/room/2025", false, "not allowed"},
+		{"guest-room-%2e%2e", false, "not allowed"},
+		{"guest-room-caf\u00e9", false, "not allowed"},
+		{"guest-room-\x00abc", false, "not allowed"},
+	} {
+		err := ValidCustomSlug(tc.slug)
+		if tc.ok {
+			if err != nil {
+				t.Errorf("ValidCustomSlug(%q) = %v", tc.slug, err)
+			}
+			continue
+		}
+		if !errors.Is(err, ErrBadSlug) || !strings.Contains(err.Error(), tc.why) {
+			t.Errorf("ValidCustomSlug(%q) = %v, want ErrBadSlug with %q", tc.slug, err, tc.why)
+		}
 	}
-	s := NewSigner([]byte("k"))
-	now := time.Now()
-	if s.Verify("l1", s.Sign("l1", now.Add(time.Minute)), now) {
-		t.Error("stub signer verifies")
-	}
-	if ValidCustomSlug("a-long-custom-slug") == nil {
-		t.Error("stub accepts a slug")
-	}
-	if ok, _ := NewLimiter(0.5, 30, time.Hour).Allow("k", now); ok {
-		t.Error("stub limiter allows")
+	// Every random slug is not a valid custom one (it may hold "_" or
+	// upper case), but a lower-case hex slug of the right length is.
+	if err := ValidCustomSlug(HashSlug("x")[:32]); err != nil {
+		t.Errorf("hex slug: %v", err)
 	}
 }
