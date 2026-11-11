@@ -284,7 +284,7 @@ test('groupProblems drops nothing', () => {
     { path: '', message: 'general' },
   ], keys, normalizeTemplatePath);
   assert.deepEqual(g.get('name'), ['is empty']);
-  assert.deepEqual(g.get('rules[0].select.entities'), ['Item 2: wildcard only']);
+  assert.deepEqual(g.get('rules[0].select.entities'), ['Entry 2: wildcard only']);
   assert.deepEqual(g.get(''), ['rules[9]: odd', 'general']);
 });
 

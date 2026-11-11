@@ -349,11 +349,11 @@ export function fieldFor(path, keys) {
   return '';
 }
 
-// restLabel words the part of a path below its field: "[1]" is "Item 2:",
+// restLabel words the part of a path below its field: "[1]" is "Entry 2:",
 // ".access.network" is "access.network:".
 function restLabel(rest) {
   const m = /^\[(\d+)\]$/.exec(rest);
-  return m ? `Item ${Number(m[1]) + 1}:` : `${rest.replace(/^\./, '')}:`;
+  return m ? `Entry ${Number(m[1]) + 1}:` : `${rest.replace(/^\./, '')}:`;
 }
 
 // groupProblems maps each problem to a field key. Nothing is dropped:
