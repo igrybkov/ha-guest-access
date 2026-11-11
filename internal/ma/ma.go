@@ -23,6 +23,3 @@ type Client interface {
 	// load.
 	PartyURL(ctx context.Context) (string, error)
 }
-
-// TODO(wave 1 or later): an HTTP Client built from model.Settings and
-// model.Secrets, with Timeout applied per call.

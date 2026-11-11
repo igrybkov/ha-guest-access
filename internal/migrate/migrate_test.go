@@ -101,3 +101,28 @@ func copyDir(t *testing.T, dir string) string {
 	}
 	return out
 }
+
+// The data set holds slugs, password hashes and the MA token, so its files
+// are 0600. The config set stays 0644 for HA's git repo.
+func TestFileModes(t *testing.T) {
+	data := t.TempDir()
+	if err := store.In(OpenData(data, quietLog), SecretsFile, func() model.Secrets { return model.Secrets{} }).Save(model.Secrets{MusicAssistantToken: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	config := t.TempDir()
+	if err := store.In(OpenConfig(config, quietLog), SettingsFile, model.DefaultSettings).Save(model.DefaultSettings()); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		path string
+		want os.FileMode
+	}{{filepath.Join(data, SecretsFile), 0o600}, {filepath.Join(config, SettingsFile), 0o644}} {
+		st, err := os.Stat(tc.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := st.Mode().Perm(); got != tc.want {
+			t.Errorf("%s mode = %o, want %o", tc.path, got, tc.want)
+		}
+	}
+}

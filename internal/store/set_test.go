@@ -196,3 +196,94 @@ func TestStepCountMustMatchVersion(t *testing.T) {
 	}()
 	OpenSet(t.TempDir(), SetOptions{Current: 3, Files: []string{"a.yaml"}})
 }
+
+func mode(t *testing.T, dir, name string) os.FileMode {
+	t.Helper()
+	st, err := os.Stat(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st.Mode().Perm()
+}
+
+// FileMode sets the mode of every file the set writes: a new file, an
+// existing one with a looser mode, and the files of a migration flush.
+func TestFileMode(t *testing.T) {
+	type m = map[string]any
+	t.Run("default is 0644", func(t *testing.T) {
+		dir := t.TempDir()
+		f := In(OpenSet(dir, SetOptions{Files: []string{"a.yaml"}}), "a.yaml", func() m { return m{} })
+		if err := f.Save(m{"k": "v"}); err != nil {
+			t.Fatal(err)
+		}
+		if got := mode(t, dir, "a.yaml"); got != 0o644 {
+			t.Errorf("mode = %o, want 644", got)
+		}
+	})
+	t.Run("new file", func(t *testing.T) {
+		dir := t.TempDir()
+		f := In(OpenSet(dir, SetOptions{Files: []string{"a.yaml"}, FileMode: 0o600}), "a.yaml", func() m { return m{} })
+		if err := f.Save(m{"k": "v"}); err != nil {
+			t.Fatal(err)
+		}
+		if got := mode(t, dir, "a.yaml"); got != 0o600 {
+			t.Errorf("mode = %o, want 600", got)
+		}
+	})
+	t.Run("existing 0644 file", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "a.yaml", "version: 1\nk: v\n")
+		f := In(OpenSet(dir, SetOptions{Files: []string{"a.yaml"}, FileMode: 0o600}), "a.yaml", func() m { return m{} })
+		if err := f.Update(func(v *m) error { (*v)["k"] = "w"; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		if got := mode(t, dir, "a.yaml"); got != 0o600 {
+			t.Errorf("mode = %o, want 600", got)
+		}
+	})
+	t.Run("migration flush", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, "a.yaml", "version: 1\nnames: [x]\n")
+		write(t, dir, "b.yaml", "k: v\n")
+		set := OpenSet(dir, SetOptions{Current: 3, Files: []string{"a.yaml", "old.yaml", "b.yaml"}, Steps: testSteps(), FileMode: 0o600})
+		b := In(set, "b.yaml", func() m { return m{} })
+		if err := b.Update(func(v *m) error { (*v)["k"] = "w"; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"a.yaml", "b.yaml"} {
+			if got := mode(t, dir, name); got != 0o600 {
+				t.Errorf("%s mode = %o, want 600", name, got)
+			}
+		}
+	})
+}
+
+// Rev changes on a write and on an outside change, and only then.
+func TestRev(t *testing.T) {
+	dir := t.TempDir()
+	set := OpenSet(dir, SetOptions{Files: []string{"a.yaml", "b.yaml"}})
+	a := In(set, "a.yaml", func() map[string]any { return map[string]any{} })
+	r0 := set.Rev()
+	if set.Rev() != r0 {
+		t.Fatal("Rev moved with no change")
+	}
+	if err := a.Save(map[string]any{"k": "v"}); err != nil {
+		t.Fatal(err)
+	}
+	r1 := a.Rev()
+	if r1 == r0 {
+		t.Fatal("Rev did not move on a write")
+	}
+	if set.Rev() != r1 {
+		t.Fatal("Rev moved on reading our own write")
+	}
+	write(t, dir, "b.yaml", "k: outside\n")
+	r2 := set.Rev()
+	if r2 == r1 {
+		t.Fatal("Rev did not move on an outside change")
+	}
+	write(t, dir, "b.yaml", "k: [\n")
+	if set.Rev() != r2 {
+		t.Error("Rev moved on a broken file; the content did not change")
+	}
+}
