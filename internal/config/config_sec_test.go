@@ -68,3 +68,20 @@ func TestSecManifestPrivileges(t *testing.T) {
 		t.Error("unexpected map")
 	}
 }
+
+// DEV_ADMIN_ANY_PEER turns off the ingress peer check and, with it, the
+// only authentication of the admin API. With the default LISTEN (":8099",
+// every interface) a dev run outside Supervisor, or a container that
+// someone starts with the variable set, gives the whole LAN an admin
+// panel that can open every link's door. The flag should demand a
+// loopback listen address.
+func TestSecDevAdminAnyPeerNeedsLoopback(t *testing.T) {
+	getenv := env(map[string]string{"HA_URL": "https://hass.example", "HA_TOKEN": "t", "DEV_ADMIN_ANY_PEER": "1"})
+	if _, err := load(getenv, files(nil)); err == nil {
+		t.Fatal("DEV_ADMIN_ANY_PEER=1 with LISTEN :8099 (all interfaces) was accepted")
+	}
+	loop := env(map[string]string{"HA_URL": "https://hass.example", "HA_TOKEN": "t", "DEV_ADMIN_ANY_PEER": "1", "LISTEN": "127.0.0.1:8099"})
+	if c, err := load(loop, files(nil)); err != nil || !c.DevAdminAnyPeer {
+		t.Fatalf("loopback dev run: %v %+v", err, c.DevAdminAnyPeer)
+	}
+}
