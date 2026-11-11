@@ -30,6 +30,11 @@ vet:
 
 lint:
 	go run $(STATICCHECK) ./...
+	@# Comments and docs must stand on their own: no pointers to planning
+	@# notes outside the repo.
+	@! grep -rniE --include='*.go' --include='*.js' --include='*.mjs' --include='*.html' --include='*.css' --include='*.yaml' --include='*.md' \
+		'(plan|brief) (section|decision|item)|(brief|plan) §|\b(decision|item) [0-9]+\b|\bthe [a-z]+ wave\b|\bwave [0-9]' \
+		--exclude=AGENTS.md --exclude=CLAUDE.md . || (echo "lint: comment refers to notes outside the repo" && false)
 
 run-dev:
 	mkdir -p data dev-config

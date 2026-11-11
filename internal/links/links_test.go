@@ -333,7 +333,7 @@ func TestConsumeOneTime(t *testing.T) {
 	}
 }
 
-// Decision 6: of N parallel uses of one pair, exactly one wins.
+// Of N parallel uses of one one-time pair, exactly one wins.
 func TestConsumeConcurrentExactlyOnce(t *testing.T) {
 	s := newStore(t, t.TempDir())
 	l := oneTimeLink(t, s)

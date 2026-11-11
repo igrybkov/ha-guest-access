@@ -84,5 +84,6 @@ Set `version` in `guest_access/config.yaml`, add a `## X.Y.Z` section to `guest_
 ## Conventions
 
 - Comments and docs use short, plain sentences (Simplified Technical English style). No em dashes. Match that tone.
+- Comments and docs must stand on their own. Never point at planning notes, task briefs, decision numbers or work phases that live outside the repo ("plan section 4", "decision 6", "the UI wave"). Say the rule itself. `make lint` fails on these.
 - Match the idioms of the sibling app ha-nfc-player: stdlib first, `coder/websocket`, `go.yaml.in/yaml/v3`, `log/slog`, embedded vanilla JS with `node --test` tests, table tests.
 - Every change comes with tests. Security code gets table tests for each attack and a fuzz target where input is parsed.

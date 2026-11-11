@@ -56,8 +56,9 @@ const (
 	MaxColorTempK = 9000
 )
 
-// actions is the table, keyed by Action.ID. It follows plan section 4.
-// There is no "code" field anywhere: codes stay in HA (brief decision 9).
+// actions is the table, keyed by Action.ID. There is no "code" field
+// anywhere: the app never handles alarm or lock codes. An entity that needs
+// one is exposed through an HA script that holds the code.
 // lock.open is here, but like every action it is only granted when a rule
 // lists it.
 var actions = index([]Action{
@@ -98,7 +99,7 @@ var actions = index([]Action{
 	{ID: "switch.turn_off", Domain: "switch", Service: "turn_off", UI: "toggle"},
 
 	// Scripts take no guest data. script.run sends the rule's fixed
-	// variables plus guest_link (brief decision 10).
+	// variables plus guest_link, the link's name.
 	{ID: "script.run", Domain: "script", Service: "turn_on", UI: "button"},
 	{ID: "script.cancel", Domain: "script", Service: "turn_off", UI: "button"},
 })
