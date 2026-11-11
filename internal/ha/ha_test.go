@@ -584,7 +584,7 @@ func TestWebsocketURL(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"https://hass.example", "wss://hass.example/api/websocket"},
 		{"https://hass.example/", "wss://hass.example/api/websocket"},
-		{"http://192.168.40.20:8123", "ws://192.168.40.20:8123/api/websocket"},
+		{"http://192.0.2.10:8123", "ws://192.0.2.10:8123/api/websocket"},
 		{"http://host/sub/path/", "ws://host/sub/path/api/websocket"},
 		{"wss://hass.example/api/websocket", "wss://hass.example/api/websocket"},
 	}
