@@ -71,7 +71,7 @@ func TestAdminSettingsReadOnly(t *testing.T) {
 	h := newHarness(t, withMA(stubMA{}), func(o *config.Options, _ *Deps) { o.LimitsEnabled = false })
 	rec := h.a(req{method: "GET", path: "/api/settings"})
 	body := rec.Body.String()
-	if rec.Code != 200 || strings.Contains(body, `"tok"`) || !strings.Contains(body, `"ma_token":{"set":true}`) ||
+	if rec.Code != 200 || strings.Contains(body, `"tok"`) || !strings.Contains(body, `"ma_token":{"set":true,"refused":false}`) ||
 		!strings.Contains(body, `"limits_disabled":true`) || !strings.Contains(body, `"public_base_url":"https://guest.example.com"`) {
 		t.Errorf("settings: %d %s", rec.Code, body)
 	}

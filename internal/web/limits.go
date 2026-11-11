@@ -19,8 +19,8 @@ type rateLimiter interface {
 
 // passwordGuard is access.PasswordGuard, or noLimit when limits are off.
 type passwordGuard interface {
-	Allow(linkID string, ip netip.Addr, now time.Time) (ok bool, retryAfter time.Duration)
-	Fail(linkID string, ip netip.Addr, now time.Time) (lockedNow bool)
+	Allow(linkID string, ip netip.Addr, now time.Time) (ok bool, retryAfter time.Duration, slowed bool)
+	Fail(linkID string, ip netip.Addr, now time.Time) (ipBlocked, linkSlowed bool)
 }
 
 // noLimit lets everything through. It stands in for every limiter when
@@ -31,24 +31,29 @@ func (noLimit) Allow(string, time.Time) (bool, time.Duration) { return true, 0 }
 
 type noGuard struct{}
 
-func (noGuard) Allow(string, netip.Addr, time.Time) (bool, time.Duration) { return true, 0 }
-func (noGuard) Fail(string, netip.Addr, time.Time) bool                   { return false }
+func (noGuard) Allow(string, netip.Addr, time.Time) (bool, time.Duration, bool) {
+	return true, 0, false
+}
+func (noGuard) Fail(string, netip.Addr, time.Time) (bool, bool) { return false, false }
 
 // limitSet holds every limiter of the app. Every route has one.
 //
 //   - preauth: every guest request that is not from an authenticated
-//     guest, per client IP.
+//     guest, per client IP. Static assets do not use it.
+//   - assets: static assets, per client IP. They are public and never
+//     change under one URL, so a page load costs one preauth token only.
 //   - authed: state reads and discrete actions of an authenticated guest,
 //     per link and client IP.
 //   - continuous: continuous actions (sliders) of an authenticated guest,
 //     per link, client IP and entity. They do not use authed.
 //   - missIP and missAll: unknown slugs, per client IP and across all IPs.
 //   - admin: the admin port, per peer.
-//   - guard: wrong passwords.
+//   - guard: wrong passwords. It blocks an IP, and slows a link down.
 //   - streams: the cap on open event streams per link.
 type limitSet struct {
 	off     bool
 	preauth rateLimiter
+	assets  rateLimiter
 	authed  rateLimiter
 	cont    rateLimiter
 	missIP  rateLimiter
@@ -62,7 +67,7 @@ type limitSet struct {
 // every one of them is a no-op.
 func newLimitSet(o config.Options) *limitSet {
 	if !o.LimitsEnabled {
-		return &limitSet{off: true, preauth: noLimit{}, authed: noLimit{}, cont: noLimit{}, missIP: noLimit{},
+		return &limitSet{off: true, preauth: noLimit{}, assets: noLimit{}, authed: noLimit{}, cont: noLimit{}, missIP: noLimit{},
 			missAll: noLimit{}, admin: noLimit{}, guard: noGuard{}}
 	}
 	rl := o.Settings.RateLimits
@@ -70,6 +75,7 @@ func newLimitSet(o config.Options) *limitSet {
 	perHour := func(n int) float64 { return float64(n) / 3600 }
 	return &limitSet{
 		preauth: access.NewLimiter(perMin(rl.GuestPerMin), rl.GuestBurst, time.Hour),
+		assets:  access.NewLimiter(perMin(rl.AssetsPerMin), rl.AssetsBurst, time.Hour),
 		authed:  access.NewLimiter(perMin(rl.ActionsPerMin), rl.ActionsBurst, time.Hour),
 		cont:    access.NewLimiter(perMin(rl.ContinuousPerMin), rl.ContinuousBurst, time.Hour),
 		missIP:  access.NewLimiter(perHour(rl.MissesPerHourPerIP), rl.MissesPerHourPerIP, time.Hour),
@@ -81,6 +87,7 @@ func newLimitSet(o config.Options) *limitSet {
 			PerLinkFails: rl.PasswordFailsPerLink,
 			PerLinkWin:   o.PasswordWindowPerLink,
 			Block:        time.Duration(rl.PasswordLockoutMin) * time.Minute,
+			LinkDelay:    time.Duration(rl.PasswordLinkDelayS) * time.Second,
 		}),
 		streams: rl.MaxStreamsPerLink,
 	}

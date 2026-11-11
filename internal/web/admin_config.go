@@ -19,10 +19,12 @@ type settingsView struct {
 	// LimitsDisabled is true when every rate limit is off. The UI shows a
 	// banner.
 	LimitsDisabled bool `json:"limits_disabled"`
-	// MATokenSet says whether a Music Assistant token is set. The token
-	// itself never leaves the app.
+	// MAToken says whether a Music Assistant token is set, and whether
+	// MA refused it on the last party call. The token itself never
+	// leaves the app.
 	MAToken struct {
-		Set bool `json:"set"`
+		Set     bool `json:"set"`
+		Refused bool `json:"refused"`
 	} `json:"ma_token"`
 	Tunables tunablesView `json:"tunables"`
 }
@@ -58,9 +60,10 @@ type approvalTuning struct {
 	TouchThrottleMin int64 `json:"touch_throttle_min"`
 }
 
-func newSettingsView(o config.Options) settingsView {
+func newSettingsView(o config.Options, maRefused bool) settingsView {
 	v := settingsView{Settings: o.Settings, PublicBaseURL: o.PublicBaseURL, LimitsDisabled: !o.LimitsEnabled}
 	v.MAToken.Set = o.MusicAssistantToken != ""
+	v.MAToken.Refused = maRefused
 	v.Tunables = tunablesView{
 		MATimeoutMS:              o.MATimeout.Milliseconds(),
 		LocationTTLMin:           int64(o.NearTTL.Minutes()),
@@ -92,7 +95,7 @@ func newSettingsView(o config.Options) settingsView {
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, newSettingsView(s.deps.Options))
+	writeJSON(w, http.StatusOK, newSettingsView(s.deps.Options, s.maRefused.Load()))
 }
 
 // templatesView is GET /api/templates. Problems lists what does not

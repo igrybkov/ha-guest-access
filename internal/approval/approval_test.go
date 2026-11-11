@@ -410,7 +410,7 @@ func TestSelfService(t *testing.T) {
 			want(t, "bad body", e.call(e.m.DecideByDevice, l.ID, approver, `{"request_id":"x","approve":"yes"}`), 400, "bad_request")
 			want(t, "no approve", e.call(e.m.DecideByDevice, l.ID, approver, fmt.Sprintf(`{"request_id":%q}`, reqID)), 400, "bad_request")
 			want(t, "unknown field", e.call(e.m.DecideByDevice, l.ID, approver, `{"request_id":"x","approve":true,"by":"admin"}`), 400, "bad_request")
-			want(t, "body over the cap", e.call(e.m.DecideByDevice, l.ID, approver, decideBody(reqID+strings.Repeat(" ", 2000), true)), 400, "bad_request")
+			want(t, "body over the cap", e.call(e.m.DecideByDevice, l.ID, approver, decideBody(reqID+strings.Repeat(" ", DefaultMaxBodyBytes+1), true)), 400, "bad_request")
 			want(t, "unknown request", e.call(e.m.DecideByDevice, l.ID, approver, decideBody("ffff", true)), 404, "not_found")
 			want(t, "approve", e.call(e.m.DecideByDevice, l.ID, approver, decideBody(reqID, true)), 200, "approved")
 			want(t, "approve twice", e.call(e.m.DecideByDevice, l.ID, approver, decideBody(reqID, true)), 404, "not_found")

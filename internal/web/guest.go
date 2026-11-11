@@ -183,6 +183,9 @@ type guestKey struct{}
 //  6. DeviceGate.Admit, on kindGuest routes only.
 //  7. The route's own work.
 //
+// Static assets under /assets/ have their own per-IP limiter and no
+// other check: they are public and the same for everyone.
+//
 // The page shell (kindOpen) stops after step 2 and is served even for an
 // inactive link, so the page can say so. The password form stops after
 // step 4.
@@ -194,7 +197,9 @@ func (s *Server) GuestHandler() http.Handler {
 	mux.HandleFunc("/g/{slug}/{route...}", slug)
 	mux.HandleFunc(assetsPrefix, func(w http.ResponseWriter, r *http.Request) {
 		g := reqOf(r)
-		if !g.allowPreauth() {
+		if ok, retry := g.lim.assets.Allow(g.ipKey(), g.now); !ok {
+			g.rateLimited(reasonLimitAssets)
+			tooMany(w, retry)
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {

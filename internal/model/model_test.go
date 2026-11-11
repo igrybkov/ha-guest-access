@@ -425,7 +425,10 @@ func TestSettingsValidate(t *testing.T) {
 			"rate_limits.misses_per_hour_per_ip", "rate_limits.misses_per_hour_global",
 			"rate_limits.password_fails_per_ip", "rate_limits.password_fails_per_link",
 			"rate_limits.password_lockout_min", "rate_limits.admin_per_min",
-			"rate_limits.continuous_per_min", "rate_limits.continuous_burst"}},
+			"rate_limits.continuous_per_min", "rate_limits.continuous_burst",
+			"rate_limits.assets_per_min", "rate_limits.assets_burst", "rate_limits.password_link_delay_s"}},
+		{"zero link delay", func(s *Settings) { s.RateLimits.PasswordLinkDelayS = 0 }, []string{"rate_limits.password_link_delay_s"}},
+		{"negative assets rate", func(s *Settings) { s.RateLimits.AssetsPerMin = -1 }, []string{"rate_limits.assets_per_min"}},
 		{"slider interval too short", func(s *Settings) { s.Guest.SliderIntervalMS = 99 }, []string{"guest.slider_interval_ms"}},
 		{"color css injection", func(s *Settings) { s.Guest.AccentColor = "#fff;}body{" }, []string{"guest.accent_color"}},
 	} {
@@ -441,7 +444,8 @@ func TestDefaultSettings(t *testing.T) {
 		t.Error("local access is on by default")
 	}
 	if s.RateLimits != (RateLimits{GuestPerMin: 20, GuestBurst: 15, ActionsPerMin: 120, ActionsBurst: 40, ContinuousPerMin: 600, ContinuousBurst: 120, MaxStreamsPerLink: 10, MissesPerHourPerIP: 10, MissesPerHourGlobal: 100,
-		PasswordFailsPerIP: 5, PasswordFailsPerLink: 30, PasswordLockoutMin: 60, AdminPerMin: 600}) {
+		PasswordFailsPerIP: 5, PasswordFailsPerLink: 30, PasswordLockoutMin: 60, PasswordLinkDelayS: 10, AdminPerMin: 600,
+		AssetsPerMin: 300, AssetsBurst: 100}) {
 		t.Errorf("default rate limits = %+v", s.RateLimits)
 	}
 	if len(s.TrustedProxies) != 0 {

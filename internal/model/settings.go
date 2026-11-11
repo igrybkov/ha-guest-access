@@ -25,11 +25,17 @@ type Settings struct {
 }
 
 // RateLimits are the request limits of the app. Every value must be
-// positive. Minutes are used for durations so YAML and JSON agree.
+// positive. Durations are whole minutes or seconds, as the field name
+// says, so YAML and JSON agree.
 type RateLimits struct {
-	// GuestPerMin and GuestBurst limit every guest route per client IP.
+	// GuestPerMin and GuestBurst limit every guest request before sign-in
+	// per client IP, apart from static assets.
 	GuestPerMin int `yaml:"guest_per_min" json:"guest_per_min"`
 	GuestBurst  int `yaml:"guest_burst" json:"guest_burst"`
+	// AssetsPerMin and AssetsBurst limit static assets (the page's script
+	// and style files) per client IP. They do not use GuestPerMin.
+	AssetsPerMin int `yaml:"assets_per_min" json:"assets_per_min"`
+	AssetsBurst  int `yaml:"assets_burst" json:"assets_burst"`
 	// ActionsPerMin and ActionsBurst limit actions per link + client IP.
 	ActionsPerMin int `yaml:"actions_per_min" json:"actions_per_min"`
 	ActionsBurst  int `yaml:"actions_burst" json:"actions_burst"`
@@ -44,12 +50,15 @@ type RateLimits struct {
 	// either, misses get 429 instead of 404.
 	MissesPerHourPerIP  int `yaml:"misses_per_hour_per_ip" json:"misses_per_hour_per_ip"`
 	MissesPerHourGlobal int `yaml:"misses_per_hour_global" json:"misses_per_hour_global"`
-	// PasswordFailsPerIP counts wrong passwords per link + client IP in 15
-	// minutes; PasswordFailsPerLink per link in one hour. Over either, the
-	// form is blocked for PasswordLockoutMin.
+	// PasswordFailsPerIP counts wrong passwords per link + client IP;
+	// over it, that IP is blocked on the link for PasswordLockoutMin.
+	// PasswordFailsPerLink counts them per link from any IP; over it,
+	// the link takes one try per PasswordLinkDelayS. The windows of both
+	// counts are app options too (config.Options).
 	PasswordFailsPerIP   int `yaml:"password_fails_per_ip" json:"password_fails_per_ip"`
 	PasswordFailsPerLink int `yaml:"password_fails_per_link" json:"password_fails_per_link"`
 	PasswordLockoutMin   int `yaml:"password_lockout_min" json:"password_lockout_min"`
+	PasswordLinkDelayS   int `yaml:"password_link_delay_s" json:"password_link_delay_s"`
 	// AdminPerMin limits the admin API.
 	AdminPerMin int `yaml:"admin_per_min" json:"admin_per_min"`
 }
@@ -59,6 +68,8 @@ func DefaultRateLimits() RateLimits {
 	return RateLimits{
 		GuestPerMin:          20,
 		GuestBurst:           15,
+		AssetsPerMin:         300,
+		AssetsBurst:          100,
 		ActionsPerMin:        120,
 		ActionsBurst:         40,
 		ContinuousPerMin:     600,
@@ -69,6 +80,7 @@ func DefaultRateLimits() RateLimits {
 		PasswordFailsPerIP:   5,
 		PasswordFailsPerLink: 30,
 		PasswordLockoutMin:   60,
+		PasswordLinkDelayS:   10,
 		AdminPerMin:          600,
 	}
 }
@@ -80,6 +92,8 @@ func (r RateLimits) WithDefaults() RateLimits {
 	for _, f := range []struct{ v, def *int }{
 		{&r.GuestPerMin, &d.GuestPerMin},
 		{&r.GuestBurst, &d.GuestBurst},
+		{&r.AssetsPerMin, &d.AssetsPerMin},
+		{&r.AssetsBurst, &d.AssetsBurst},
 		{&r.ActionsPerMin, &d.ActionsPerMin},
 		{&r.ActionsBurst, &d.ActionsBurst},
 		{&r.ContinuousPerMin, &d.ContinuousPerMin},
@@ -90,6 +104,7 @@ func (r RateLimits) WithDefaults() RateLimits {
 		{&r.PasswordFailsPerIP, &d.PasswordFailsPerIP},
 		{&r.PasswordFailsPerLink, &d.PasswordFailsPerLink},
 		{&r.PasswordLockoutMin, &d.PasswordLockoutMin},
+		{&r.PasswordLinkDelayS, &d.PasswordLinkDelayS},
 		{&r.AdminPerMin, &d.AdminPerMin},
 	} {
 		if *f.v == 0 {
@@ -106,6 +121,8 @@ func (r RateLimits) validate(p *problems, path string) {
 	}{
 		{"guest_per_min", r.GuestPerMin},
 		{"guest_burst", r.GuestBurst},
+		{"assets_per_min", r.AssetsPerMin},
+		{"assets_burst", r.AssetsBurst},
 		{"actions_per_min", r.ActionsPerMin},
 		{"actions_burst", r.ActionsBurst},
 		{"continuous_per_min", r.ContinuousPerMin},
@@ -116,6 +133,7 @@ func (r RateLimits) validate(p *problems, path string) {
 		{"password_fails_per_ip", r.PasswordFailsPerIP},
 		{"password_fails_per_link", r.PasswordFailsPerLink},
 		{"password_lockout_min", r.PasswordLockoutMin},
+		{"password_link_delay_s", r.PasswordLinkDelayS},
 		{"admin_per_min", r.AdminPerMin},
 	} {
 		if f.v <= 0 {

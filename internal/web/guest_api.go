@@ -14,6 +14,7 @@ import (
 	"github.com/igrybkov/ha-guest-access/internal/catalog"
 	"github.com/igrybkov/ha-guest-access/internal/ha"
 	"github.com/igrybkov/ha-guest-access/internal/links"
+	"github.com/igrybkov/ha-guest-access/internal/ma"
 	"github.com/igrybkov/ha-guest-access/internal/model"
 )
 
@@ -43,19 +44,20 @@ func (s *Server) guestPassword(g *guestReq) {
 		return
 	}
 	ip := g.client.IP
-	if ok, retry := g.lim.guard.Allow(g.link.ID, ip, g.now); !ok {
-		g.deny(reasonLocked)
+	if ok, retry, slowed := g.lim.guard.Allow(g.link.ID, ip, g.now); !ok {
+		reason := reasonLocked
+		if slowed {
+			reason = reasonLinkSlowed
+		}
+		g.deny(reason)
 		tooMany(g.w, retry)
 		return
 	}
 	id, ok := access.MatchPassword(g.link.Passwords, body.Password)
 	if !ok {
-		if g.lim.guard.Fail(g.link.ID, ip, g.now) {
-			g.note("guest.lockout", audit.ResultDenied, reasonWrongPassword)
-			s.log.Warn("password form locked", "link", g.link.ID, "client", g.ipKey())
-			s.fire(g.r.Context(), eventLockout, map[string]any{
-				"link_id": g.link.ID, "link_name": g.link.Name, "ip": g.ipKey(),
-			})
+		ipBlocked, linkSlowed := g.lim.guard.Fail(g.link.ID, ip, g.now)
+		if ipBlocked || linkSlowed {
+			s.lockout(g, ipBlocked, linkSlowed)
 		}
 		g.note("guest.password.fail", audit.ResultDenied, reasonWrongPassword)
 		writeError(g.w, http.StatusForbidden, msgWrongPass)
@@ -67,6 +69,36 @@ func (s *Server) guestPassword(g *guestReq) {
 	setCookie(g, sessionCookie, s.deps.Signer.SignSession(g.link.ID, id, g.link.ValidUntil), g.link.ValidUntil)
 	s.log.Info("guest signed in", "link", g.link.ID, "guest", pw.Label)
 	writeJSON(g.w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// Lockout scopes in the guest_access_lockout event and the log.
+const (
+	lockoutScopeIP   = "ip"   // one address is blocked on the link
+	lockoutScopeLink = "link" // the link takes one try per delay
+)
+
+// lockout records, logs and fires a new lockout. ipBlocked is a block of
+// the client's address on the link; linkSlowed is the link slowing down
+// for everyone. One wrong password can start both.
+func (s *Server) lockout(g *guestReq, ipBlocked, linkSlowed bool) {
+	scopes := make([]string, 0, 2)
+	if ipBlocked {
+		scopes = append(scopes, lockoutScopeIP)
+	}
+	if linkSlowed {
+		scopes = append(scopes, lockoutScopeLink)
+	}
+	reason := reasonWrongPassword
+	if !ipBlocked {
+		reason = reasonLinkSlowed
+	}
+	g.note("guest.lockout", audit.ResultDenied, reason)
+	for _, scope := range scopes {
+		s.log.Warn("password form locked", "link", g.link.ID, "client", g.ipKey(), "scope", scope)
+		s.fire(g.r.Context(), eventLockout, map[string]any{
+			"link_id": g.link.ID, "link_name": g.link.Name, "ip": g.ipKey(), "scope": scope,
+		})
+	}
 }
 
 // decodeGuest decodes a guest JSON body, or answers 400 or 413.
@@ -514,12 +546,34 @@ func (s *Server) guestParty(g *guestReq) {
 	mctx, cancel := context.WithTimeout(ctx, o.MATimeout)
 	defer cancel()
 	u, err := client.PartyURL(mctx)
+	s.noteMAToken(err)
 	if err != nil {
 		s.log.Warn("music assistant party url", "err", err)
 		writeError(g.w, http.StatusServiceUnavailable, "The party is not available now.")
 		return
 	}
 	writeJSON(g.w, http.StatusOK, map[string]string{"url": u})
+}
+
+// maRefusedWarning is the admin warning while Music Assistant refuses the
+// token.
+const maRefusedWarning = "Music Assistant refused the token, so guests see no party button. " +
+	"Make a new long-lived token in Music Assistant and put it in the music_assistant.token option."
+
+// noteMAToken tracks whether Music Assistant takes the token, from the
+// result of a call. It logs once when MA starts refusing it, and once
+// when it takes it again. Other errors (MA down or slow) change nothing.
+func (s *Server) noteMAToken(err error) {
+	switch {
+	case errors.Is(err, ma.ErrUnauthorized):
+		if !s.maRefused.Swap(true) {
+			s.log.Warn("music assistant refused the token; set a new one in the music_assistant.token option")
+		}
+	case err == nil:
+		if s.maRefused.Swap(false) {
+			s.log.Info("music assistant takes the token again")
+		}
+	}
 }
 
 func compare(a, b string) int {

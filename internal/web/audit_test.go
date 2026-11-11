@@ -284,3 +284,64 @@ func TestAuditThrottlesSliderDrags(t *testing.T) {
 		t.Errorf("allowed records = %+v", allowed)
 	}
 }
+
+// With the dev bypass on, a peer other than the ingress proxy can send
+// X-Remote-User headers. They are not read: the user is recorded as dev.
+// The ingress proxy's headers still count.
+func TestAuditAdminDevPeerUser(t *testing.T) {
+	ah := newAuditHarness(t, func(_ *config.Options, d *Deps) { d.DevAdminAnyPeer = true })
+	l := ah.link("guest_room")
+	user := map[string]string{"X-Remote-User-Id": "u1", "X-Remote-User-Name": "illia", "X-Remote-User-Display-Name": "Illia"}
+	if c := ah.a(req{method: "POST", path: "/api/links/" + l.ID + "/revoke", body: map[string]any{}, headers: user, peer: "192.0.2.5:4000"}).Code; c != 200 {
+		t.Fatalf("dev peer: %d", c)
+	}
+	ah.a(req{method: "POST", path: "/api/links/" + l.ID + "/revoke", body: map[string]any{}, headers: user})
+	recs := ah.records()
+	if len(recs) != 2 {
+		t.Fatalf("records = %+v", recs)
+	}
+	if u := recs[0].User; u == nil || *u != (audit.User{Name: "dev"}) || recs[0].Peer != "192.0.2.5" {
+		t.Errorf("dev peer record: user %+v, peer %q", u, recs[0].Peer)
+	}
+	if u := recs[1].User; u == nil || u.ID != "u1" || u.Name != "illia" || u.DisplayName != "Illia" {
+		t.Errorf("ingress record: user %+v", u)
+	}
+}
+
+// A flood of one guest denial kind from one client can't rotate a recent
+// admin record out of the audit files. Limits are off, so nothing else
+// stops the flood.
+func TestAuditDenialFloodKeepsAdminRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), audit.FileName)
+	al, err := audit.New(audit.Options{Path: path, Enabled: true, MaxBytes: 16 << 10, Logger: quietLog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { al.Close() })
+	h := newHarness(t, func(o *config.Options, d *Deps) {
+		o.LimitsEnabled = false
+		d.Audit = al
+	})
+	l := h.link("guest_room")
+	other := h.link("guest_room")
+	if c := h.a(req{method: "POST", path: "/api/links/" + other.ID + "/revoke", body: map[string]any{}}).Code; c != 200 {
+		t.Fatalf("revoke: %d", c)
+	}
+	for i := range 500 {
+		if c := h.act(l, "light.bedroom", "light.turn_on", nil).Code; c != 403 {
+			t.Fatalf("flood %d: %d", i, c)
+		}
+		h.advance(10 * time.Millisecond)
+	}
+	var all []byte
+	for _, p := range []string{path, path + ".1"} {
+		raw, _ := os.ReadFile(p)
+		all = append(all, raw...)
+	}
+	if !bytes.Contains(all, []byte(`"event":"admin.link.revoke"`)) {
+		t.Error("the admin record was rotated out")
+	}
+	if n := bytes.Count(all, []byte(`"event":"guest.act.denied"`)); n > 5 {
+		t.Errorf("%d denial records for one client in 5 s", n)
+	}
+}

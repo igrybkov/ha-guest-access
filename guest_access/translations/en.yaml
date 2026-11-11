@@ -82,6 +82,11 @@ configuration:
       guest_burst:
         name: Guest burst
         description: Requests in a quick row before the per-minute limit applies.
+      assets_per_min:
+        name: Page files per minute
+        description: Script and style files of the guest page, per address.
+      assets_burst:
+        name: Page files burst
       actions_per_min:
         name: Actions per minute
         description: Per link and address, once the guest is in.
@@ -107,12 +112,18 @@ configuration:
         description: In minutes.
       password_fails_per_link:
         name: Wrong passwords per link
+        description: From all addresses. Over this, the link slows down.
       password_window_per_link_min:
         name: Window for wrong passwords per link
         description: In minutes.
       password_lockout_min:
-        name: Password lockout
-        description: Minutes the password form stays locked after too many wrong passwords.
+        name: Password lockout per address
+        description: Minutes an address stays locked out after too many wrong passwords.
+      password_link_delay_s:
+        name: Slowed link delay
+        description: >-
+          Seconds between two password tries on a link that had too many
+          wrong passwords. Applies to all addresses.
       admin_per_min:
         name: Admin requests per minute
   links:

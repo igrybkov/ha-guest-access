@@ -6,7 +6,7 @@ import {
   preset, toLocalInput, fromLocalInput, buildTemplate, buildLink, buildRule, ruleState, linkForm, cleanAccess,
   parseVarValue, slugifyID, normalizeTemplatePath, parentPath, fieldFor, groupProblems,
   approvalMode, splitTemplates, linkBadges, rotateWarning, grantSummary,
-  auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections, addMonth, PRESETS,
+  auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections, settingsWarnings, addMonth, PRESETS,
 } from './lib.js';
 
 // ---- Patterns ----
@@ -385,6 +385,7 @@ const settingsSample = {
     continuous_per_min: 205, continuous_burst: 206, max_streams_per_link: 207,
     misses_per_hour_per_ip: 208, misses_per_hour_global: 209,
     password_fails_per_ip: 210, password_fails_per_link: 211, password_lockout_min: 212, admin_per_min: 213,
+    assets_per_min: 214, assets_burst: 215, password_link_delay_s: 216,
   },
   tunables: {
     ma_timeout_ms: 301, location_ttl_min: 302, max_accuracy_m: 303,
@@ -424,6 +425,19 @@ test('settings sections: on/off, lists and missing values', () => {
   assert.equal(empty.get('Trusted proxies'), 'None');
   assert.equal(empty.get('Log file'), 'Off');
   assert.equal(empty.get('Custom slug length'), null);
+});
+
+test('settings: a refused Music Assistant token shows in the row and as a warning', () => {
+  const ok = { ...settingsSample, ma_token: { set: true, refused: false } };
+  assert.deepEqual(settingsWarnings(ok), []);
+  const bad = { ...settingsSample, ma_token: { set: true, refused: true }, limits_disabled: true };
+  const rows = new Map(settingsSections(bad).flatMap((s) => s.rows));
+  assert.equal(rows.get('Token'), 'Refused by Music Assistant');
+  const w = settingsWarnings(bad);
+  assert.equal(w.length, 2);
+  assert.match(w[0], /Rate limits are off/);
+  assert.match(w[1], /music_assistant\.token/);
+  assert.deepEqual(settingsWarnings({}), []);
 });
 
 test('link badges count waiting devices', () => {
