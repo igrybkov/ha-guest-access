@@ -61,6 +61,7 @@ const (
 	DefaultMaxDevices    = 10
 	DefaultEventsPerHour = 5
 	DefaultTouchThrottle = time.Minute
+	DefaultMaxBodyBytes  = 1 << 10
 )
 
 // CodeAlphabet is the alphabet of request codes. It has no 0, O, 1, I or
@@ -73,8 +74,6 @@ const CodeLen = 4
 // fireTimeout caps one FireEvent call.
 const fireTimeout = 5 * time.Second
 
-// maxDecideBody caps the JSON body of a self-service decision.
-const maxDecideBody = 1 << 10
 
 var (
 	// ErrUnknownRequest means no pending request has that id: it never
@@ -120,6 +119,9 @@ type Options struct {
 	EventsPerHour int
 	// TouchThrottle is the most often a device's LastSeenAt is saved.
 	TouchThrottle time.Duration
+	// MaxBodyBytes caps the JSON body of a self-service decision. Pass
+	// the app's request body limit.
+	MaxBodyBytes int64
 }
 
 // Request is a pending device request, as the admin API shows it.
@@ -198,6 +200,9 @@ func New(o Options) *Manager {
 	}
 	if o.TouchThrottle <= 0 {
 		o.TouchThrottle = DefaultTouchThrottle
+	}
+	if o.MaxBodyBytes <= 0 {
+		o.MaxBodyBytes = DefaultMaxBodyBytes
 	}
 	log := o.Logger
 	if log == nil {
@@ -458,7 +463,7 @@ func (m *Manager) DecideByDevice(w http.ResponseWriter, r *http.Request, link mo
 		RequestID string `json:"request_id"`
 		Approve   *bool  `json:"approve"`
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxDecideBody))
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, m.opts.MaxBodyBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&body); err != nil || body.RequestID == "" || body.Approve == nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"status": "bad_request"})
