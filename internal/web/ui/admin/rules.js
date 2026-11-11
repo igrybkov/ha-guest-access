@@ -5,8 +5,10 @@
 import { h, fill, get, check, localEnabled, docsLink } from './dom.js';
 import {
   paths, SELECTOR_KEYS, patternProblem, searchOptions, pickedEntities, actionChoices,
-  domainOf, ruleState, buildRule, groupProblems, isExact, effectiveOrder, moveItem,
+  domainOf, ruleState, buildRule, groupProblems, isExact, entityLists, rulesPicking, grantRules,
+  excludeEntity, includeEntity, placeItem, dropItem, lockedNote, rekeyPath, moveIndex, indexMap,
 } from './lib.js';
+import { dualList, sortHandle } from './dnd.js';
 
 // ---- Problem slots ----
 
@@ -30,6 +32,19 @@ export class Slots {
   // drop forgets slots under a prefix, when a rule is removed.
   drop(prefix) {
     for (const k of [...this.map.keys()]) if (k && k.startsWith(prefix)) this.map.delete(k);
+  }
+
+  // rekey renames the slots of indexed items after a sort: prefix is
+  // "rules" or "extra", map[old] = new. Slots no longer on the page are
+  // dropped, so an old one can't take a moved card's key.
+  rekey(prefix, map) {
+    const next = new Map();
+    for (const [k, el] of this.map) {
+      const nk = rekeyPath(k, prefix, map);
+      if (nk !== k && !el.isConnected) continue;
+      next.set(nk, el);
+    }
+    this.map = next;
   }
 
   show(problems, normalize) {
@@ -117,55 +132,104 @@ function patternList({ values, options, inSelect, label, onChange }) {
     if (e.key === 'Escape') sugg.hidden = true;
   });
   draw();
-  return h('div', { class: 'patterns' }, h('div', { class: 'small muted', text: label }), chips, h('div', { class: 'suggest-wrap' }, input, sugg), hint);
+  return { el: h('div', { class: 'patterns' }, h('div', { class: 'small muted', text: label }), chips, h('div', { class: 'suggest-wrap' }, input, sugg), hint), draw };
 }
 
+// selectorBox edits one selector. draw() redraws the chips after
+// something else changed the lists.
 function selectorBox(title, sel, inSelect, inv, base, slots, onChange) {
-  return h('fieldset', { class: 'selector' }, h('legend', { text: title }),
-    SELECTOR_KEYS.map((k) => h('div', {},
-      patternList({ values: sel[k], options: optionsFor(inv, k), inSelect, label: KEY_LABELS[k], onChange }),
-      slots.slot(`${base}.${k}`))));
+  const lists = SELECTOR_KEYS.map((k) => [k, patternList({ values: sel[k], options: optionsFor(inv, k), inSelect, label: KEY_LABELS[k], onChange })]);
+  return {
+    el: h('fieldset', { class: 'selector' }, h('legend', { text: title }),
+      lists.map(([k, pl]) => h('div', {}, pl.el, slots.slot(`${base}.${k}`)))),
+    draw: () => lists.forEach(([, pl]) => pl.draw()),
+  };
 }
 
 // ---- Entity order ----
 
-// orderEditor lists entities in guest page order with up and down
-// buttons. form.entity_order is the saved order. set() redraws the list
-// from the preview's entities ([{entity_id, name}]). A move writes the
-// whole shown order into form.entity_order. Order changes no grant, so a
-// move needs no new preview.
-export function orderEditor(form, empty) {
-  const box = h('div', { class: 'stack tight' });
+// entityEditor lists a guest page group in two lists: Shown, in guest
+// page order, and Removed. opts:
+//   - form: holds entity_order, the saved order.
+//   - rules(): the group's rule editor states. A remove or restore
+//     changes their excludes in place.
+//   - inv, catalog: the inventory (or null) and the action catalog.
+//   - group(): the template id of the group, or "" for a link's extra
+//     rules, as the preview sources name it.
+//   - empty: the text for an empty Shown list.
+//   - onRulesChange(indexes): runs after the excludes of those rules
+//     changed. The caller redraws those rule editors and runs the
+//     preview.
+// set(grants, granted, hide) takes a new preview: its grants, the
+// group's entities and ids to leave out of Removed.
+export function entityEditor(opts) {
+  const { form, inv } = opts;
+  const known = opts.catalog?.actions ? new Set(opts.catalog.actions.map((a) => a.id)) : null;
+  let grants = [];
+  let granted = [];
+  let hide = [];
   let shown = [];
-  // A redraw drops focus, so give it back to the button with the same
-  // label. That is the same button on the moved row.
-  const draw = (focusLabel) => {
-    if (!shown.length) {
-      fill(box, h('p', { class: 'muted small', text: empty }));
+
+  const draw = () => {
+    const lists = entityLists({ rules: opts.rules(), inv, known, granted, hide, order: form.entity_order });
+    shown = lists.shown;
+    list.set({
+      chosen: lists.shown.map((e) => ({ id: e.entity_id, name: e.name, sub: e.entity_id })),
+      other: lists.removed.map((e) => ({ id: e.entity_id, name: e.name, sub: e.entity_id, locked: e.locked, note: e.locked ? lockedNote(e.by) : '' })),
+    });
+  };
+
+  // picking lists the rules that select id in a domain they allow.
+  const picking = (id) => {
+    const e = inv?.byId.get(id);
+    return e ? rulesPicking(opts.rules(), e, inv, known) : [];
+  };
+
+  const onMove = (id, to, index) => {
+    const ids = shown.map((e) => e.entity_id);
+    if (to === 'chosen' && ids.includes(id)) {
+      // Order changes no grant, so it needs no new preview.
+      form.entity_order = placeItem(ids, id, index);
+      draw();
       return;
     }
-    const n = shown.length;
-    const move = (i, d) => (ev) => {
-      const label = ev.currentTarget.getAttribute('aria-label');
-      const ids = moveItem(shown.map((e) => e.entity_id), i, d);
-      form.entity_order = ids;
-      shown = effectiveOrder(ids, shown);
-      draw(label);
-    };
-    fill(box, ...shown.map((e, i) => h('div', { class: 'tpl-row' },
-      h('span', { class: 'check' }, h('span', { text: e.name }), h('code', { class: 'muted small', text: e.entity_id })),
-      n > 1 && h('span', { class: 'tpl-move' },
-        h('button', { type: 'button', class: 'icon', text: '↑', disabled: i === 0, 'aria-label': `Move ${e.name} up`, onclick: move(i, -1) }),
-        h('button', { type: 'button', class: 'icon', text: '↓', disabled: i === n - 1, 'aria-label': `Move ${e.name} down`, onclick: move(i, 1) })))));
-    const btn = focusLabel && [...box.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === focusLabel);
-    if (btn && !btn.disabled) btn.focus();
+    let changed;
+    if (to === 'chosen') {
+      changed = includeEntity(opts.rules(), id, picking(id));
+      form.entity_order = placeItem(ids, id, index);
+      // Show it at once. The preview that follows has the last word.
+      granted = [...granted, { entity_id: id, name: inv?.byId.get(id)?.name || id }];
+    } else {
+      // Also the rules the server says grant it, so no access is left
+      // behind when this page and the server disagree.
+      const targets = [...new Set([...picking(id), ...grantRules(grants, id, opts.group())])];
+      changed = excludeEntity(opts.rules(), id, targets);
+      form.entity_order = dropItem(form.entity_order || [], id);
+      granted = granted.filter((e) => e.entity_id !== id);
+    }
+    draw();
+    opts.onRulesChange(changed);
   };
+
+  const list = dualList({
+    label: 'Entities on the guest page',
+    chosen: { title: 'Shown', empty: opts.empty, remove: (n) => `Remove ${n} and take its access away` },
+    other: {
+      title: 'Removed',
+      empty: inv ? 'Nothing removed.' : 'The entity list is not loaded, so removed entities do not show.',
+      add: (n) => `Give ${n} back`,
+    },
+    onMove,
+  });
+  // Start empty. The rules may not exist yet; the first preview fills it.
+  list.set({ chosen: [], other: [] });
   return {
-    el: box,
-    set(entities) {
-      const active = box.contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
-      shown = effectiveOrder(form.entity_order, entities);
-      draw(active);
+    el: list.el,
+    set(newGrants, newGranted, newHide = []) {
+      grants = newGrants || [];
+      granted = newGranted || [];
+      hide = newHide;
+      draw();
     },
   };
 }
@@ -262,12 +326,33 @@ function varsBox(st, base, slots, onChange) {
     slots.slot(`${base}.variables`));
 }
 
+// moveRule moves rule card from to place to and returns the new list of
+// editors. Each editor keeps its own state and DOM (chips, open boxes,
+// typed text). Slots, paths and titles follow the new places. prefix is
+// "rules" or "extra"; title(i) names the card at place i.
+export function moveRule(editors, from, to, { box, slots, prefix, title }) {
+  const map = indexMap(editors.length, from, to);
+  const next = moveIndex(editors, from, to);
+  slots.rekey(prefix, map);
+  next.forEach((e, i) => e.setPlace(`${prefix}[${i}]`, title(i)));
+  // Moving a node keeps its state, but a focused node loses focus. The
+  // handle takes it back.
+  fill(box, ...next.map((e) => e.el));
+  return next;
+}
+
 // ruleEditor builds one rule card. ctx: {catalog, inv, slots, onChange,
-// onRemove, forceAccess (link extras always carry their own access)}.
-// Returns {el, st, setResolved(ids)}.
-export function ruleEditor(rule, base, title, ctx) {
+// onRemove, forceAccess (link extras always carry their own access),
+// sort}. sort, when set, adds a drag handle: {box, index(), count(),
+// onMove(from, to)}. Returns {el, st, setPlace(base, title),
+// syncExclude(), setResolved(ids)}.
+export function ruleEditor(rule, startBase, title, ctx) {
   const st = ruleState(rule, { forceAccess: ctx.forceAccess });
   const { slots } = ctx;
+  // base moves with the card when the rules are sorted. Slots made at
+  // build time are renamed with Slots.rekey; redraws read base again.
+  let base = startBase;
+  const heading = h('h3', { class: 'grow', text: title });
   const resolved = h('div', { class: 'resolved small' }, h('span', { class: 'muted', text: 'Resolving…' }));
   let actions = null;
 
@@ -291,14 +376,16 @@ export function ruleEditor(rule, base, title, ctx) {
   const own = h('input', { type: 'checkbox', checked: st.ownAccess });
   own.addEventListener('change', () => { st.ownAccess = own.checked; drawAccess(); changed(); });
 
-  const el = h('section', { class: 'rule card' },
-    h('div', { class: 'toolbar' }, h('h3', { class: 'grow', text: title }),
-      ctx.onRemove && h('button', { type: 'button', class: 'danger', text: 'Remove rule', onclick: ctx.onRemove })),
+  const excludeBox = selectorBox('Exclude', st.exclude, false, ctx.inv, `${base}.exclude`, slots, changed);
+  const toolbar = h('div', { class: 'toolbar' }, heading,
+    ctx.onRemove && h('button', { type: 'button', class: 'danger', text: 'Remove rule', onclick: ctx.onRemove }));
+  const el = h('section', { class: 'rule card', 'data-drag-row': '' },
+    toolbar,
     slots.slot(base),
-    selectorBox('Select', st.select, true, ctx.inv, `${base}.select`, slots, changed),
+    selectorBox('Select', st.select, true, ctx.inv, `${base}.select`, slots, changed).el,
     slots.slot(`${base}.select`),
     h('details', { class: 'exclude' }, h('summary', { text: 'Exclude' }),
-      selectorBox('Exclude', st.exclude, false, ctx.inv, `${base}.exclude`, slots, changed),
+      excludeBox.el,
       slots.slot(`${base}.exclude`)),
     h('fieldset', {}, h('legend', { text: 'Actions' }), actions.el, slots.slot(`${base}.actions`)),
     ctx.forceAccess
@@ -308,6 +395,13 @@ export function ruleEditor(rule, base, title, ctx) {
     vars,
     resolved);
   if (Object.values(st.exclude).some((l) => l.length)) el.querySelector('details.exclude').setAttribute('open', '');
+  if (ctx.sort) {
+    toolbar.prepend(sortHandle({
+      card: el, box: ctx.sort.box,
+      label: () => `Move ${heading.textContent}, place ${ctx.sort.index() + 1} of ${ctx.sort.count()}`,
+      index: ctx.sort.index, count: ctx.sort.count, onMove: ctx.sort.onMove,
+    }));
+  }
   drawAccess();
   drawVars();
   refreshDomains();
@@ -315,6 +409,18 @@ export function ruleEditor(rule, base, title, ctx) {
   return {
     el,
     st,
+    // setPlace gives the card its new path and title after a sort.
+    setPlace(newBase, newTitle) {
+      base = newBase;
+      heading.textContent = newTitle;
+    },
+    // syncExclude redraws the exclude chips after the entity lists
+    // changed st.exclude, and opens the exclude box.
+    syncExclude() {
+      excludeBox.draw();
+      el.querySelector('details.exclude').setAttribute('open', '');
+      refreshDomains();
+    },
     // setResolved shows the entities the server preview resolved.
     setResolved(ids) {
       if (ids == null) {

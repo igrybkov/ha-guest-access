@@ -5,7 +5,7 @@ import {
   localEnabled, maEnabled, APIError,
 } from './dom.js';
 import { paths, buildTemplate, buildRule, slugifyID, normalizeTemplatePath, grantedEntities } from './lib.js';
-import { Slots, ruleEditor, loadInventory, accessEditor, localOffNote, orderEditor } from './rules.js';
+import { Slots, ruleEditor, loadInventory, accessEditor, localOffNote, entityEditor, moveRule } from './rules.js';
 
 export async function render(view, rest) {
   const data = await get(paths.templates);
@@ -37,7 +37,7 @@ async function editor(view, tpl, all) {
   const isNew = !tpl;
   if (!isNew && !tpl.id) throw new Error('no such template');
   const [catalog, inv] = await Promise.all([get(paths.catalog), loadInventory()]);
-  const src = tpl || { id: '', name: '', rules: [{ select: {}, actions: [] }] };
+  const src = tpl || { id: '', name: '', rules: [] };
   const f = {
     id: src.id,
     name: src.name,
@@ -47,7 +47,19 @@ async function editor(view, tpl, all) {
     entity_order: [...(src.entity_order || [])],
   };
   const slots = new Slots();
-  const order = orderEditor(f, 'Nothing yet. Entities this template grants show here.');
+  // The server only resolves a template that passes Validate, so a new
+  // template gets a stand-in id until it has one.
+  const probeID = () => f.id || 'new-template';
+  const entities = entityEditor({
+    form: f, inv, catalog,
+    rules: () => editors.map((e) => e.st),
+    group: probeID,
+    empty: 'Nothing yet. Entities this template grants show here.',
+    onRulesChange: (changed) => {
+      for (const i of changed) editors[i]?.syncExclude();
+      schedule();
+    },
+  });
   let idTouched = !isNew;
 
   const name = h('input', { value: f.name, required: true });
@@ -63,18 +75,29 @@ async function editor(view, tpl, all) {
   const party = h('input', { type: 'checkbox', checked: f.party });
   party.addEventListener('change', () => { f.party = party.checked; });
 
-  // Rules: the cards rebuild only when a rule is added or removed. Each
-  // editor holds its own state; draft() reads it.
+  // Rules: the cards rebuild only when a rule is added or removed. A sort
+  // moves the cards with their state. Each editor holds its own state;
+  // draft() reads it.
   const rulesBox = h('div', { class: 'stack' });
   let editors = [];
   const current = () => editors.map((e) => buildRule(e.st));
+  const sortRule = (from, to) => {
+    editors = moveRule(editors, from, to, { box: rulesBox, slots, prefix: 'rules', title: (i) => `Rule ${i + 1}` });
+    schedule();
+  };
   function drawRules(rules) {
     slots.drop('rules[');
-    editors = rules.map((r, i) => ruleEditor(r, `rules[${i}]`, `Rule ${i + 1}`, {
-      catalog, inv, slots, onChange: schedule,
-      onRemove: rules.length > 1 ? () => { const next = current(); next.splice(i, 1); drawRules(next); schedule(); } : null,
-    }));
-    fill(rulesBox, ...editors.map((e) => e.el));
+    editors = rules.map((r, i) => {
+      const ed = ruleEditor(r, `rules[${i}]`, `Rule ${i + 1}`, {
+        catalog, inv, slots, onChange: schedule,
+        onRemove: () => { const next = current(); next.splice(editors.indexOf(ed), 1); drawRules(next); schedule(); },
+        sort: { box: rulesBox, index: () => editors.indexOf(ed), count: () => editors.length, onMove: sortRule },
+      });
+      return ed;
+    });
+    fill(rulesBox, ...(editors.length
+      ? editors.map((e) => e.el)
+      : [h('p', { class: 'muted', text: 'No rules yet. The template grants nothing until you add one.' })]));
   }
   const draft = () => buildTemplate({ ...f, rules: editors.map((e) => e.st) });
 
@@ -83,15 +106,13 @@ async function editor(view, tpl, all) {
   const preview = debounce(async () => {
     const my = ++seq;
     const t = draft();
-    // The server only resolves a template that passes Validate, so a
-    // new template gets a stand-in id until it has one.
-    const probe = { ...t, id: t.id || 'new-template', name: t.name || 'New template' };
+    const probe = { ...t, id: probeID(), name: t.name || 'New template' };
     try {
       const res = await post(paths.preview, { template: probe });
       if (my !== seq) return;
       const byRule = new Map(res.rules.filter((r) => r.template === probe.id).map((r) => [r.rule, r.entities]));
       editors.forEach((e, i) => e.setResolved(byRule.get(i) ?? []));
-      order.set(grantedEntities(res.grants));
+      entities.set(res.grants, grantedEntities(res.grants));
       const probs = [...res.problems.filter((p) => !(t.id === '' && p.path === 'id'))];
       slots.show(probs, normalizeTemplatePath);
       fill(warnings, ...res.warnings.map((w) => h('li', { text: w.rule >= 0 ? `Rule ${w.rule + 1}: ${w.message}` : w.message })));
@@ -141,9 +162,9 @@ async function editor(view, tpl, all) {
     schedule();
   } })),
   warnings,
-  h('fieldset', {}, h('legend', { text: 'Order on the guest page' }),
-    h('p', { class: 'muted small', text: 'Guests see the entities in this order. Until you move one, they go by name.' }),
-    order.el, slots.slot('entity_order')),
+  h('fieldset', {}, h('legend', { text: 'Entities on the guest page' }),
+    h('p', { class: 'muted small', text: 'Guests see Shown in this order. Drag by the handle, or use Alt+Up and Alt+Down. Until you move one, they go by name. Removing an entity takes its access away: it goes on the exclude list of the rules that pick it.' }),
+    entities.el, slots.slot('entity_order')),
   h('div', { class: 'actions sticky' },
     save,
     !isNew && h('button', { type: 'button', class: 'danger', text: 'Delete', onclick: async (ev) => {

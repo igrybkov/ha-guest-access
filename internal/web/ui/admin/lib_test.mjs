@@ -5,7 +5,8 @@ import {
   wildcardOnly, patternProblem, selectorProblems, matchPattern, pickedEntities, actionChoices, searchOptions,
   preset, toLocalInput, fromLocalInput, buildTemplate, buildLink, buildRule, ruleState, linkForm, cleanAccess,
   parseVarValue, slugifyID, normalizeTemplatePath, parentPath, fieldFor, groupProblems,
-  approvalMode, splitTemplates, templateRows, moveItem, effectiveOrder, grantedEntities, ownRuleEntities, linkBadges, rotateWarning, grantSummary,
+  approvalMode, splitTemplates, templateLists, placeItem, dropItem, moveIndex, indexMap, rekeyPath, effectiveOrder,
+  ruleDomains, rulesPicking, excludeKinds, entityLists, grantRules, excludeEntity, includeEntity, lockedNote, grantedEntities, ownRuleEntities, linkBadges, rotateWarning, grantSummary,
   auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections, settingsWarnings, addMonth, PRESETS,
   linkProblems, removePasswordPrompt, wallToUTC, wallParts, usableZone, browserZone, zoneNote, fmtTime, fmtWindow,
   PENDING_ROUTE, wantsPending, haRoutePath, pollMs, ago, pendingRows, pendingBadge,
@@ -399,19 +400,200 @@ test('splitTemplates drops ids that no longer exist', () => {
   assert.deepEqual(splitTemplates([], ts), { keep: [], missing: [] });
 });
 
-test('templateRows puts ticked templates first, in link order', () => {
+test('templateLists: chosen in link order, the rest in file order', () => {
   const ts = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }];
-  const rows = templateRows(['c', 'gone', 'a'], ts);
-  assert.deepEqual(rows.map((r) => [r.t.id, r.ticked]), [['c', true], ['a', true], ['b', false], ['d', false]]);
-  assert.deepEqual(templateRows([], ts).map((r) => r.t.id), ['a', 'b', 'c', 'd']);
+  const got = templateLists(['c', 'gone', 'a'], ts);
+  assert.deepEqual(got.chosen.map((t) => t.id), ['c', 'a']);
+  assert.deepEqual(got.available.map((t) => t.id), ['b', 'd']);
+  assert.deepEqual(templateLists([], ts).available.map((t) => t.id), ['a', 'b', 'c', 'd']);
 });
 
-test('moveItem swaps neighbours and ignores moves past the ends', () => {
-  assert.deepEqual(moveItem(['a', 'b', 'c'], 2, -1), ['a', 'c', 'b']);
-  assert.deepEqual(moveItem(['a', 'b', 'c'], 0, 1), ['b', 'a', 'c']);
-  assert.deepEqual(moveItem(['a', 'b', 'c'], 0, -1), ['a', 'b', 'c']);
-  assert.deepEqual(moveItem(['a', 'b', 'c'], 2, 1), ['a', 'b', 'c']);
-  assert.deepEqual(moveItem([], 0, 1), []);
+test('placeItem moves within a list and adds from another; dropItem takes out', () => {
+  assert.deepEqual(placeItem(['a', 'b', 'c'], 'c', 0), ['c', 'a', 'b']);
+  assert.deepEqual(placeItem(['a', 'b', 'c'], 'a', 1), ['b', 'a', 'c'], 'the index counts the list without the item');
+  assert.deepEqual(placeItem(['a', 'b', 'c'], 'a', 2), ['b', 'c', 'a']);
+  assert.deepEqual(placeItem(['a', 'b'], 'x'), ['a', 'b', 'x'], 'no index puts it last');
+  assert.deepEqual(placeItem(['a', 'b'], 'x', 1), ['a', 'x', 'b']);
+  assert.deepEqual(placeItem(['a', 'b'], 'x', 99), ['a', 'b', 'x']);
+  assert.deepEqual(placeItem(['a', 'b'], 'x', -3), ['x', 'a', 'b']);
+  assert.deepEqual(placeItem([], 'x', 0), ['x']);
+  const ids = ['a', 'b'];
+  placeItem(ids, 'b', 0);
+  assert.deepEqual(ids, ['a', 'b'], 'the input stays as it was');
+  assert.deepEqual(dropItem(['a', 'b', 'c'], 'b'), ['a', 'c']);
+  assert.deepEqual(dropItem(['a'], 'x'), ['a']);
+});
+
+test('moveIndex and indexMap move one item; the rest keep their order', () => {
+  assert.deepEqual(moveIndex(['a', 'b', 'c', 'd'], 3, 0), ['d', 'a', 'b', 'c']);
+  assert.deepEqual(moveIndex(['a', 'b', 'c', 'd'], 0, 2), ['b', 'c', 'a', 'd']);
+  assert.deepEqual(moveIndex(['a', 'b'], 5, 0), ['a', 'b']);
+  assert.deepEqual(moveIndex(['a', 'b'], 0, 9), ['b', 'a']);
+  assert.deepEqual(indexMap(4, 3, 0), [1, 2, 3, 0]);
+  assert.deepEqual(indexMap(4, 0, 2), [2, 0, 1, 3]);
+  assert.deepEqual(indexMap(1, 0, 0), [0]);
+});
+
+test('rule state moves with the rule, and problem paths follow it', () => {
+  const st = [ruleState({ select: { areas: ['den'] }, actions: ['light.turn_on'] }),
+    ruleState({ select: { entities: ['lock.front'] }, exclude: { labels: ['private'] }, actions: ['lock.unlock'], access: { network: 'local' } })];
+  const moved = moveIndex(st, 1, 0);
+  assert.equal(moved[0], st[1], 'the same state object');
+  assert.deepEqual(buildRule(moved[0]).exclude, { labels: ['private'] });
+  const map = indexMap(3, 2, 0);
+  assert.equal(rekeyPath('rules[2].select.entities[0]', 'rules', map), 'rules[0].select.entities[0]');
+  assert.equal(rekeyPath('rules[0]', 'rules', map), 'rules[1]');
+  assert.equal(rekeyPath('rules[1].access', 'rules', map), 'rules[2].access');
+  assert.equal(rekeyPath('extra[1].actions', 'extra', indexMap(2, 1, 0)), 'extra[0].actions');
+  assert.equal(rekeyPath('name', 'rules', map), 'name');
+  assert.equal(rekeyPath('rules', 'rules', map), 'rules');
+  assert.equal(rekeyPath('extra[0]', 'rules', map), 'extra[0]');
+  assert.equal(rekeyPath('rules[9].x', 'rules', map), 'rules[9].x', 'an index out of the map stays');
+});
+
+// ---- Shown and removed entities ----
+
+const rmInv = {
+  entities: [
+    { entity_id: 'light.a', name: 'Alpha', area_id: 'den', labels: [] },
+    { entity_id: 'light.b', name: 'Bravo', area_id: 'den', labels: ['private'] },
+    { entity_id: 'light.c', name: 'Charlie', area_id: 'den', device_id: 'd9', labels: [] },
+    { entity_id: 'light.d', name: 'Delta', area_id: 'den', labels: [] },
+    { entity_id: 'light.e', name: 'Echo', area_id: 'hall', labels: [] },
+    { entity_id: 'light.f', name: 'Foxtrot', area_id: 'den', labels: [] },
+    { entity_id: 'sensor.t', name: 'Temp', area_id: 'den', labels: [] },
+    { entity_id: 'switch.s', name: 'Socket', area_id: 'den', labels: [] },
+  ],
+  areas: [{ area_id: 'den', name: 'Den', labels: [] }, { area_id: 'hall', name: 'Hall', labels: [] }],
+  labels: [{ label_id: 'private', name: 'Private' }],
+  devices: [{ id: 'd9', name: 'Desk lamp', labels: [] }],
+};
+const KNOWN = new Set(['light.turn_on', 'light.turn_off', 'switch.turn_on']);
+const rmRules = () => [
+  {
+    select: { areas: ['den'] },
+    exclude: { entities: ['light.a', 'light.b', 'light.d*', 'switch.s'], labels: ['private'], devices: ['Desk*'] },
+    actions: ['light.turn_on'],
+  },
+  { select: { entities: ['light.e'] }, exclude: { areas: ['hall'] }, actions: ['light.turn_on'] },
+];
+const foxtrot = [{ entity_id: 'light.f', name: 'Foxtrot' }];
+
+test('ruleDomains counts only catalog actions', () => {
+  const r = { actions: ['light.turn_on', 'bogus.x', 'light.turn_off'] };
+  assert.deepEqual([...ruleDomains(r, KNOWN)], ['light']);
+  assert.deepEqual([...ruleDomains(r, null)], ['light', 'bogus']);
+  assert.deepEqual([...ruleDomains({}, KNOWN)], []);
+});
+
+test('rulesPicking needs the select and an action in the domain, not the exclude', () => {
+  const rules = rmRules();
+  const e = (id) => rmInv.entities.find((x) => x.entity_id === id);
+  assert.deepEqual(rulesPicking(rules, e('light.a'), rmInv, KNOWN), [0]);
+  assert.deepEqual(rulesPicking(rules, e('light.e'), rmInv, KNOWN), [1]);
+  assert.deepEqual(rulesPicking(rules, e('switch.s'), rmInv, KNOWN), [], 'no switch action');
+});
+
+test('entityLists: removed holds what the excludes drop, with the kind that locks it', () => {
+  const { shown, removed } = entityLists({ rules: rmRules(), inv: rmInv, known: KNOWN, granted: foxtrot });
+  assert.deepEqual(shown.map((e) => e.entity_id), ['light.f']);
+  assert.deepEqual(removed.map((e) => [e.entity_id, e.locked, e.by]), [
+    ['light.a', false, []],
+    // The exact id and a label both exclude it, so taking the id out is
+    // not enough.
+    ['light.b', true, ['label']],
+    ['light.c', true, ['device']],
+    ['light.d', true, ['pattern']],
+    ['light.e', true, ['area']],
+  ]);
+  // sensor.t is selected but no action fits it. switch.s is excluded, but
+  // no rule allows a switch action, so it never was a grant.
+  assert.ok(!removed.some((e) => e.entity_id === 'sensor.t' || e.entity_id === 'switch.s'));
+});
+
+test('entityLists: an entity one rule excludes and another grants stays shown', () => {
+  const rules = [...rmRules(), { select: { entities: ['light.a'] }, actions: ['light.turn_off'] }];
+  const granted = [...foxtrot, { entity_id: 'light.a', name: 'Alpha' }];
+  const { shown, removed } = entityLists({ rules, inv: rmInv, known: KNOWN, granted });
+  assert.deepEqual(shown.map((e) => e.entity_id), ['light.a', 'light.f']);
+  assert.ok(!removed.some((e) => e.entity_id === 'light.a'));
+  // A stale preview that leaves it out does not put it in removed either.
+  const stale = entityLists({ rules, inv: rmInv, known: KNOWN, granted: foxtrot });
+  assert.ok(!stale.removed.some((e) => e.entity_id === 'light.a'));
+});
+
+test('entityLists: hide, order and no inventory', () => {
+  const { removed } = entityLists({ rules: rmRules(), inv: rmInv, known: KNOWN, granted: foxtrot, hide: ['light.a', 'light.b'] });
+  assert.deepEqual(removed.map((e) => e.entity_id), ['light.c', 'light.d', 'light.e']);
+  const granted = [{ entity_id: 'light.x', name: 'X' }, { entity_id: 'light.y', name: 'Y' }];
+  const got = entityLists({ rules: [], inv: null, granted, order: ['light.y'] });
+  assert.deepEqual(got.shown.map((e) => e.entity_id), ['light.y', 'light.x']);
+  assert.deepEqual(got.removed, []);
+});
+
+test('excludeKinds ignores the exact id', () => {
+  const e = rmInv.entities[1];
+  assert.deepEqual(excludeKinds({ entities: ['light.b', 'light.*'], labels: ['private'] }, e, rmInv), ['pattern', 'label']);
+  assert.deepEqual(excludeKinds({ entities: ['light.b'] }, e, rmInv), []);
+  assert.deepEqual(excludeKinds(undefined, e, rmInv), []);
+});
+
+test('grantRules reads the preview sources of one group', () => {
+  const grants = [
+    { entity_id: 'light.a', action: 'light.turn_on', sources: [{ template: 'tv', rule: 2 }, { template: '', rule: 1 }] },
+    { entity_id: 'light.a', action: 'light.turn_off', sources: [{ template: 'tv', rule: 0 }, { template: 'tv', rule: 2 }] },
+    { entity_id: 'light.b', action: 'light.turn_on', sources: [{ template: 'tv', rule: 1 }] },
+  ];
+  assert.deepEqual(grantRules(grants, 'light.a', 'tv'), [0, 2]);
+  assert.deepEqual(grantRules(grants, 'light.a', ''), [1]);
+  assert.deepEqual(grantRules(grants, 'light.x', 'tv'), []);
+  assert.deepEqual(grantRules(undefined, 'light.a', ''), []);
+});
+
+test('excludeEntity adds the exact id once, in place, to the target rules only', () => {
+  const st = [ruleState({ select: { areas: ['den'] }, actions: ['light.turn_on'] }), ruleState({ exclude: { entities: ['light.a'] } }), {}];
+  const before = st[0].exclude.entities;
+  assert.deepEqual(excludeEntity(st, 'light.a', [0, 1, 2, 7]), [0, 2]);
+  assert.equal(st[0].exclude.entities, before, 'the same array, so the editor chips see it');
+  assert.deepEqual(st[0].exclude.entities, ['light.a']);
+  assert.deepEqual(st[1].exclude.entities, ['light.a'], 'no duplicate');
+  assert.deepEqual(st[2].exclude, { entities: ['light.a'] });
+  assert.deepEqual(excludeEntity(st, 'light.a', [0]), []);
+  assert.deepEqual(buildRule(st[0]).exclude, { entities: ['light.a'] });
+});
+
+test('includeEntity takes out only the exact id', () => {
+  const st = [
+    ruleState({ exclude: { entities: ['light.a', 'light.*', 'light.a'], labels: ['private'] } }),
+    ruleState({ exclude: { entities: ['light.b'] } }),
+    { select: {} },
+  ];
+  assert.deepEqual(includeEntity(st, 'light.a', [0, 1, 2]), [0]);
+  assert.deepEqual(st[0].exclude.entities, ['light.*']);
+  assert.deepEqual(st[0].exclude.labels, ['private']);
+  assert.deepEqual(st[1].exclude.entities, ['light.b']);
+});
+
+test('remove then restore round-trips through the lists', () => {
+  const rules = rmRules();
+  const f = rmInv.entities.find((e) => e.entity_id === 'light.f');
+  const targets = rulesPicking(rules, f, rmInv, KNOWN);
+  excludeEntity(rules, 'light.f', targets);
+  let lists = entityLists({ rules, inv: rmInv, known: KNOWN, granted: [] });
+  assert.deepEqual(lists.removed.find((e) => e.entity_id === 'light.f'), { entity_id: 'light.f', name: 'Foxtrot', locked: false, by: [] });
+  includeEntity(rules, 'light.f', targets);
+  lists = entityLists({ rules, inv: rmInv, known: KNOWN, granted: [] });
+  assert.ok(!lists.removed.some((e) => e.entity_id === 'light.f'));
+  // A restore at an index writes the whole order, so it does not jump
+  // to its name place.
+  const order = placeItem(['light.c', 'light.a'], 'light.f', 1);
+  assert.deepEqual(effectiveOrder(order, [...foxtrot, { entity_id: 'light.a', name: 'Alpha' }, { entity_id: 'light.c', name: 'Charlie' }])
+    .map((e) => e.entity_id), ['light.c', 'light.f', 'light.a']);
+});
+
+test('lockedNote names what excludes it', () => {
+  assert.equal(lockedNote(['label', 'area']), 'Excluded by a label or an area. Change the rule to bring it back.');
+  assert.equal(lockedNote([]), 'Excluded by a rule. Change the rule to bring it back.');
 });
 
 // The same cases as TestSortGroup in internal/web, so both sides agree.

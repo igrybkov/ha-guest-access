@@ -2,12 +2,18 @@
 
 ## Unreleased
 
-- Admin: set the order of entities on the guest page. The template editor
-  and the link editor (for the extra rules' group) list the entities with
-  up and down buttons, saved as `entity_order`. Entities not placed now
-  go by name, not by entity id.
-- Admin: ticked templates on a link can be moved up and down. The guest
-  page shows its groups in that order.
+- Admin: two lists with drag and drop (mouse, touch and keyboard) set
+  what a guest page shows and in which order. A link's templates move
+  between "In this link" and "Available"; the guest page shows their
+  groups in that order. The entities of a template, and of a link's
+  extra rules, sit in "Shown" (in guest page order, saved as
+  `entity_order`) and "Removed". Removing an entity adds its id to the
+  rules' `exclude`, so the guest loses access to it; "+" takes it out
+  again. Entities not placed now go by name, not by entity id. Rules
+  can be sorted by drag too.
+- A template may have no rules, and a link no templates and no rules.
+  Both are valid and grant nothing, so you can build them up step by
+  step. The admin shows a warning until they grant something.
 - Guest: a fan's speed slider shows only while the fan is on, like a
   light's brightness. A fan with no on/off grant keeps it. The slider
   moves in the fan's own steps (`percentage_step`), for example 25% for

@@ -48,9 +48,16 @@ func TestTemplatesStore(t *testing.T) {
 	}
 
 	// A hand edit that does not validate is returned with the error.
-	writeFile(t, dir, migrate.TemplatesFile, "version: 1\ntemplates:\n  - {id: x, name: X, rules: []}\n")
+	writeFile(t, dir, migrate.TemplatesFile, "version: 1\ntemplates:\n  - {id: x, name: \" \", rules: []}\n")
 	got, err = s.Templates()
 	if err == nil || len(got.Templates) != 1 {
 		t.Fatalf("invalid file = %+v, %v", got, err)
+	}
+
+	// A template with no rules is valid: it grants nothing.
+	writeFile(t, dir, migrate.TemplatesFile, "version: 1\ntemplates:\n  - {id: x, name: X, rules: []}\n  - {id: y, name: Y}\n")
+	got, err = s.Templates()
+	if err != nil || len(got.Templates) != 2 || len(got.Templates[0].Rules) != 0 || len(got.Templates[1].Rules) != 0 {
+		t.Fatalf("empty templates = %+v, %v", got, err)
 	}
 }
