@@ -15,12 +15,14 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
 	"github.com/igrybkov/ha-guest-access/internal/approval"
+	"github.com/igrybkov/ha-guest-access/internal/audit"
 	"github.com/igrybkov/ha-guest-access/internal/config"
 	"github.com/igrybkov/ha-guest-access/internal/ha"
 	"github.com/igrybkov/ha-guest-access/internal/inventory"
@@ -119,6 +121,20 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		return fmt.Errorf("hmac key: %w", err)
 	}
 
+	// The audit log. A file that can't be opened stops startup: running
+	// without the record the user asked for would hide what happens.
+	auditLog, err := audit.New(audit.Options{
+		Path: filepath.Join(cfg.DataDir, audit.FileName), Enabled: o.AuditEnabled,
+		MaxBytes: o.AuditMaxFileBytes, Logger: log, Now: opts.Now,
+	})
+	if err != nil {
+		closeAll()
+		return err
+	}
+	defer auditLog.Close()
+	limitsOn := o.LimitsEnabled
+	auditLog.Log(audit.Record{Event: "app.start", Result: audit.ResultOK, Version: version, LimitsEnabled: &limitsOn})
+
 	// Storage. Missing files read as empty and are created on the first
 	// save. Older schemas are migrated in memory; see package migrate.
 	templates := config.NewTemplatesStore(migrate.OpenConfig(cfg.ConfigDir, log))
@@ -153,6 +169,7 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		TouchThrottle: o.Approval.TouchThrottle,
 		MaxBodyBytes:  o.GuestBodyBytes,
 		EventTimeout:  o.HAEventTimeout,
+		Audit:         auditLog,
 	})
 	if err := devices.Run(ctx, client.SubscribeEvents); err != nil { // returns once subscribed
 		closeAll()
@@ -167,6 +184,7 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		HA:              client,
 		Signer:          signer,
 		Devices:         devices,
+		Audit:           auditLog,
 		NewMA:           opts.NewMA,
 		DevAdminAnyPeer: cfg.DevAdminAnyPeer,
 		Now:             opts.Now,

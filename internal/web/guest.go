@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
+	"github.com/igrybkov/ha-guest-access/internal/audit"
 	"github.com/igrybkov/ha-guest-access/internal/model"
 )
 
@@ -102,6 +103,11 @@ type guestReq struct {
 	link   model.Link
 	label  string // password label, the guest's name; "" without passwords
 	device string // device id from the DeviceGate
+
+	// sessionReason says why session() failed: no_session or
+	// session_invalid.
+	sessionReason string
+	audit         guestAudit
 }
 
 // ipKey is the client IP as a limiter key.
@@ -116,6 +122,7 @@ func (g *guestReq) ipKey() string {
 func (g *guestReq) allowPreauth() bool {
 	ok, retry := g.lim.preauth.Allow(g.ipKey(), g.now)
 	if !ok {
+		g.rateLimited(reasonLimitPreauth)
 		tooMany(g.w, retry)
 	}
 	return ok
@@ -199,6 +206,7 @@ func (s *Server) guestBase(next http.Handler) http.Handler {
 		g := &guestReq{w: w, now: now, st: st, lim: s.lim, client: c, nets: nets}
 		g.r = r.WithContext(context.WithValue(r.Context(), guestKey{}, g))
 		next.ServeHTTP(w, g.r)
+		s.emitGuest(g)
 	})
 }
 
@@ -235,6 +243,7 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 	authed := active && s.session(g)
 	if route.kind != kindOpen && authed {
 		if ok, retry := g.lim.authed.Allow(link.ID+"|"+g.ipKey(), g.now); !ok {
+			g.rateLimited(reasonLimitActions)
 			tooMany(w, retry)
 			return
 		}
@@ -251,16 +260,19 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 		return
 	}
 	if !active {
+		g.deny(reasonInactive)
 		writeError(w, http.StatusGone, msgGone)
 		return
 	}
 	if route.kind != kindOpen && !authed {
+		g.deny(g.sessionReason)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": msgPassword, "need": "password"})
 		return
 	}
 	if route.kind == kindGuest {
 		dev, ok := s.devices.Admit(w, r, link, g.client, g.label)
 		if !ok {
+			g.deny(reasonDevice)
 			return
 		}
 		g.device = dev
@@ -272,14 +284,17 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 // together has missed too often.
 func (s *Server) miss(g *guestReq) {
 	if ok, retry := g.lim.missIP.Allow(g.ipKey(), g.now); !ok {
+		g.rateLimited(reasonLimitMisses)
 		tooMany(g.w, retry)
 		return
 	}
 	if ok, retry := g.lim.missAll.Allow(missGlobalKey, g.now); !ok {
 		s.log.Debug("slug miss cap reached", "client", g.ipKey())
+		g.rateLimited(reasonLimitMisses)
 		tooMany(g.w, retry)
 		return
 	}
+	g.note(auditEventSlugMiss, audit.ResultDenied, "")
 	writeError(g.w, http.StatusNotFound, msgNotFound)
 }
 
@@ -287,14 +302,16 @@ func (s *Server) miss(g *guestReq) {
 // passwords go: the link has none, or the session cookie names a
 // password the link still has. It sets g.label.
 func (s *Server) session(g *guestReq) bool {
-	g.label = ""
+	g.label, g.sessionReason = "", ""
 	if len(g.link.Passwords) == 0 {
 		return true
 	}
 	c, err := g.r.Cookie(access.LinkCookie(sessionCookie, g.link.ID))
 	if err != nil {
+		g.sessionReason = reasonNoSession
 		return false
 	}
+	g.sessionReason = reasonSessionInvalid
 	pwID, ok := s.deps.Signer.VerifySession(g.link.ID, c.Value, g.now)
 	if !ok {
 		return false
@@ -303,6 +320,7 @@ func (s *Server) session(g *guestReq) bool {
 	if !ok {
 		return false
 	}
+	g.sessionReason = ""
 	g.label = pw.Label
 	return true
 }
@@ -312,10 +330,12 @@ func (s *Server) session(g *guestReq) bool {
 // refused too.
 func checkPost(g *guestReq) bool {
 	if !isJSON(g.r) {
+		g.deny(reasonContentType)
 		writeError(g.w, http.StatusUnsupportedMediaType, msgJSONOnly)
 		return false
 	}
 	if !sameOrigin(g.r) {
+		g.deny(reasonOrigin)
 		writeError(g.w, http.StatusForbidden, msgOrigin)
 		return false
 	}

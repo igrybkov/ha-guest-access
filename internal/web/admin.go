@@ -7,6 +7,7 @@ import (
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
 	"github.com/igrybkov/ha-guest-access/internal/approval"
+	"github.com/igrybkov/ha-guest-access/internal/audit"
 	"github.com/igrybkov/ha-guest-access/internal/links"
 	"github.com/igrybkov/ha-guest-access/internal/model"
 	"github.com/igrybkov/ha-guest-access/internal/store"
@@ -65,12 +66,13 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.HandleFunc("GET /api/labels", s.listLabels)
 	mux.HandleFunc("GET /api/devices", s.listDevices)
 	mux.HandleFunc("GET /api/diagnostics", s.getDiagnostics)
+	mux.HandleFunc("GET /api/audit", s.getAudit)
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "no such endpoint")
 	})
 	mux.Handle("/", adminUI())
-	return s.recoverPanics(s.adminGuard(mux))
+	return s.recoverPanics(s.adminGuard(s.auditAdmin(mux)))
 }
 
 // adminGuard runs the peer check, the admin limiter and the JSON rule.
@@ -84,6 +86,12 @@ func (s *Server) adminGuard(next http.Handler) http.Handler {
 		peer := peerAddr(r.RemoteAddr)
 		if !s.deps.DevAdminAnyPeer && peer != supervisorIngress {
 			s.log.Warn("admin: refused peer", "peer", r.RemoteAddr, "path", r.URL.Path)
+			if ok, skipped := s.auditThrottle.Allow("admin.refused|"+peer.String(), s.now()); ok {
+				rec := audit.Record{Time: s.now(), Event: "admin.refused", Result: audit.ResultDenied, Reason: "peer",
+					Method: r.Method, Route: routeLabel(r.URL.Path), Count: skipped}
+				setClient(&rec, access.Client{IP: peer}, peer)
+				s.audit.Log(rec)
+			}
 			writeError(w, http.StatusForbidden, "access only through Home Assistant")
 			return
 		}
@@ -144,6 +152,7 @@ func (s *Server) writeAdminErr(w http.ResponseWriter, r *http.Request, err error
 	status := http.StatusInternalServerError
 	switch {
 	case errors.As(err, &verr):
+		adminAudit(r).Reason = "invalid"
 		writeJSON(w, http.StatusBadRequest, adminBody{Error: "invalid", Problems: verr.Problems})
 		return
 	case errors.Is(err, links.ErrNotFound), errors.Is(err, errNoTemplate), errors.Is(err, approval.ErrUnknownRequest):
@@ -155,6 +164,7 @@ func (s *Server) writeAdminErr(w http.ResponseWriter, r *http.Request, err error
 	case errors.Is(err, store.ErrNewerVersion):
 		status = http.StatusForbidden
 	}
+	adminAudit(r).Reason = adminReason(err, status)
 	if status >= 500 {
 		s.log.Error("admin: request failed", "method", r.Method, "path", r.URL.Path, "err", err)
 	}

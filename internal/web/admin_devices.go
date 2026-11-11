@@ -46,6 +46,11 @@ func (s *Server) decidePending(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "approve must be true or false")
 		return
 	}
+	rec := adminAudit(r)
+	rec.RequestID, rec.Action = r.PathValue("id"), "deny"
+	if *b.Approve {
+		rec.Action = "approve"
+	}
 	if err := s.devices.Decide(r.PathValue("id"), *b.Approve); err != nil {
 		s.writeAdminErr(w, r, err)
 		return
@@ -60,6 +65,11 @@ func (s *Server) decidePending(w http.ResponseWriter, r *http.Request) {
 // removeDevice is DELETE /api/links/{id}/devices/{did}. The device's
 // cookie fails on its next request, and its open streams end.
 func (s *Server) removeDevice(w http.ResponseWriter, r *http.Request) {
+	if l, err := s.deps.Links.Get(r.PathValue("id")); err == nil {
+		if d, ok := l.Device(r.PathValue("did")); ok {
+			adminAudit(r).DeviceLabel = d.Label
+		}
+	}
 	if err := s.devices.RemoveDevice(r.PathValue("id"), r.PathValue("did")); err != nil {
 		s.writeAdminErr(w, r, err)
 		return

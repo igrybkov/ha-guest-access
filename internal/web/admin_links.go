@@ -120,6 +120,8 @@ func (s *Server) createLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("link created", "link", l.ID, "name", l.Name)
+	rec := adminAudit(r)
+	rec.LinkID, rec.LinkName = l.ID, l.Name
 	s.writeLink(w, r, http.StatusCreated, l)
 }
 
@@ -141,6 +143,9 @@ func (s *Server) updateLink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deleteLink(w http.ResponseWriter, r *http.Request) {
+	if l, err := s.deps.Links.Get(r.PathValue("id")); err == nil {
+		adminAudit(r).LinkName = l.Name
+	}
 	if err := s.deps.Links.Delete(r.PathValue("id")); err != nil {
 		s.writeAdminErr(w, r, err)
 		return
@@ -207,10 +212,17 @@ func (s *Server) addPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("link password added", "link", r.PathValue("id"), "label", pw.Label)
+	rec := adminAudit(r)
+	rec.Target, rec.PasswordLabel = pw.ID, pw.Label
 	writeJSON(w, http.StatusCreated, pw)
 }
 
 func (s *Server) removePassword(w http.ResponseWriter, r *http.Request) {
+	if l, err := s.deps.Links.Get(r.PathValue("id")); err == nil {
+		if pw, ok := l.Password(r.PathValue("pid")); ok {
+			adminAudit(r).PasswordLabel = pw.Label
+		}
+	}
 	if err := s.deps.Links.RemovePassword(r.PathValue("id"), r.PathValue("pid")); err != nil {
 		s.writeAdminErr(w, r, err)
 		return

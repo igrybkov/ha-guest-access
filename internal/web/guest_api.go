@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
+	"github.com/igrybkov/ha-guest-access/internal/audit"
 	"github.com/igrybkov/ha-guest-access/internal/authz"
 	"github.com/igrybkov/ha-guest-access/internal/catalog"
 	"github.com/igrybkov/ha-guest-access/internal/ha"
@@ -37,26 +38,32 @@ func (s *Server) guestPassword(g *guestReq) {
 		return
 	}
 	if len(g.link.Passwords) == 0 || body.Password == "" || len(body.Password) > access.MaxPasswordLen {
+		g.deny(reasonBadRequest)
 		writeError(g.w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 	ip := g.client.IP
 	if ok, retry := g.lim.guard.Allow(g.link.ID, ip, g.now); !ok {
+		g.deny(reasonLocked)
 		tooMany(g.w, retry)
 		return
 	}
 	id, ok := access.MatchPassword(g.link.Passwords, body.Password)
 	if !ok {
 		if g.lim.guard.Fail(g.link.ID, ip, g.now) {
+			g.note("guest.lockout", audit.ResultDenied, reasonWrongPassword)
 			s.log.Warn("password form locked", "link", g.link.ID, "client", g.ipKey())
 			s.fire(g.r.Context(), eventLockout, map[string]any{
 				"link_id": g.link.ID, "link_name": g.link.Name, "ip": g.ipKey(),
 			})
 		}
+		g.note("guest.password.fail", audit.ResultDenied, reasonWrongPassword)
 		writeError(g.w, http.StatusForbidden, msgWrongPass)
 		return
 	}
 	pw, _ := g.link.Password(id)
+	g.label = pw.Label
+	g.note("guest.password.ok", audit.ResultAllowed, "")
 	setCookie(g, sessionCookie, s.deps.Signer.SignSession(g.link.ID, id, g.link.ValidUntil), g.link.ValidUntil)
 	s.log.Info("guest signed in", "link", g.link.ID, "guest", pw.Label)
 	writeJSON(g.w, http.StatusOK, map[string]bool{"ok": true})
@@ -67,8 +74,10 @@ func (s *Server) decodeGuest(g *guestReq, v any) bool {
 	err := decodeBody(g.w, g.r, s.deps.Options.GuestBodyBytes, v)
 	switch {
 	case errors.Is(err, errBodyTooLarge):
+		g.deny(reasonTooLarge)
 		writeError(g.w, http.StatusRequestEntityTooLarge, msgTooLarge)
 	case err != nil:
+		g.deny(reasonBadRequest)
 		writeError(g.w, http.StatusBadRequest, msgBadRequest)
 	}
 	return err == nil
@@ -342,9 +351,17 @@ func (s *Server) guestAct(g *guestReq) {
 	if !ok {
 		return
 	}
+	// The record names the entity, the action and the data keys, never
+	// the data values.
+	defer func() {
+		if g.audit.set {
+			g.audit.rec.EntityID, g.audit.rec.Action, g.audit.rec.DataKeys = req.EntityID, req.Action, dataKeys(req.Data)
+		}
+	}()
 	ctx := g.r.Context()
 	grants, _, err := s.resolveLink(ctx, g.link)
 	if err != nil {
+		g.deny(reasonHAError)
 		s.log.Warn("guest act: inventory", "err", err)
 		writeError(g.w, http.StatusServiceUnavailable, msgHAFailed)
 		return
@@ -357,7 +374,11 @@ func (s *Server) guestAct(g *guestReq) {
 			st = &x
 		}
 	}
-	src, call, err := authz.Check(grants, req, st, s.accessFor(g).allow)
+	acc := s.accessFor(g)
+	src, call, err := authz.Check(grants, req, st, acc.allow)
+	if err != nil {
+		g.deny(actDenial(err, grants, req, acc))
+	}
 	switch {
 	case errors.Is(err, authz.ErrBadData):
 		writeError(g.w, http.StatusBadRequest, msgBadRequest)
@@ -370,12 +391,15 @@ func (s *Server) guestAct(g *guestReq) {
 	refund, err := s.deps.Links.Consume(g.link.ID, call.EntityID, req.Action, g.now)
 	switch {
 	case errors.Is(err, links.ErrUsed):
+		g.deny(reasonOneTimeUsed)
 		writeError(g.w, http.StatusConflict, msgUsed)
 		return
 	case errors.Is(err, links.ErrInactive), errors.Is(err, links.ErrNotFound):
+		g.deny(reasonInactive)
 		writeError(g.w, http.StatusGone, msgGone)
 		return
 	case err != nil:
+		g.deny(reasonInternal)
 		s.log.Error("guest act: record use", "link", g.link.ID, "err", err)
 		writeError(g.w, http.StatusInternalServerError, msgInternal)
 		return
@@ -388,10 +412,12 @@ func (s *Server) guestAct(g *guestReq) {
 	if _, err := s.deps.HA.CallService(hctx, call.Domain, call.Service, call.Data,
 		&ha.Target{EntityID: []string{call.EntityID}}, false); err != nil {
 		refund()
+		g.deny(reasonHAError)
 		s.log.Warn("guest action failed", "link", g.link.ID, "guest", g.label, "entity_id", call.EntityID, "action", req.Action, "err", err)
 		writeError(g.w, http.StatusBadGateway, msgHAFailed)
 		return
 	}
+	g.note("guest.act.allowed", audit.ResultAllowed, "")
 	s.log.Info("guest action", "link", g.link.ID, "guest", g.label, "entity_id", call.EntityID,
 		"action", req.Action, "template", src.Template, "client", g.ipKey())
 	s.fire(ctx, eventAction, map[string]any{
@@ -427,12 +453,20 @@ func (s *Server) guestWhere(g *guestReq) {
 		return
 	}
 	if b.Lat == nil || b.Lon == nil || b.Accuracy == nil ||
-		!finiteIn(*b.Lat, -90, 90) || !finiteIn(*b.Lon, -180, 180) || !finiteIn(*b.Accuracy, 0, float64(s.deps.Options.MaxAccuracyM)) {
+		!finiteIn(*b.Lat, -90, 90) || !finiteIn(*b.Lon, -180, 180) || !finiteIn(*b.Accuracy, 0, math.MaxFloat64) {
+		g.deny(reasonBadRequest)
+		writeError(g.w, http.StatusBadRequest, msgBadRequest)
+		return
+	}
+	if *b.Accuracy > float64(s.deps.Options.MaxAccuracyM) {
+		acc := int(math.Round(*b.Accuracy))
+		g.deny(reasonAccuracyTooLow).AccuracyM = &acc
 		writeError(g.w, http.StatusBadRequest, msgBadRequest)
 		return
 	}
 	inv, err := s.deps.Inventory.Inventory(g.r.Context())
 	if err != nil {
+		g.deny(reasonHAError)
 		s.log.Warn("guest where: inventory", "err", err)
 		writeError(g.w, http.StatusServiceUnavailable, msgHAFailed)
 		return
@@ -442,6 +476,9 @@ func (s *Server) guestWhere(g *guestReq) {
 	exp := g.now.Add(s.deps.Options.NearTTL)
 	setCookie(g, nearCookie, s.deps.Signer.SignNear(g.link.ID, m, exp), exp)
 	s.log.Info("guest location", "link", g.link.ID, "guest", g.label, "distance_m", math.Round(d/10)*10)
+	dist, acc := int(math.Ceil(d)), int(math.Round(*b.Accuracy))
+	rec := g.note("guest.near.ok", audit.ResultOK, "")
+	rec.DistanceM, rec.AccuracyM = &dist, &acc
 	writeJSON(g.w, http.StatusOK, map[string]any{"ok": true, "expires_at": exp})
 }
 

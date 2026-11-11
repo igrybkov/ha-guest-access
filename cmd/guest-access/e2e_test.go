@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -85,12 +86,14 @@ type app struct {
 	done    chan error
 	stop    context.CancelFunc
 	stopped bool
+	dataDir string
 }
 
 type appOpts struct {
 	options    func(*config.Options)
 	devAnyPeer *bool
 	ma         ma.Client
+	logger     *slog.Logger // nil discards
 }
 
 // testClient sends no cookies of its own and does not pool connections,
@@ -145,9 +148,9 @@ func startApp(t *testing.T, o appOpts) *app {
 	now.Store(&start)
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &app{t: t, admin: "http://" + adminLn.Addr().String(), guest: "http://" + guestLn.Addr().String(),
-		ha: srv, fake: fake, failHA: failHA, now: now, done: make(chan error, 1), stop: cancel}
+		ha: srv, fake: fake, failHA: failHA, now: now, done: make(chan error, 1), stop: cancel, dataDir: dataDir}
 	ro := options{
-		Logger: slog.New(slog.DiscardHandler),
+		Logger: cmp.Or(o.logger, slog.New(slog.DiscardHandler)),
 		Now:    func() time.Time { return *now.Load() },
 	}
 	if o.ma != nil {

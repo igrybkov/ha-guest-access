@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
+	"github.com/igrybkov/ha-guest-access/internal/audit"
 	"github.com/igrybkov/ha-guest-access/internal/ha"
 	"github.com/igrybkov/ha-guest-access/internal/links"
 	"github.com/igrybkov/ha-guest-access/internal/model"
@@ -93,6 +94,7 @@ var (
 
 // LinkStore is the part of *links.Store the manager uses.
 type LinkStore interface {
+	Get(linkID string) (model.Link, error)
 	AddDevice(linkID string, d model.LinkDevice, maxDevices int) (model.LinkDevice, error)
 	ClaimDevice(linkID string, d model.LinkDevice, maxDevices int) (model.LinkDevice, error)
 	RemoveDevice(linkID, deviceID string) error
@@ -129,6 +131,8 @@ type Options struct {
 	MaxBodyBytes int64
 	// EventTimeout caps one FireEvent call.
 	EventTimeout time.Duration
+	// Audit records device.* events. nil records nothing.
+	Audit *audit.Logger
 }
 
 // Request is a pending device request, as the admin API shows it.
@@ -165,6 +169,7 @@ const (
 type request struct {
 	Request
 	secret   string // value of RequestCookie
+	linkName string // for audit records
 	state    state
 	deviceID string // set when approved
 }
@@ -337,6 +342,8 @@ func (m *Manager) RequestAccess(w http.ResponseWriter, r *http.Request, link mod
 		case err == nil:
 			m.mu.Unlock()
 			m.log.Info("device claimed link", "link", link.ID, "device", d.ID, "label", label, "ua", device)
+			m.record(audit.Record{Event: "device.claimed", Result: audit.ResultAllowed, By: model.ApprovedByClaim,
+				LinkID: link.ID, LinkName: link.Name, DeviceID: d.ID, DeviceLabel: label, PasswordLabel: label, Device: device}, c)
 			m.setDeviceCookie(w, link, c, d.ID)
 			writeJSON(w, http.StatusOK, map[string]string{"status": "approved"})
 			return
@@ -349,15 +356,23 @@ func (m *Manager) RequestAccess(w http.ResponseWriter, r *http.Request, link mod
 		// Another device won the claim; this one asks like any other.
 	}
 
-	req, retry, err := m.newRequest(link.ID, label, device, c, now)
+	req, retry, err := m.newRequest(link, label, device, c, now)
 	m.mu.Unlock()
 	if err != nil {
 		m.log.Info("device request refused", "link", link.ID, "label", label, "reason", err)
+		reason := "too_many_pending"
+		if errors.Is(err, ErrTooManyEvents) {
+			reason = "too_many_events"
+		}
+		m.record(audit.Record{Event: "device.request", Result: audit.ResultDenied, Reason: reason,
+			LinkID: link.ID, LinkName: link.Name, PasswordLabel: label, Device: device}, c)
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"status": "try_later"})
 		return
 	}
 	m.log.Info("device request", "link", link.ID, "request", req.ID, "code", req.Code, "label", label, "ua", device, "ip", req.IP)
+	m.record(audit.Record{Event: "device.request", Result: audit.ResultOK, LinkID: link.ID, LinkName: link.Name,
+		PasswordLabel: label, Device: device, RequestID: req.ID, Code: req.Code}, c)
 	http.SetCookie(w, &http.Cookie{
 		Name: RequestCookieName(link.ID), Value: req.secret, Path: access.GuestCookiePath,
 		MaxAge: int(m.opts.PendingTTL / time.Second), Expires: req.ExpiresAt,
@@ -369,7 +384,8 @@ func (m *Manager) RequestAccess(w http.ResponseWriter, r *http.Request, link mod
 
 // newRequest adds a pending request, or says why not and in how many
 // seconds to try again. It requires m.mu.
-func (m *Manager) newRequest(linkID, label, device string, c access.Client, now time.Time) (*request, int, error) {
+func (m *Manager) newRequest(link model.Link, label, device string, c access.Client, now time.Time) (*request, int, error) {
+	linkID := link.ID
 	var pending []*request
 	for _, req := range m.byID {
 		if req.LinkID == linkID && req.state == statePending {
@@ -393,7 +409,8 @@ func (m *Manager) newRequest(linkID, label, device string, c access.Client, now 
 			ID: randomHex(), LinkID: linkID, Code: m.newCode(linkID), Label: label, Device: device,
 			CreatedAt: now, ExpiresAt: now.Add(m.opts.PendingTTL),
 		},
-		secret: randomHex(),
+		secret:   randomHex(),
+		linkName: link.Name,
 	}
 	if c.IP.IsValid() {
 		req.IP = c.IP.String()
@@ -548,6 +565,13 @@ func (m *Manager) Decide(requestID string, approve bool) error {
 func (m *Manager) RemoveDevice(linkID, deviceID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	rec := audit.Record{Event: "device.revoked", Result: audit.ResultOK, LinkID: linkID, DeviceID: deviceID}
+	if l, err := m.opts.Links.Get(linkID); err == nil {
+		rec.LinkName = l.Name
+		if d, ok := l.Device(deviceID); ok {
+			rec.DeviceLabel, rec.Device = d.Label, d.Device
+		}
+	}
 	if err := m.opts.Links.RemoveDevice(linkID, deviceID); err != nil {
 		return err
 	}
@@ -557,6 +581,7 @@ func (m *Manager) RemoveDevice(linkID, deviceID string) error {
 		}
 	}
 	m.log.Info("device revoked", "link", linkID, "device", deviceID)
+	m.record(rec, access.Client{})
 	return nil
 }
 
@@ -566,6 +591,10 @@ func (m *Manager) RemoveDevice(linkID, deviceID string) error {
 func (m *Manager) ResetDevices(linkID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	rec := audit.Record{Event: "device.reset", Result: audit.ResultOK, LinkID: linkID}
+	if l, err := m.opts.Links.Get(linkID); err == nil {
+		rec.LinkName = l.Name
+	}
 	if err := m.opts.Links.ResetDevices(linkID); err != nil {
 		return err
 	}
@@ -575,6 +604,7 @@ func (m *Manager) ResetDevices(linkID string) error {
 		}
 	}
 	m.log.Info("devices reset", "link", linkID)
+	m.record(rec, access.Client{})
 	return nil
 }
 
@@ -622,6 +652,7 @@ func (m *Manager) decide(requestID string, approve bool, by, onlyLink string) er
 	if !approve {
 		req.state, req.ExpiresAt = stateDenied, now.Add(m.opts.PendingTTL)
 		m.log.Info("device denied", "link", req.LinkID, "request", req.ID, "by", by)
+		m.recordDecision("device.denied", audit.ResultDenied, req, by, "")
 		return nil
 	}
 	d, err := m.opts.Links.AddDevice(req.LinkID, model.LinkDevice{
@@ -632,7 +663,28 @@ func (m *Manager) decide(requestID string, approve bool, by, onlyLink string) er
 	}
 	req.state, req.deviceID, req.ExpiresAt = stateApproved, d.ID, now.Add(m.opts.PendingTTL)
 	m.log.Info("device approved", "link", req.LinkID, "request", req.ID, "device", d.ID, "by", by)
+	m.recordDecision("device.approved", audit.ResultAllowed, req, by, d.ID)
 	return nil
+}
+
+// record sends r to the audit log with the client c, when there is one.
+func (m *Manager) record(r audit.Record, c access.Client) {
+	r.Time = m.now()
+	if c.IP.IsValid() {
+		r.ClientIP = c.IP.String()
+	}
+	r.ViaProxy, r.Unresolved = c.ViaProxy, c.Unresolved
+	m.opts.Audit.Log(r)
+}
+
+// recordDecision records a decision on req. The client fields are the
+// requester's, from when it asked.
+func (m *Manager) recordDecision(event, result string, req *request, by, deviceID string) {
+	m.opts.Audit.Log(audit.Record{
+		Time: m.now(), Event: event, Result: result, By: by,
+		LinkID: req.LinkID, LinkName: req.linkName, PasswordLabel: req.Label, DeviceLabel: req.Label, DeviceID: deviceID,
+		Device: req.Device, ClientIP: req.IP, RequestID: req.ID, Code: req.Code,
+	})
 }
 
 // handoff gives the browser of an approved request its device cookie and

@@ -21,6 +21,7 @@ import (
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
 	"github.com/igrybkov/ha-guest-access/internal/approval"
+	"github.com/igrybkov/ha-guest-access/internal/audit"
 	"github.com/igrybkov/ha-guest-access/internal/config"
 	"github.com/igrybkov/ha-guest-access/internal/ha"
 	"github.com/igrybkov/ha-guest-access/internal/links"
@@ -90,6 +91,9 @@ type Deps struct {
 	// It may return a nil Client: MA is off.
 	NewMA func(url, token string, timeout time.Duration) (ma.Client, error)
 
+	// Audit records security events. nil records nothing.
+	Audit *audit.Logger
+
 	// DevAdminAnyPeer lets any peer reach the admin port (make run-dev).
 	DevAdminAnyPeer bool
 
@@ -126,8 +130,11 @@ type Server struct {
 	nets    []netip.Prefix // local networks
 
 	streams streamCounter
-	diag    *diagRing
-	assets  *assetSet
+	audit   *audit.Logger
+	// auditThrottle holds back records a client can cause in bulk.
+	auditThrottle *audit.Throttle
+	diag          *diagRing
+	assets        *assetSet
 }
 
 // New returns a Server.
@@ -138,8 +145,11 @@ func New(d Deps) *Server {
 		devices: d.Devices,
 		newMA:   d.NewMA,
 		streams: streamCounter{open: map[string]int{}},
-		diag:    newDiagRing(max(1, d.Options.DiagRequests)),
-		assets:  loadAssets(),
+		audit:   d.Audit,
+
+		auditThrottle: audit.NewThrottle(auditThrottlePeriod),
+		diag:          newDiagRing(max(1, d.Options.DiagRequests)),
+		assets:        loadAssets(),
 	}
 	if s.log == nil {
 		s.log = slog.Default()
@@ -193,6 +203,7 @@ func New(d Deps) *Server {
 			PendingTTL: a.PendingTTL, MaxPending: a.MaxPending, MaxDevices: a.MaxDevices,
 			EventsPerHour: a.EventsPerHour, TouchThrottle: a.TouchThrottle,
 			MaxBodyBytes: s.deps.Options.GuestBodyBytes, EventTimeout: s.deps.Options.HAEventTimeout,
+			Audit: d.Audit,
 		})
 	}
 	return s

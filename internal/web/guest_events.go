@@ -41,6 +41,7 @@ func (s *Server) guestEvents(g *guestReq) {
 		return
 	}
 	if !s.streams.acquire(g.link.ID, g.lim.streams) {
+		g.rateLimited(reasonLimitStreams)
 		tooMany(g.w, s.deps.Options.StreamRetry)
 		return
 	}

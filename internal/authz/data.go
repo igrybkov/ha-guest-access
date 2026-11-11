@@ -29,10 +29,30 @@ var targetKeys = []string{"entity_id", "area_id", "device_id", "label_id", "floo
 //     cross, every value is refused.
 //   - Bools must be bool. Strings must be one of Enum.
 //   - Anything else (arrays, objects, null) is refused.
+//
+// DataError is the error for data that does not fit the catalog. It
+// matches ErrBadData with errors.Is. Key is the first bad key, or "" when
+// the action takes no data at all. Key comes from the guest; cap it
+// before it goes in a log.
+type DataError struct {
+	Key string
+	Msg string
+}
+
+func (e *DataError) Error() string {
+	if e.Key == "" {
+		return ErrBadData.Error() + ": " + e.Msg
+	}
+	return ErrBadData.Error() + ": " + quote(e.Key) + ": " + e.Msg
+}
+
+// Unwrap makes errors.Is(err, ErrBadData) true.
+func (e *DataError) Unwrap() error { return ErrBadData }
+
 func checkData(act catalog.Action, req Request, st *model.State) (map[string]any, error) {
 	out := make(map[string]any, len(req.Data))
 	if model.Domain(act.ID) == "script" && len(req.Data) > 0 {
-		return nil, fmt.Errorf("%w: scripts take no data", ErrBadData)
+		return nil, &DataError{Msg: "scripts take no data"}
 	}
 	keys := make([]string, 0, len(req.Data))
 	for k := range req.Data {
@@ -41,15 +61,15 @@ func checkData(act catalog.Action, req Request, st *model.State) (map[string]any
 	slices.Sort(keys) // the first bad key is the same on every call
 	for _, k := range keys {
 		if slices.Contains(targetKeys, k) {
-			return nil, fmt.Errorf("%w: %s: the target is set by the server", ErrBadData, quote(k))
+			return nil, &DataError{Key: k, Msg: "the target is set by the server"}
 		}
 		f, ok := act.Data[k]
 		if !ok {
-			return nil, fmt.Errorf("%w: %s: unknown key", ErrBadData, quote(k))
+			return nil, &DataError{Key: k, Msg: "unknown key"}
 		}
 		v, err := checkValue(f, req.Data[k], req.EntityID, st)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %s: %v", ErrBadData, quote(k), err)
+			return nil, &DataError{Key: k, Msg: err.Error()}
 		}
 		out[k] = v
 	}
