@@ -52,6 +52,10 @@ type Set struct {
 	onDisk map[string]int         // version of each file on disk, at the last read
 	err    error                  // why the files on disk are not usable as they are
 	rev    uint64                 // bumped when tree changes
+
+	// writeFile writes one file. It is writeFileAtomic, swapped in tests
+	// to make a write fail.
+	writeFile func(path string, data []byte, mode os.FileMode) error
 }
 
 // SetOptions configure a Set.
@@ -84,7 +88,7 @@ func OpenSet(dir string, o SetOptions) *Set {
 	if o.FileMode == 0 {
 		o.FileMode = 0o644
 	}
-	return &Set{dir: dir, current: o.Current, names: slices.Clone(o.Files), steps: o.Steps, mode: o.FileMode, log: log}
+	return &Set{dir: dir, current: o.Current, names: slices.Clone(o.Files), steps: o.Steps, mode: o.FileMode, log: log, writeFile: writeFileAtomic}
 }
 
 // Dir returns the directory of the set.
@@ -204,8 +208,14 @@ func (s *Set) get(name string) (*yaml.Node, error) {
 
 // put stores node as the content of a file and writes it. When disk lags
 // the migration, it writes every file of the set first, then deletes the
-// obsolete ones. It requires s.mu.
-func (s *Set) put(name string, node *yaml.Node) error {
+// obsolete ones. The named file is written last, so a failed flush never
+// leaves the new content on disk.
+//
+// On any error, memory goes back to what disk holds: the old content is
+// restored if the named file was not written, and the next load re-reads
+// every file. So a failed save is never visible to a later Load. It
+// requires s.mu.
+func (s *Set) put(name string, node *yaml.Node) (err error) {
 	s.load()
 	if s.err != nil {
 		return fmt.Errorf("not saved: %w", s.err)
@@ -213,12 +223,32 @@ func (s *Set) put(name string, node *yaml.Node) error {
 	if s.tree == nil {
 		s.tree = &Tree{docs: map[string]*yaml.Node{}, versions: map[string]int{}}
 	}
+	prevNode, hadPrev := s.tree.docs[name]
+	prevVer := s.tree.versions[name]
+	wroteName := false
+	defer func() {
+		if err == nil {
+			return
+		}
+		if !wroteName {
+			if hadPrev {
+				s.tree.docs[name], s.tree.versions[name] = prevNode, prevVer
+			} else {
+				delete(s.tree.docs, name)
+				delete(s.tree.versions, name)
+			}
+		}
+		s.read = false // disk is the truth; read it again on the next load
+		s.rev++
+	}()
+
 	setVersion(node, s.current)
 	s.tree.docs[name], s.tree.versions[name] = node, s.current
 	s.rev++
 	write := []string{name}
 	if s.needsFlush() {
-		write = s.tree.Names()
+		write = slices.DeleteFunc(s.tree.Names(), func(n string) bool { return n == name })
+		write = append(write, name)
 	}
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
@@ -228,10 +258,11 @@ func (s *Set) put(name string, node *yaml.Node) error {
 		if err != nil {
 			return fmt.Errorf("encode %s: %w", n, err)
 		}
-		if err := writeFileAtomic(filepath.Join(s.dir, n), data, s.mode); err != nil {
+		if err := s.writeFile(filepath.Join(s.dir, n), data, s.mode); err != nil {
 			return err
 		}
 		s.onDisk[n] = s.current
+		wroteName = n == name
 	}
 	if len(write) > 1 {
 		for n := range s.onDisk {
