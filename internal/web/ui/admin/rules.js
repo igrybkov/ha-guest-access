@@ -5,7 +5,7 @@
 import { h, fill, get, check, localEnabled, docsLink } from './dom.js';
 import {
   paths, SELECTOR_KEYS, patternProblem, searchOptions, pickedEntities, actionChoices,
-  domainOf, ruleState, buildRule, groupProblems, isExact,
+  domainOf, ruleState, buildRule, groupProblems, isExact, effectiveOrder, moveItem,
 } from './lib.js';
 
 // ---- Problem slots ----
@@ -125,6 +125,49 @@ function selectorBox(title, sel, inSelect, inv, base, slots, onChange) {
     SELECTOR_KEYS.map((k) => h('div', {},
       patternList({ values: sel[k], options: optionsFor(inv, k), inSelect, label: KEY_LABELS[k], onChange }),
       slots.slot(`${base}.${k}`))));
+}
+
+// ---- Entity order ----
+
+// orderEditor lists entities in guest page order with up and down
+// buttons. form.entity_order is the saved order. set() redraws the list
+// from the preview's entities ([{entity_id, name}]). A move writes the
+// whole shown order into form.entity_order. Order changes no grant, so a
+// move needs no new preview.
+export function orderEditor(form, empty) {
+  const box = h('div', { class: 'stack tight' });
+  let shown = [];
+  // A redraw drops focus, so give it back to the button with the same
+  // label. That is the same button on the moved row.
+  const draw = (focusLabel) => {
+    if (!shown.length) {
+      fill(box, h('p', { class: 'muted small', text: empty }));
+      return;
+    }
+    const n = shown.length;
+    const move = (i, d) => (ev) => {
+      const label = ev.currentTarget.getAttribute('aria-label');
+      const ids = moveItem(shown.map((e) => e.entity_id), i, d);
+      form.entity_order = ids;
+      shown = effectiveOrder(ids, shown);
+      draw(label);
+    };
+    fill(box, ...shown.map((e, i) => h('div', { class: 'tpl-row' },
+      h('span', { class: 'check' }, h('span', { text: e.name }), h('code', { class: 'muted small', text: e.entity_id })),
+      n > 1 && h('span', { class: 'tpl-move' },
+        h('button', { type: 'button', class: 'icon', text: '↑', disabled: i === 0, 'aria-label': `Move ${e.name} up`, onclick: move(i, -1) }),
+        h('button', { type: 'button', class: 'icon', text: '↓', disabled: i === n - 1, 'aria-label': `Move ${e.name} down`, onclick: move(i, 1) })))));
+    const btn = focusLabel && [...box.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === focusLabel);
+    if (btn && !btn.disabled) btn.focus();
+  };
+  return {
+    el: box,
+    set(entities) {
+      const active = box.contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
+      shown = effectiveOrder(form.entity_order, entities);
+      draw(active);
+    },
+  };
 }
 
 // LOCAL_LIMITS is the short warning next to a local-only choice.

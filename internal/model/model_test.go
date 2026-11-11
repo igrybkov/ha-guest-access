@@ -158,6 +158,11 @@ func TestTemplateValidate(t *testing.T) {
 		{"bad access", Template{ID: "x", Name: "x", Access: &Access{NearHomeM: -5}, Rules: []Rule{rule}}, []string{"access.near_home_m"}},
 		{"bad rule path", Template{ID: "x", Name: "x", Rules: []Rule{rule, {Select: Selector{Entities: []string{"*"}}, Actions: []string{"light.turn_on"}}}},
 			[]string{"rules[1].select.entities[0]"}},
+		{"entity order", Template{ID: "x", Name: "x", Rules: []Rule{rule}, EntityOrder: []string{"light.lamp", "sensor.1st_floor", "light.gone"}}, nil},
+		{"entity order bad shape", Template{ID: "x", Name: "x", Rules: []Rule{rule}, EntityOrder: []string{"light.lamp", "", "lamp", "light.*", "Light.Lamp", " light.x"}},
+			[]string{"entity_order[1]", "entity_order[2]", "entity_order[3]", "entity_order[4]", "entity_order[5]"}},
+		{"entity order twice", Template{ID: "x", Name: "x", Rules: []Rule{rule}, EntityOrder: []string{"light.lamp", "switch.fan", "light.lamp"}},
+			[]string{"entity_order[2]"}},
 	} {
 		wantProblems(t, tc.name, tc.t.Validate(), tc.paths...)
 	}
@@ -217,6 +222,9 @@ func TestLinkValidate(t *testing.T) {
 		{"ok", ok, nil},
 		{"extra only", with(func(l *Link) { l.TemplateIDs = nil; l.Extra = []Rule{rule} }), nil},
 		{"window", with(func(l *Link) { l.ValidFrom = now }), nil},
+		{"entity order", with(func(l *Link) { l.EntityOrder = []string{"switch.heater", "light.gone"} }), nil},
+		{"entity order bad shape", with(func(l *Link) { l.EntityOrder = []string{"heater"} }), []string{"entity_order[0]"}},
+		{"entity order twice", with(func(l *Link) { l.EntityOrder = []string{"switch.heater", "switch.heater"} }), []string{"entity_order[1]"}},
 		{"no id", with(func(l *Link) { l.ID = "" }), []string{"id"}},
 		{"blank name", with(func(l *Link) { l.Name = "" }), []string{"name"}},
 		{"short slug", with(func(l *Link) { l.Slug = "short" }), []string{"slug"}},
@@ -518,6 +526,51 @@ templates:
 		tpl.Rules[0].Select.Devices[0] != "Front*" || tpl.Rules[0].Exclude.Labels[0] != "private" ||
 		tpl.Rules[1].Variables["source"] != "guest_access" {
 		t.Fatalf("decoded %+v", tpl)
+	}
+}
+
+// entity_order survives a YAML and a JSON round trip on templates and
+// links, and is left out when empty.
+func TestEntityOrderRoundTrip(t *testing.T) {
+	order := []string{"switch.fan", "light.lamp"}
+	ts := Templates{Version: 1, Templates: []Template{{ID: "x", Name: "x", EntityOrder: order}, {ID: "y", Name: "y"}}}
+	ls := Links{Version: 1, Links: []Link{{ID: "l1", EntityOrder: order}, {ID: "l2"}}}
+	for _, tc := range []struct {
+		name      string
+		marshal   func(any) ([]byte, error)
+		unmarshal func([]byte, any) error
+	}{
+		{"yaml", yaml.Marshal, yaml.Unmarshal},
+		{"json", json.Marshal, json.Unmarshal},
+	} {
+		b, err := tc.marshal(ts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(b), "entity_order"); n != 1 {
+			t.Errorf("%s templates: entity_order %d times in %s", tc.name, n, b)
+		}
+		var ts2 Templates
+		if err := tc.unmarshal(b, &ts2); err != nil {
+			t.Fatal(err)
+		}
+		if got := ts2.Templates[0].EntityOrder; fmt.Sprint(got) != fmt.Sprint(order) || ts2.Templates[1].EntityOrder != nil {
+			t.Errorf("%s templates: %v", tc.name, ts2.Templates)
+		}
+		b, err = tc.marshal(ls)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(b), "entity_order"); n != 1 {
+			t.Errorf("%s links: entity_order %d times in %s", tc.name, n, b)
+		}
+		var ls2 Links
+		if err := tc.unmarshal(b, &ls2); err != nil {
+			t.Fatal(err)
+		}
+		if got := ls2.Links[0].EntityOrder; fmt.Sprint(got) != fmt.Sprint(order) || ls2.Links[1].EntityOrder != nil {
+			t.Errorf("%s links: %v", tc.name, ls2.Links)
+		}
 	}
 }
 

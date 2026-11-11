@@ -229,6 +229,31 @@ func TestUpdateKeepsServerFields(t *testing.T) {
 	}
 }
 
+// entity_order is an admin field: create and update keep it, and it
+// reaches the file.
+func TestEntityOrderIsEditable(t *testing.T) {
+	dir := t.TempDir()
+	s := newStore(t, dir)
+	d := draft()
+	d.EntityOrder = []string{"switch.fan", "light.lamp"}
+	l := mustCreate(t, s, d, "")
+	if fmt.Sprint(l.EntityOrder) != "[switch.fan light.lamp]" {
+		t.Errorf("create: %v", l.EntityOrder)
+	}
+	edit := draft()
+	edit.EntityOrder = []string{"light.lamp"}
+	got, err := s.Update(l.ID, edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(got.EntityOrder) != "[light.lamp]" {
+		t.Errorf("update: %v", got.EntityOrder)
+	}
+	if again, err := newStore(t, dir).Get(l.ID); err != nil || fmt.Sprint(again.EntityOrder) != "[light.lamp]" {
+		t.Errorf("reload: %v %v", again.EntityOrder, err)
+	}
+}
+
 func TestRevoke(t *testing.T) {
 	s := newStore(t, t.TempDir())
 	l := mustCreate(t, s, draft(), "")

@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
@@ -263,6 +264,7 @@ func (s *Server) plan(ctx context.Context, g *guestReq) (guestPlan, error) {
 		passing: map[string]bool{},
 	}
 	groupOf := map[string]int{} // template id -> index in Groups
+	var orders [][]string       // entity order of each group, by index
 	for _, id := range g.link.TemplateIDs {
 		i := slices.IndexFunc(ts, func(t model.Template) bool { return t.ID == id })
 		if _, seen := groupOf[id]; i < 0 || seen {
@@ -270,6 +272,7 @@ func (s *Server) plan(ctx context.Context, g *guestReq) (guestPlan, error) {
 		}
 		groupOf[id] = len(p.view.Groups)
 		p.view.Groups = append(p.view.Groups, groupView{ID: id, Name: ts[i].Name, Icon: ts[i].Icon})
+		orders = append(orders, ts[i].EntityOrder)
 	}
 
 	keys := make([]authz.GrantKey, 0, len(grants))
@@ -317,6 +320,7 @@ func (s *Server) plan(ctx context.Context, g *guestReq) (guestPlan, error) {
 			gi = len(p.view.Groups)
 			groupOf[src.Template] = gi
 			p.view.Groups = append(p.view.Groups, groupView{})
+			orders = append(orders, g.link.EntityOrder)
 		}
 		if cur, ok := entityGroup[k.EntityID]; !ok || gi < cur {
 			entityGroup[k.EntityID] = gi
@@ -325,6 +329,9 @@ func (s *Server) plan(ctx context.Context, g *guestReq) (guestPlan, error) {
 	for _, id := range sortedKeys(entityGroup) {
 		gi := entityGroup[id]
 		p.view.Groups[gi].Entities = append(p.view.Groups[gi].Entities, id)
+	}
+	for i := range p.view.Groups {
+		sortGroup(p.view.Groups[i].Entities, orders[i], p.view.Entities)
 	}
 	p.view.Groups = slices.DeleteFunc(p.view.Groups, func(gv groupView) bool { return len(gv.Entities) == 0 })
 	p.view.Party = s.partyAllowed(g, ts, acc)
@@ -656,6 +663,40 @@ func compare(a, b string) int {
 		return 1
 	}
 	return 0
+}
+
+// sortGroup sorts the entity ids of one guest page group in place. Ids in
+// order come first, in that order. The rest follow by name, case
+// insensitive, then by id. An id in order that is not in ids is skipped.
+func sortGroup(ids, order []string, entities map[string]*entityView) {
+	rank := make(map[string]int, len(order))
+	for i, id := range order {
+		if _, dup := rank[id]; !dup {
+			rank[id] = i
+		}
+	}
+	name := func(id string) string {
+		if e := entities[id]; e != nil {
+			return strings.ToLower(e.Name)
+		}
+		return id
+	}
+	slices.SortStableFunc(ids, func(a, b string) int {
+		ra, aok := rank[a]
+		rb, bok := rank[b]
+		switch {
+		case aok && bok:
+			return ra - rb
+		case aok:
+			return -1
+		case bok:
+			return 1
+		}
+		if c := compare(name(a), name(b)); c != 0 {
+			return c
+		}
+		return compare(a, b)
+	})
 }
 
 func sortedKeys[V any](m map[string]V) []string {
