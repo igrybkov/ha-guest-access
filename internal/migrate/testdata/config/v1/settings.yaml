@@ -1,0 +1,12 @@
+version: 1
+local_access:
+  enabled: false
+  networks: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7]
+trusted_proxies: [172.30.32.1, 172.30.33.0/24]
+home_radius_default_m: 300
+music_assistant:
+  url: http://d5369777-music-assistant:8095
+guest:
+  title: Welcome to our home
+  welcome: Tap a card to use it.
+  accent_color: "#1e88e5"

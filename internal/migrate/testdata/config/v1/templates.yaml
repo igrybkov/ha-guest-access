@@ -1,0 +1,30 @@
+version: 1
+templates:
+  - id: house_entry
+    name: House entry
+    icon: mdi:door
+    access: {network: any, near_home_m: 300}
+    rules:
+      - select: {entities: [lock.front_door]}
+        actions: [lock.unlock, lock.lock]
+      - select: {entities: [script.let_me_in, script.im_leaving]}
+        actions: [script.run, script.cancel]
+        variables: {source: guest_access}
+  - id: music
+    name: Music control
+    rules:
+      - select:
+          labels: [guest_music]
+          entities: [media_player.living_room, media_player.sonos_*]
+        exclude:
+          entities: [media_player.bedroom*]
+          labels: [private]
+          devices: [Office*]
+        actions: [media_player.media_play_pause, media_player.volume_set]
+    party: true
+  - id: guest_room
+    name: Guest room control
+    rules:
+      - select: {areas: [guest_room]}
+        actions: [light.turn_on, light.turn_off, fan.set_percentage]
+        access: {near_home_m: 500}
