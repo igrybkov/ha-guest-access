@@ -45,6 +45,8 @@ options:
     enabled: true
     guest_per_min: 20
     guest_burst: 15
+    assets_per_min: 300
+    assets_burst: 100
     actions_per_min: 120
     actions_burst: 40
     continuous_per_min: 600
@@ -57,6 +59,7 @@ options:
     password_fails_per_link: 30
     password_window_per_link_min: 60
     password_lockout_min: 60
+    password_link_delay_s: 10
     admin_per_min: 600
   links:
     custom_slug_min_len: 12
@@ -110,6 +113,8 @@ schema:
     enabled: bool
     guest_per_min: int(1,)
     guest_burst: int(1,)
+    assets_per_min: int(1,)
+    assets_burst: int(1,)
     actions_per_min: int(1,)
     actions_burst: int(1,)
     continuous_per_min: int(1,)
@@ -122,6 +127,7 @@ schema:
     password_fails_per_link: int(1,)
     password_window_per_link_min: int(1,10080)
     password_lockout_min: int(1,)
+    password_link_delay_s: int(1,3600)
     admin_per_min: int(1,)
   links:
     custom_slug_min_len: int(12,128)

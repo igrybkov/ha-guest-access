@@ -472,6 +472,24 @@ export function auditResult(r) {
 
 // ---- Settings ----
 
+// tokenState is the Music Assistant token row of the settings.
+function tokenState(t) {
+  if (!t?.set) return 'Not set';
+  return t.refused ? 'Refused by Music Assistant' : 'Set';
+}
+
+// settingsWarnings lists the problems the Settings page shows at the top,
+// from GET api/settings.
+export function settingsWarnings(s) {
+  const out = [];
+  if (s.limits_disabled) out.push('Rate limits are off. Not recommended.');
+  if (s.ma_token?.refused) {
+    out.push('Music Assistant refused the token, so guests see no party button. ' +
+      'Make a new long-lived token in Music Assistant and put it in the music_assistant.token option.');
+  }
+  return out;
+}
+
 // settingsSections lays out GET api/settings as [{id, title, rows}],
 // where rows are [label, value]. A null or "" value shows as "Not set".
 export function settingsSections(s) {
@@ -493,7 +511,7 @@ export function settingsSections(s) {
     ] },
     { id: 'ma', title: 'Music Assistant', rows: [
       ['URL', s.music_assistant?.url],
-      ['Token', s.ma_token?.set ? 'Set' : 'Not set'],
+      ['Token', tokenState(s.ma_token)],
       ['Timeout (ms)', t.ma_timeout_ms],
     ] },
     { id: 'guest', title: 'Guest page', rows: [
@@ -505,6 +523,8 @@ export function settingsSections(s) {
     { id: 'limits', title: 'Rate limits', rows: [
       ['Guest requests per minute', r.guest_per_min],
       ['Guest burst', r.guest_burst],
+      ['Page files per minute', r.assets_per_min],
+      ['Page files burst', r.assets_burst],
       ['Actions per minute', r.actions_per_min],
       ['Actions burst', r.actions_burst],
       ['Slider actions per minute, per entity', r.continuous_per_min],
@@ -514,7 +534,8 @@ export function settingsSections(s) {
       ['Slug misses per hour, all IPs', r.misses_per_hour_global],
       ['Password fails per IP', r.password_fails_per_ip],
       ['Password fails per link', r.password_fails_per_link],
-      ['Password lockout (min)', r.password_lockout_min],
+      ['Password lockout per address (min)', r.password_lockout_min],
+      ['Slowed link delay (s)', r.password_link_delay_s],
       ['Admin requests per minute', r.admin_per_min],
     ] },
     { id: 'ha', title: 'Home Assistant', rows: [

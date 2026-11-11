@@ -36,8 +36,10 @@ const (
 	reasonContentType     = "content_type"
 	reasonWrongPassword   = "wrong_password"
 	reasonLocked          = "locked"
+	reasonLinkSlowed      = "link_slowed"
 	reasonInternal        = "internal"
 	reasonLimitPreauth    = "limit_preauth"
+	reasonLimitAssets     = "limit_assets"
 	reasonLimitActions    = "limit_actions"
 	reasonLimitContinuous = "limit_continuous"
 	reasonLimitMisses     = "limit_slug_misses"
@@ -95,16 +97,39 @@ func (g *guestReq) rateLimited(reason string) {
 	g.note(auditEventRateLimited, audit.ResultDenied, reason)
 }
 
+// unthrottledDenials are the guest denials recorded one by one. The
+// password guard already caps how many there can be, and they are the
+// records an owner most wants whole.
+var unthrottledDenials = map[string]bool{
+	"guest.password.fail": true,
+	"guest.lockout":       true,
+}
+
+// bulkKey returns the throttle key of a record a client can cause in
+// bulk, or "" for a record that is always written. Rate limits and slug
+// misses are keyed per client IP. Every other guest denial is keyed per
+// event, reason, link and client IP, so a flood of one kind can't push
+// older records (admin writes among them) out of the rotated file.
+func bulkKey(r audit.Record, g *guestReq) string {
+	switch {
+	case r.Event == auditEventRateLimited || r.Event == auditEventSlugMiss:
+		return r.Event + "|" + g.ipKey()
+	case r.Result == audit.ResultDenied && !unthrottledDenials[r.Event]:
+		return r.Event + "|" + r.Reason + "|" + g.link.ID + "|" + g.ipKey()
+	}
+	return ""
+}
+
 // emitGuest writes the request's audit record, if it has one. It adds
 // who: the link (never the slug), the guest, the device and the client.
-// Records a client can cause in bulk are throttled per client IP.
+// Records a client can cause in bulk are throttled (see bulkKey).
 func (s *Server) emitGuest(g *guestReq) {
 	if !g.audit.set {
 		return
 	}
 	r := g.audit.rec
-	if r.Event == auditEventRateLimited || r.Event == auditEventSlugMiss {
-		ok, skipped := s.auditThrottle.Allow(r.Event+"|"+g.ipKey(), g.now)
+	if key := bulkKey(r, g); key != "" {
+		ok, skipped := s.auditThrottle.Allow(key, g.now)
 		if !ok {
 			return
 		}
@@ -203,7 +228,8 @@ var adminEvents = map[string]string{
 // auditAdmin records every admin write after it ran: who (the HA user
 // from the ingress headers), what (event, route, ids) and the result.
 // It sits behind the peer check, which is what makes those headers
-// trustworthy. With DEV_ADMIN_ANY_PEER set, anyone can send them.
+// trustworthy. With DEV_ADMIN_ANY_PEER set, other peers get through too;
+// their headers are never read and the user is recorded as devUser.
 func (s *Server) auditAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet || r.Method == http.MethodHead {
@@ -253,8 +279,8 @@ func (s *Server) auditAdmin(next http.Handler) http.Handler {
 				rec.LinkName = l.Name
 			}
 		}
-		rec.User = haUser(r)
 		peer := peerAddr(r.RemoteAddr)
+		rec.User = adminUser(r, peer)
 		setClient(rec, access.Client{IP: peer}, peer)
 		s.audit.Log(*rec)
 	})
@@ -268,6 +294,20 @@ func adminAudit(r *http.Request) *audit.Record {
 		return rec
 	}
 	return &audit.Record{}
+}
+
+// devUser is the audit user of an admin write that did not come through
+// the ingress proxy. Only the DEV_ADMIN_ANY_PEER bypass lets one in.
+const devUser = "dev"
+
+// adminUser is the audit user of an admin write from peer. Only the
+// ingress proxy sets the X-Remote-User headers, so they are read only
+// from it. Any other peer may have made them up.
+func adminUser(r *http.Request, peer netip.Addr) *audit.User {
+	if peer != supervisorIngress {
+		return &audit.User{Name: devUser}
+	}
+	return haUser(r)
 }
 
 // haUser reads the HA user from the Supervisor ingress headers.

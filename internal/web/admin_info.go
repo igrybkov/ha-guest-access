@@ -155,5 +155,8 @@ func (s *Server) getDiagnostics(w http.ResponseWriter, _ *http.Request) {
 	if s.lim.off {
 		v.Warnings = append(v.Warnings, "Rate limits are off.")
 	}
+	if s.maRefused.Load() {
+		v.Warnings = append(v.Warnings, maRefusedWarning)
+	}
 	writeJSON(w, http.StatusOK, v)
 }

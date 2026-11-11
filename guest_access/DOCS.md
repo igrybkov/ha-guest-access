@@ -279,18 +279,20 @@ A link can have zero or more passwords. Guests often get their phone number as t
 - A password can be up to 1024 bytes.
 - A correct password gives the browser a session cookie tied to that password. Deleting the password ends its sessions.
 
-### Lockout
+### Lockout and slow-down
 
 Wrong passwords are counted:
 
-| Scope | Default | Option |
-|---|---|---|
-| Per link and client address | 5 wrong in 15 minutes | `rate_limits.password_fails_per_ip`, `rate_limits.password_window_per_ip_min` |
-| Per link, all addresses | 30 wrong in 60 minutes | `rate_limits.password_fails_per_link`, `rate_limits.password_window_per_link_min` |
+| Scope | Default | Option | Over the limit |
+|---|---|---|---|
+| Per link and client address | 5 wrong in 15 minutes | `rate_limits.password_fails_per_ip`, `rate_limits.password_window_per_ip_min` | That address is locked out of the link for `rate_limits.password_lockout_min` minutes (60). |
+| Per link, all addresses | 30 wrong in 60 minutes | `rate_limits.password_fails_per_link`, `rate_limits.password_window_per_link_min` | The link slows down. It takes one password try every `rate_limits.password_link_delay_s` seconds (10), from any address. |
 
-Over either limit, the password form is blocked for `rate_limits.password_lockout_min` minutes (60 by default). Each lockout fires the HA event `guest_access_lockout` with `link_id`, `link_name` and `ip`. Guests who are already signed in are not affected.
+A slowed link never locks anyone out. A guest who tries during the delay sees how many seconds to wait, and gets in on the next try. Someone who guesses from many addresses gets about one guess per delay: 360 an hour at the default. The link speeds up again once the wrong passwords are older than the window.
 
-The per-link limit means someone who has the URL can block the form for everyone for an hour. That does not let them in. It only stops new sign-ins until the block ends.
+The delay counts from the last try that went through. Tries that the delay refused do not count, so nobody can keep a real guest waiting longer than the delay.
+
+Each lockout of an address, and each start of a slow-down, fires the HA event `guest_access_lockout` with `link_id`, `link_name`, `ip` and `scope`. `scope` is `ip` for a locked-out address and `link` for a slowed link. A slow-down fires once when it starts, not on every try. Guests who are already signed in are not affected.
 
 ## Device approval
 
@@ -459,6 +461,8 @@ The app asks MA for the join URL each time the page needs it. The call times out
 
 A long-lived token expires. When it does, the party button disappears. Make a new token and update the option.
 
+When MA refuses the token, the app logs a warning, and the Settings and Diagnostics pages show it. The app learns this only when a guest asks for the party, so the warning shows after the first refused call. It goes away after the next call that works.
+
 ### The party outlives the link
 
 MA runs its own guest session. When a link ends or is revoked, a guest who already joined the party stays in MA until MA ends that session. The join code in MA also lives for MA's own party duration.
@@ -471,19 +475,21 @@ Every route has a limit. Over a limit, the app answers 429 with a `Retry-After` 
 
 | Limit | Default | Keyed by |
 |---|---|---|
-| Guest page, assets and any request before sign-in | 20 per minute, burst 15 | client address |
+| Guest page and any request before sign-in | 20 per minute, burst 15 | client address |
+| Page files (script and style) | 300 per minute, burst 100 | client address |
 | Wrong links (unknown slugs) | 10 per hour | client address |
 | Wrong links, all addresses together | 100 per hour | one global key |
 | Discrete actions and state reads | 120 per minute, burst 40 | link and client address |
 | Continuous actions (sliders) | 600 per minute, burst 120 | link, client address and entity |
 | Open live-update streams | 10 | link |
-| Wrong passwords | see **Passwords** | link and client address, and link |
+| Wrong passwords | see **Passwords**: a lockout per address, a slow-down per link | link and client address, and link |
 | New device requests | see **Device approval** | link |
 | Admin API | 600 per minute | peer |
 
 Notes:
 
 - A valid link always works, whatever the wrong-link limits say. Someone else's misses never lock a real guest out.
+- **Page files have their own limit.** The page's script and style files are the same for everyone and hold no secret. They do not count against the limit before sign-in, so many guests behind one home or mobile network address can load the page often.
 - **Continuous and discrete are separate.** Light brightness and color, fan speed and media volume send many values while a guest drags a slider. They use the continuous limiter, so dragging does not use up the limit for buttons. Note that `light.turn_on` counts as continuous, so a plain "on" tap uses it too.
 - Behind a proxy you do not trust, all guests share the proxy's address and one limiter. If many guests hit 429 together, check `trusted_proxies`.
 - Limiters drop idle keys, so memory stays bounded.
@@ -497,9 +503,9 @@ The app records who did what and when, for every security decision and every adm
 **Recorded:**
 
 - guest actions, allowed and denied, with an internal reason for each denial
-- sign-ins, wrong passwords and lockouts
+- sign-ins, wrong passwords, lockouts and slow-downs
 - wrong links, rate-limit hits and invalid sessions
-- device requests, approvals, denials, revokes and resets
+- device requests (with the code shown on the guest's screen), approvals, denials, revokes and resets
 - location checks (the distance and the accuracy)
 - every admin write: templates, links, passwords, devices
 - app starts
@@ -508,7 +514,7 @@ Each record names the link, the password label (the guest), the device, the clie
 
 **Never recorded:** slugs, passwords, tokens, cookies, coordinates, data values of an action (only the key names), and raw headers.
 
-Records a client can cause in bulk (wrong links, rate limits, slider drags) are thinned out. One record per kind and client per period carries a count of the ones it skipped.
+Records a client can cause in bulk are thinned out: wrong links, rate limits, slider drags, refused device requests, and every other denial of a guest request. Within a minute, the first record of each kind, reason, link and client is written. The next one carries a count of the ones it skipped. So a flood can't push older records, such as admin changes, out of the file. Wrong passwords and lockouts are always written one by one. The password limits already keep them few.
 
 **Where it goes:**
 
@@ -538,6 +544,8 @@ Set these in the app's Configuration tab. Saving restarts the app. Each row show
 | `rate_limits.enabled` | `true` | Master switch. Not recommended to turn off. |
 | `rate_limits.guest_per_min` | `20` | Requests per minute before sign-in, per client address. |
 | `rate_limits.guest_burst` | `15` | Requests allowed in a quick row before that limit applies. |
+| `rate_limits.assets_per_min` | `300` | Page files (script and style) per minute, per client address. |
+| `rate_limits.assets_burst` | `100` | Burst for the limit above. |
 | `rate_limits.actions_per_min` | `120` | Discrete actions and state reads per minute, per link and client address. |
 | `rate_limits.actions_burst` | `40` | Burst for the limit above. |
 | `rate_limits.continuous_per_min` | `600` | Slider actions per minute, per link, client address and entity. |
@@ -545,11 +553,12 @@ Set these in the app's Configuration tab. Saving restarts the app. Each row show
 | `rate_limits.max_streams_per_link` | `10` | Open live-update pages per link. |
 | `rate_limits.misses_per_hour_per_ip` | `10` | Unknown links per hour, per client address. |
 | `rate_limits.misses_per_hour_global` | `100` | Unknown links per hour, all addresses. Valid links keep working. |
-| `rate_limits.password_fails_per_ip` | `5` | Wrong passwords per link and client address before lockout. |
+| `rate_limits.password_fails_per_ip` | `5` | Wrong passwords per link and client address before that address is locked out. |
 | `rate_limits.password_window_per_ip_min` | `15` | Minutes in which those wrong passwords count. |
-| `rate_limits.password_fails_per_link` | `30` | Wrong passwords per link, all addresses, before lockout. |
+| `rate_limits.password_fails_per_link` | `30` | Wrong passwords per link, all addresses, before the link slows down. |
 | `rate_limits.password_window_per_link_min` | `60` | Minutes in which those wrong passwords count. |
-| `rate_limits.password_lockout_min` | `60` | Minutes the password form stays blocked. |
+| `rate_limits.password_lockout_min` | `60` | Minutes a locked-out address stays locked out of the link. |
+| `rate_limits.password_link_delay_s` | `10` | Seconds between two password tries on a slowed link, from any address. |
 | `rate_limits.admin_per_min` | `600` | Admin requests per minute, per peer. |
 | `links.custom_slug_min_len` | `12` | Shortest custom slug. Not below 12. |
 | `links.custom_slug_max_len` | `64` | Longest custom slug. |
@@ -613,6 +622,7 @@ The chain sends `X-Forwarded-For`, and the app reads only that header and `X-For
 ### What the app protects against
 
 - **Guessing a link.** Random slugs have 128 bits. Wrong links, passwords and request floods are rate limited.
+- **Guessing a password.** Each address gets a few tries before it is locked out. Past the per-link limit, the link takes one try per delay from all addresses together, so guessing from many addresses stays slow.
 - **Doing more than granted.** Each request is checked against the exact entity and action. The app builds the HA call itself, with exactly one entity. A guest can never name an area, a device, a label or a code.
 - **Checks run in a fixed order**, and each one fails closed: rate limit, link, request shape (JSON and same-origin), link window, password session, device approval, grant and access rules, one-time use, then the HA call.
 - **Seeing too much.** A guest sees only the entities a rule grants, and only a short list of attributes per domain. Locations, user IDs and picture URLs are never sent.
@@ -628,7 +638,7 @@ The chain sends `X-Forwarded-For`, and the app reads only that header and `X-For
 - **A guest who is not really local.** See **Local only**. It fails safe, but it is not a firewall.
 - **A stolen device that is already approved.** Revoke the device.
 - **Someone with access to the HA host or the `/data` folder.** They can read the slugs.
-- **Someone who blocks the password form.** Anyone with the URL can trigger the per-link lockout. See **Passwords**.
+- **Someone who slows the password form.** Anyone with the URL can make the link slow down. Guests then wait up to `rate_limits.password_link_delay_s` seconds to sign in. Nobody is locked out by someone else's guesses. See **Passwords**.
 
 ## Files
 

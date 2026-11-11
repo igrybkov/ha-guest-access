@@ -542,7 +542,7 @@ func TestGuestPasswordLockout(t *testing.T) {
 		t.Errorf("locked: %d %q", rec.Code, rec.Header().Get("Retry-After"))
 	}
 	ev := h.fake.FiredEvents()
-	if len(ev) != 1 || ev[0].EventType != eventLockout || ev[0].Data["link_id"] != l.ID {
+	if len(ev) != 1 || ev[0].EventType != eventLockout || ev[0].Data["link_id"] != l.ID || ev[0].Data["scope"] != lockoutScopeIP {
 		t.Errorf("lockout events = %+v", ev)
 	}
 }
@@ -586,15 +586,18 @@ func TestGuestPreauthLimit(t *testing.T) {
 			t.Fatalf("page %d: %d", i, c)
 		}
 	}
-	rec := h.g(req{method: "GET", path: "/assets/" + h.srv.assets.version + "/guest.js"})
+	rec := h.g(req{method: "GET", path: "/g/" + l.Slug})
 	if rec.Code != 429 || rec.Header().Get("Retry-After") != "3" {
 		t.Errorf("over: %d %q", rec.Code, rec.Header().Get("Retry-After"))
 	}
-	// An authenticated guest uses its own limiter.
+	// An authenticated guest uses its own limiter, and so do files.
 	if c := h.g(req{method: "GET", path: "/g/" + l.Slug + "/state"}).Code; c != 200 {
 		t.Errorf("state after pre-auth limit: %d", c)
 	}
-	if c := h.g(req{method: "GET", path: "/assets/" + h.srv.assets.version + "/guest.js", peer: "203.0.113.99:1"}).Code; c != 200 {
+	if c := h.g(req{method: "GET", path: "/assets/" + h.srv.assets.version + "/guest.js"}).Code; c != 200 {
+		t.Errorf("file after pre-auth limit: %d", c)
+	}
+	if c := h.g(req{method: "GET", path: "/g/" + l.Slug, peer: "203.0.113.99:1"}).Code; c != 200 {
 		t.Errorf("another IP: %d", c)
 	}
 }

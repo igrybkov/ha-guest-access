@@ -69,8 +69,8 @@ const (
 	DefaultMaxPending    = 3
 	DefaultMaxDevices    = 10
 	DefaultEventsPerHour = 5
-	DefaultTouchThrottle = time.Minute
-	DefaultMaxBodyBytes  = 1 << 10
+	DefaultTouchThrottle = 5 * time.Minute
+	DefaultMaxBodyBytes  = 16 << 10
 	DefaultEventTimeout  = 5 * time.Second
 )
 
@@ -188,7 +188,15 @@ type Manager struct {
 	byID     map[string]*request
 	bySecret map[string]*request
 	events   map[string][]time.Time // link id -> request events in the last hour, oldest first
+
+	// refused thins out refused device request records. A device that
+	// keeps asking past the caps gets one record per period per link,
+	// reason and client, which counts the ones left out.
+	refused *audit.Throttle
 }
+
+// refusedAuditPeriod is the throttle period of refused device requests.
+const refusedAuditPeriod = time.Minute
 
 // New returns a Manager. It panics when a required option is missing.
 func New(o Options) *Manager {
@@ -229,6 +237,7 @@ func New(o Options) *Manager {
 		byID:     map[string]*request{},
 		bySecret: map[string]*request{},
 		events:   map[string][]time.Time{},
+		refused:  audit.NewThrottle(refusedAuditPeriod),
 	}
 }
 
@@ -364,8 +373,10 @@ func (m *Manager) RequestAccess(w http.ResponseWriter, r *http.Request, link mod
 		if errors.Is(err, ErrTooManyEvents) {
 			reason = "too_many_events"
 		}
-		m.record(audit.Record{Event: "device.request", Result: audit.ResultDenied, Reason: reason,
-			LinkID: link.ID, LinkName: link.Name, PasswordLabel: label, Device: device}, c)
+		if ok, skipped := m.refused.Allow(link.ID+"|"+reason+"|"+c.IP.String(), now); ok {
+			m.record(audit.Record{Event: "device.request", Result: audit.ResultDenied, Reason: reason, Count: skipped,
+				LinkID: link.ID, LinkName: link.Name, PasswordLabel: label, Device: device}, c)
+		}
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"status": "try_later"})
 		return

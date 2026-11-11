@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"sync/atomic"
 	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
@@ -137,6 +138,10 @@ type Server struct {
 	sliderThrottle *audit.Throttle
 	diag           *diagRing
 	assets         *assetSet
+	// maRefused is true while Music Assistant refuses the token: set by
+	// a party call that gets ma.ErrUnauthorized, cleared by one that
+	// works. The admin API shows it as a warning.
+	maRefused atomic.Bool
 }
 
 // New returns a Server.

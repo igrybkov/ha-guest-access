@@ -110,8 +110,9 @@ func TestE2EAuditActDenials(t *testing.T) {
 	}
 }
 
-// Admin writes name the HA user. The admin port here takes any peer, so
-// the headers come straight from the test.
+// Admin writes are recorded with who made them. The admin port here takes
+// any peer (the dev bypass), and the peer is not the ingress proxy, so the
+// X-Remote-User headers from the test are not trusted: the user is "dev".
 func TestE2EAuditAdminWrites(t *testing.T) {
 	a := startApp(t, appOpts{})
 	user := map[string]string{"X-Remote-User-Id": "u1", "X-Remote-User-Name": "illia", "X-Remote-User-Display-Name": "Illia"}
@@ -127,7 +128,7 @@ func TestE2EAuditAdminWrites(t *testing.T) {
 			continue
 		}
 		got = append(got, rec.Event)
-		if rec.User == nil || rec.User.Name != "illia" || rec.LinkID != l.ID || rec.LinkName != "Anna" || rec.Result != audit.ResultOK {
+		if rec.User == nil || *rec.User != (audit.User{Name: "dev"}) || rec.LinkID != l.ID || rec.LinkName != "Anna" || rec.Result != audit.ResultOK {
 			t.Errorf("record = %+v", rec)
 		}
 	}
