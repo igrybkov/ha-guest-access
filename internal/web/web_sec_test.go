@@ -166,14 +166,20 @@ func TestSecIPv6PrefixSharesLimiter(t *testing.T) {
 }
 
 // Every guest request, even a refused one, adds a diagnostics entry with
-// the forwarding headers as sent. A header can be close to 1 MiB, and the
-// ring keeps `diagnostics.requests` entries (up to 1000).
+// the forwarding headers as sent and, for a path under /api/, the whole
+// path (routeLabel returns it as is). Each can be close to 1 MiB, and the
+// ring keeps `diagnostics.requests` entries (up to 1000). The admin page
+// renders them as text, so this is memory, not script.
 func TestSecDiagnosticsBoundsHeaderValues(t *testing.T) {
 	h := newHarness(t)
 	h.g(req{method: "GET", path: "/nothing", headers: map[string]string{
 		"X-Forwarded-For": strings.Repeat("a", 60_000), "X-Forwarded-Host": strings.Repeat("b", 60_000),
 	}})
+	h.g(req{method: "GET", path: "/api/" + strings.Repeat("x", 60_000)})
 	for _, e := range h.srv.diag.list() {
+		if len(e.Route) > 1024 {
+			t.Fatalf("diagnostics keep a route of %d bytes", len(e.Route))
+		}
 		for k, v := range e.Headers {
 			if len(v) > 1024 {
 				t.Fatalf("diagnostics keep %d bytes of %s", len(v), k)
@@ -184,7 +190,11 @@ func TestSecDiagnosticsBoundsHeaderValues(t *testing.T) {
 
 // A timeout or a lost connection does not say the call did not run. The
 // use of a one-time pair is given back anyway, so the guest can run an
-// unlock twice.
+// unlock twice. This one needs a decision: DOCS say a failed call gives the
+// use back. The fix must split ambiguous errors (timeout, connection lost
+// after the send) from a definite error result from HA. The stand-in error
+// here wraps context.DeadlineExceeded; the real client's error shape on a
+// timeout was not checked.
 func TestSecOneTimeNotRefundedOnAmbiguousFailure(t *testing.T) {
 	h := newHarness(t)
 	l, err := h.links.Create(model.Link{
@@ -704,8 +714,8 @@ func TestSecDataSmuggling(t *testing.T) {
 // address) slows guessing, not the 10 an hour the docs promise. This
 // matters for custom slugs, which can be words.
 //
-// DOCS say "a valid link always works, whatever the wrong-link limits say",
-// so a fix needs a decision: for example refuse hits without a session from
+// This one needs a decision. DOCS say "a valid link always works, whatever
+// the wrong-link limits say", so a fix goes against the docs: for example refuse hits without a session from
 // an address that is over its miss budget.
 func TestSecSlugGuessBudgetBindsHits(t *testing.T) {
 	h := newHarness(t)
@@ -742,9 +752,17 @@ func TestSecOneClientCannotTakeEveryStreamSlot(t *testing.T) {
 		rec := httptest.NewRecorder()
 		wg.Go(func() { h.guest.ServeHTTP(rec, r) })
 	}
+	// settle waits until the stream count holds still for 300 ms.
 	settle := func() int {
-		time.Sleep(300 * time.Millisecond)
-		return h.srv.streams.count(l.ID)
+		last, since := -1, time.Now()
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+			if n := h.srv.streams.count(l.ID); n != last {
+				last, since = n, time.Now()
+			} else if time.Since(since) > 300*time.Millisecond {
+				break
+			}
+		}
+		return last
 	}
 	defer func() {
 		for _, c := range cancels {
@@ -782,7 +800,7 @@ func TestSecStateReadsDoNotFetchEveryState(t *testing.T) {
 		o.LimitsEnabled = false
 		cha = &countingHA{Fake: fakeHA()}
 		inv := inventory.New(cha, quietLog)
-		if err := inv.Run(context.Background()); err != nil {
+		if err := inv.Run(t.Context()); err != nil {
 			t.Fatal(err)
 		}
 		d.Inventory = inv

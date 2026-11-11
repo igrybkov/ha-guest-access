@@ -9,9 +9,11 @@ import (
 
 // The servers have a header timeout but no read timeout, so a client can
 // send a body one byte a minute and hold a goroutine and a connection for
-// as long as it likes. A read timeout covers the request only: event
-// streams are responses, so they are not affected (WriteTimeout must stay
-// unset). The header size is also the Go default, 1 MiB per request.
+// as long as it likes. A ReadTimeout does not end a streaming response:
+// checked on go1.27.2 with a handler that streams for 3 s under a 500 ms
+// ReadTimeout (the request context stays live and writes succeed).
+// WriteTimeout must stay unset, since it would cut every event stream. The
+// header size is also the Go default, 1 MiB per request.
 func TestSecServerBoundsRequestRead(t *testing.T) {
 	s := newServer(context.Background(), http.NotFoundHandler(), slog.New(slog.DiscardHandler))
 	if s.ReadTimeout <= 0 {

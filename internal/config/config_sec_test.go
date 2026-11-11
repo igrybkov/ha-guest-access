@@ -46,10 +46,13 @@ func TestSecManifestMapsHAConfig(t *testing.T) {
 // only the guest port, and leaves the admin port to ingress.
 func TestSecManifestPrivileges(t *testing.T) {
 	m := readManifest(t)
-	for _, k := range []string{"host_network", "privileged", "full_access", "hassio_api", "hassio_role", "auth_api", "docker_api", "host_pid", "host_ipc", "host_dbus", "devices", "usb", "uart", "kernel_modules", "apparmor", "ingress_stream", "backup_exclude"} {
+	for _, k := range []string{"host_network", "privileged", "full_access", "hassio_api", "hassio_role", "auth_api", "docker_api", "host_pid", "host_ipc", "host_dbus", "devices", "usb", "uart", "kernel_modules"} {
 		if v, ok := m[k]; ok && v != false {
 			t.Errorf("manifest sets %s: %v", k, v)
 		}
+	}
+	if v, ok := m["apparmor"]; ok && v == false {
+		t.Error("apparmor is turned off")
 	}
 	if m["homeassistant_api"] != true {
 		t.Errorf("homeassistant_api = %v", m["homeassistant_api"])
