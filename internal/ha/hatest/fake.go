@@ -129,9 +129,42 @@ func (f *Fake) CallService(ctx context.Context, domain, service string, data map
 func (f *Fake) Areas(ctx context.Context) ([]ha.Area, error)      { return f.AreaList, nil }
 func (f *Fake) Devices(ctx context.Context) ([]ha.Device, error)  { return f.DeviceList, nil }
 func (f *Fake) Entities(ctx context.Context) ([]ha.Entity, error) { return f.EntityList, nil }
-func (f *Fake) States(ctx context.Context) ([]ha.State, error)    { return f.StateList, nil }
 func (f *Fake) Labels(ctx context.Context) ([]ha.Label, error)    { return f.LabelList, nil }
 func (f *Fake) Config(ctx context.Context) (ha.Config, error)     { return f.Core, nil }
+
+// States returns a copy of StateList. Safe for concurrent use with
+// SetState.
+func (f *Fake) States(ctx context.Context) ([]ha.State, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.StateList), nil
+}
+
+// State returns the state of entityID, if StateList has one.
+func (f *Fake) State(entityID string) (ha.State, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if i := f.stateIndex(entityID); i >= 0 {
+		return f.StateList[i], true
+	}
+	return ha.State{}, false
+}
+
+// SetState puts st in StateList, in place of the entity's old state if
+// it had one. Safe for concurrent use with States.
+func (f *Fake) SetState(st ha.State) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if i := f.stateIndex(st.EntityID); i >= 0 {
+		f.StateList[i] = st
+		return
+	}
+	f.StateList = append(f.StateList, st)
+}
+
+func (f *Fake) stateIndex(entityID string) int {
+	return slices.IndexFunc(f.StateList, func(s ha.State) bool { return s.EntityID == entityID })
+}
 
 // FireEvent records the event. Read it with FiredEvents.
 func (f *Fake) FireEvent(ctx context.Context, eventType string, data map[string]any) error {

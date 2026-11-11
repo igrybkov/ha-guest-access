@@ -180,7 +180,8 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		case "config/entity_registry/list":
 			ok(orEmpty(f.EntityList))
 		case "get_states":
-			ok(orEmpty(f.StateList))
+			states, _ := f.States(ctx)
+			ok(orEmpty(states))
 		case "config/label_registry/list":
 			ok(orEmpty(f.LabelList))
 		case "get_config":

@@ -11,7 +11,7 @@ BUILDER     ?=
 -include .env
 export
 
-.PHONY: build test test-ui vet lint run-dev docker
+.PHONY: build test test-ui vet lint run-dev demo docker
 
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$(VERSION)" -o $(BINARY) $(PKG)
@@ -25,11 +25,14 @@ UI_TESTS := $(wildcard internal/web/ui/*_test.mjs internal/web/ui/*/*_test.mjs)
 test-ui:
 	$(if $(UI_TESTS),node --test $(UI_TESTS),@echo "no UI tests yet")
 
+# The demo build tag adds cmd/guest-access/demo.go; vet and lint check
+# it too.
 vet:
 	go vet ./...
+	go vet -tags demo ./cmd/guest-access
 
 lint:
-	go run $(STATICCHECK) ./...
+	go run $(STATICCHECK) -tags demo ./...
 	@# Comments and docs must stand on their own: no pointers to planning
 	@# notes outside the repo.
 	@! grep -rniE --include='*.go' --include='*.js' --include='*.mjs' --include='*.html' --include='*.css' --include='*.yaml' --include='*.md' \
@@ -44,6 +47,13 @@ run-dev:
 	DATA_DIR=$(CURDIR)/data CONFIG_DIR=$(CURDIR)/dev-config \
 		LISTEN=127.0.0.1:8099 GUEST_LISTEN=127.0.0.1:8888 DEV_ADMIN_ANY_PEER=1 \
 		go run $(PKG)
+
+# Demo: the real app against a fake HA with a made-up house, on
+# 127.0.0.1:8099 (admin) and 127.0.0.1:8888 (guest). It never talks to a
+# real HA and ignores .env. Flags go in DEMO_FLAGS, such as
+# DEMO_FLAGS="-guest 127.0.0.1:9888".
+demo:
+	go run -tags demo $(PKG) $(DEMO_FLAGS)
 
 docker:
 	docker buildx build $(if $(BUILDER),--builder $(BUILDER)) --platform $(PLATFORMS) --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) .

@@ -94,6 +94,10 @@ type appOpts struct {
 	devAnyPeer *bool
 	ma         ma.Client
 	logger     *slog.Logger // nil discards
+	// fake replaces houseHA. With sim, a hatest.Sim answers service
+	// calls, so they change states and send state_changed.
+	fake *hatest.Fake
+	sim  bool
 }
 
 // testClient sends no cookies of its own and does not pool connections,
@@ -105,7 +109,10 @@ var t0 = time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 
 func startApp(t *testing.T, o appOpts) *app {
 	t.Helper()
-	fake := houseHA()
+	fake := o.fake
+	if fake == nil {
+		fake = houseHA()
+	}
 	failHA := &atomic.Bool{}
 	// Set once, before start: Respond is read on the server's goroutines.
 	fake.Respond = func(hatest.ServiceCall) (json.RawMessage, error) {
@@ -116,6 +123,12 @@ func startApp(t *testing.T, o appOpts) *app {
 	}
 	srv := hatest.NewServer(fake, testToken)
 	t.Cleanup(srv.Close)
+	if o.sim {
+		// Set before run starts: Respond is read on the server's goroutines.
+		sim := hatest.NewSim(fake, hatest.SimOptions{Emit: func(typ string, data any) { srv.Emit(typ, data) }})
+		t.Cleanup(sim.Stop)
+		fake.Respond = sim.Respond
+	}
 
 	cfgDir, dataDir := t.TempDir(), t.TempDir()
 	raw, _ := yaml.Marshal(templatesYAML)

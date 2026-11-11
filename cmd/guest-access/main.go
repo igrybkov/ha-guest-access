@@ -42,7 +42,16 @@ const (
 	healthTimeout   = 3 * time.Second
 )
 
+// demoMain, when set, runs in place of main. Only a build with the demo
+// tag sets it (see demo.go), so the release binary never holds the fake
+// HA.
+var demoMain func()
+
 func main() {
+	if demoMain != nil {
+		demoMain()
+		return
+	}
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	healthcheck := flag.Bool("healthcheck", false, "exit 0 if the local server answers /healthz, else 1")
 	flag.Parse()
