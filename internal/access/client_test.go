@@ -317,7 +317,7 @@ func TestIsLocal(t *testing.T) {
 		want bool
 	}{
 		{"10.1.2.3", nets, true},
-		{"192.168.40.20", nets, true},
+		{"192.168.0.20", nets, true},
 		{"192.169.0.1", nets, false},
 		{"8.8.8.8", nets, false},
 		{"::ffff:10.1.2.3", nets, true}, // 4in6 counts as IPv4
