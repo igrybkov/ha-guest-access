@@ -70,7 +70,7 @@ func TestStubsFailClosed(t *testing.T) {
 	if ValidCustomSlug("a-long-custom-slug") == nil {
 		t.Error("stub accepts a slug")
 	}
-	if NewLimiter(10, time.Minute).Allow("k", now) {
+	if ok, _ := NewLimiter(0.5, 30, time.Hour).Allow("k", now); ok {
 		t.Error("stub limiter allows")
 	}
 }

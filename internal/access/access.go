@@ -116,23 +116,26 @@ func ValidCustomSlug(s string) error {
 	return ErrBadSlug
 }
 
-// Limiter is a fixed-budget rate limiter per key, such as a client IP for
-// slug misses, or link id plus client IP for actions. Safe for concurrent
-// use.
+// Limiter is a keyed token bucket. Each key (a client IP for slug misses,
+// link id plus client IP for actions, and so on) has its own bucket that
+// refills at rate tokens per second, up to burst. A key idle for idleTTL is
+// dropped, so memory stays bounded. Safe for concurrent use.
 type Limiter struct {
-	n   int
-	per time.Duration
+	rate    float64
+	burst   int
+	idleTTL time.Duration
 }
 
-// NewLimiter allows n events per key in any window of length per.
-func NewLimiter(n int, per time.Duration) *Limiter {
-	return &Limiter{n: n, per: per}
+// NewLimiter returns a Limiter. rate is tokens per second (30 a minute is
+// 0.5), burst is the bucket size, idleTTL is how long an unused key is kept.
+func NewLimiter(rate float64, burst int, idleTTL time.Duration) *Limiter {
+	return &Limiter{rate: rate, burst: burst, idleTTL: idleTTL}
 }
 
-// Allow records an event for key at now and reports whether it is within
-// the limit.
+// Allow takes one token from key's bucket at now. When the bucket is empty,
+// ok is false and retryAfter says when the next token arrives.
 //
 // TODO(wave 1): implement. The stub refuses everything.
-func (l *Limiter) Allow(key string, now time.Time) bool {
-	return false
+func (l *Limiter) Allow(key string, now time.Time) (ok bool, retryAfter time.Duration) {
+	return false, time.Second
 }
