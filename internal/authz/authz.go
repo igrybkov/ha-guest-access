@@ -1,11 +1,8 @@
 // Package authz turns a link into the exact (entity, action) pairs it
 // grants, and checks a guest request against them.
 //
-// Resolve mirrors HA's target expansion (homeassistant/helpers/target.py):
-// an entity's own area wins over its device's area; area, device and label
-// expansion skip hidden entities, disabled entities and entities with an
-// entity_category; explicit entity ids select even hidden ones. Wave 1
-// notes the HA version it mirrored.
+// Resolve mirrors HA's target expansion. See resolve.go for the HA file and
+// commit it follows, and for the few places it is stricter.
 //
 // Network and location checks are not done here. The caller passes them in
 // as an AccessFunc, so authz needs no settings, cookies or client IPs.
@@ -14,6 +11,7 @@ package authz
 import (
 	"errors"
 
+	"github.com/igrybkov/ha-guest-access/internal/catalog"
 	"github.com/igrybkov/ha-guest-access/internal/model"
 )
 
@@ -82,34 +80,6 @@ func (g Grant) Pick(allow AccessFunc) (Source, bool) {
 	return Source{}, false
 }
 
-// Resolve expands the link's templates and extra rules against inv. A
-// pair is granted only when the action is in the catalog and its domain
-// is the entity's domain. Template ids the link names but templates does
-// not hold give a Warning, not an error.
-//
-// It does not look at the link's window, revocation or one-time use.
-//
-// TODO(wave 1): implement. The stub grants nothing.
-func Resolve(link model.Link, templates []model.Template, inv model.Inventory) (Grants, []Warning) {
-	return Grants{}, nil
-}
-
-// RuleEntities returns the entity ids a rule selects in inv, after exclude
-// and the domain filter, sorted. The editor shows it next to each rule.
-//
-// TODO(wave 1): implement. The stub selects nothing.
-func RuleEntities(r model.Rule, inv model.Inventory) []string {
-	return nil
-}
-
-// Match reports whether s matches pattern, where "*" matches any run of
-// characters (none included) and every other character matches itself.
-//
-// TODO(wave 1): implement. The stub matches nothing.
-func Match(pattern, s string) bool {
-	return false
-}
-
 // Request is what a guest sends to POST /g/{slug}/act.
 type Request struct {
 	EntityID string         `json:"entity_id"`
@@ -131,11 +101,51 @@ type Call struct {
 // st is the entity's current state, for fields bounded by attributes (light
 // color temperature); nil means fixed bounds only.
 //
+// The steps run in this order, and each one fails closed:
+//  1. The exact (entity_id, action) pair is in g. No trimming, no case
+//     folding.
+//  2. The action is in the catalog and its domain is the entity's domain.
+//  3. A source passes allow. A nil allow passes nothing.
+//  4. The data fits the catalog (see checkData).
+//
 // Errors: ErrForbidden when the pair is not granted or no source passes
 // allow; ErrBadData (wrapped, with the key) for an unknown key, a wrong
-// type or a value out of range.
+// type or a value out of range. A data error is only ever returned for a
+// granted pair that passed access, so it can't be used to probe for ids.
 //
-// TODO(wave 1): implement. The stub forbids everything.
+// The returned Source and Call share no maps with g.
 func Check(g Grants, req Request, st *model.State, allow AccessFunc) (Source, Call, error) {
-	return Source{}, Call{}, ErrForbidden
+	grant, ok := g[GrantKey{EntityID: req.EntityID, Action: req.Action}]
+	if !ok || grant.EntityID != req.EntityID || grant.Action != req.Action {
+		return Source{}, Call{}, ErrForbidden
+	}
+	act, ok := catalog.Lookup(req.Action)
+	if !ok || model.Domain(act.ID) != model.Domain(grant.EntityID) {
+		return Source{}, Call{}, ErrForbidden
+	}
+	if allow == nil {
+		return Source{}, Call{}, ErrForbidden
+	}
+	src, ok := grant.Pick(allow)
+	if !ok {
+		return Source{}, Call{}, ErrForbidden
+	}
+	data, err := checkData(act, req, st)
+	if err != nil {
+		return Source{}, Call{}, err
+	}
+	src.Variables = cloneMap(src.Variables)
+	if act.ID == model.ActionScriptRun {
+		vars := cloneMap(src.Variables)
+		if vars == nil {
+			vars = map[string]any{}
+		}
+		data["variables"] = vars
+	}
+	return src, Call{
+		Domain:   act.Domain,
+		Service:  act.Service,
+		EntityID: grant.EntityID,
+		Data:     data,
+	}, nil
 }
