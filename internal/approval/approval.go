@@ -74,7 +74,6 @@ const CodeLen = 4
 // fireTimeout caps one FireEvent call.
 const fireTimeout = 5 * time.Second
 
-
 var (
 	// ErrUnknownRequest means no pending request has that id: it never
 	// existed, expired, was decided already, or belongs to another link.
