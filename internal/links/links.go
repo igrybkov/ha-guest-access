@@ -128,13 +128,18 @@ func (s *Store) FindBySlug(slug string) (model.Link, bool) {
 	if err != nil {
 		s.log.Warn("load links", "err", err)
 	}
-	l, ok := ls.Find(id)
-	if !ok || l.Slug != slug {
-		// The file changed after Rev. The next call rebuilds the index.
-		s.built = false
-		return model.Link{}, false
+	if l, ok := ls.Find(id); ok && l.Slug == slug {
+		return l, true
 	}
-	return l, true
+	// The file changed after Rev. Look in what was just loaded, and make
+	// the next call rebuild the index.
+	s.built = false
+	for _, l := range ls.Links {
+		if l.Slug == slug {
+			return l, true
+		}
+	}
+	return model.Link{}, false
 }
 
 // index rebuilds bySlug. It requires s.mu.
