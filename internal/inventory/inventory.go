@@ -31,11 +31,12 @@ var registryEvents = []string{
 }
 
 // Cache builds model.Inventory snapshots on demand and keeps the last one
-// until a registry changes or it is MaxAge old. Safe for concurrent use.
+// until a registry changes or it is MaxAge old (see SetMaxAge). Safe for concurrent use.
 type Cache struct {
 	client ha.Client
 	now    func() time.Time
 	log    *slog.Logger
+	maxAge time.Duration
 
 	mu    sync.Mutex
 	inv   model.Inventory
@@ -52,7 +53,19 @@ func New(client ha.Client, log *slog.Logger) *Cache {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Cache{client: client, now: time.Now, log: log.With("component", "inventory"), watchers: map[*watcher]struct{}{}}
+	return &Cache{client: client, now: time.Now, maxAge: MaxAge, log: log.With("component", "inventory"), watchers: map[*watcher]struct{}{}}
+}
+
+// SetMaxAge sets how long a snapshot is served without a registry event,
+// instead of MaxAge. A value of 0 or less means MaxAge. Call it before
+// first use.
+func (c *Cache) SetMaxAge(d time.Duration) {
+	if d <= 0 {
+		d = MaxAge
+	}
+	c.mu.Lock()
+	c.maxAge = d
+	c.mu.Unlock()
 }
 
 // Run subscribes to registry and state events until ctx is done. It
@@ -86,7 +99,7 @@ func (c *Cache) Invalidate() {
 // kept.
 func (c *Cache) Inventory(ctx context.Context) (model.Inventory, error) {
 	c.mu.Lock()
-	if !c.built.IsZero() && c.now().Sub(c.built) < MaxAge {
+	if !c.built.IsZero() && c.now().Sub(c.built) < c.maxAge {
 		inv := c.inv
 		c.mu.Unlock()
 		return inv, nil

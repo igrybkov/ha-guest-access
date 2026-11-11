@@ -18,7 +18,10 @@ const MinKeyLen = 32
 const (
 	purposeLocation byte = 1
 	purposeSession  byte = 2
-	purposeDevice   byte = 3
+	// purposeNear is a location token that carries the measured distance
+	// to home. See SignNear.
+	purposeNear   byte = 3
+	purposeDevice byte = 4
 )
 
 // tokenVersion is the first byte of every token. Bump it to change the
@@ -38,7 +41,8 @@ const maxTokenLen = 512
 // padding) of:
 //
 //	version (1) | purpose (1) | expiry, Unix seconds (8) |
-//	[session and device only: id length (1) | id] | HMAC-SHA256 (32)
+//	[session and device only: id length (1) | id] |
+//	[near only: distance in meters, uint32 (4)] | HMAC-SHA256 (32)
 //
 // The id is the password id of a session token and the device id of a
 // device token. The HMAC covers the version, purpose, expiry, the
@@ -121,30 +125,79 @@ func tokenExpiry(token string) time.Time {
 // hasID reports whether tokens of purpose carry an id.
 func hasID(purpose byte) bool { return purpose == purposeSession || purpose == purposeDevice }
 
+// SignNear returns a location token for linkID that says the guest was
+// distanceM meters from home (accuracy included). It expires at exp.
+func (s *Signer) SignNear(linkID string, distanceM uint32, exp time.Time) string {
+	return s.encode(s.head(purposeNear, exp, func(b []byte) []byte {
+		return binary.BigEndian.AppendUint32(b, distanceM)
+	}), linkID, "")
+}
+
+// VerifyNear checks a token from SignNear for linkID at now and returns
+// the distance it holds. Location tokens from Sign and session tokens
+// never pass here, and near tokens never pass Verify or VerifySession.
+func (s *Signer) VerifyNear(linkID, token string, now time.Time) (distanceM uint32, ok bool) {
+	raw, ok := decodeToken(token)
+	if !ok || len(raw) != headLen+4+sha256.Size || raw[0] != tokenVersion || raw[1] != purposeNear {
+		return 0, false
+	}
+	body, sum := raw[:len(raw)-sha256.Size], raw[len(raw)-sha256.Size:]
+	if !hmac.Equal(sum, s.mac(body, linkID, "")) || expired(body, now) {
+		return 0, false
+	}
+	return binary.BigEndian.Uint32(body[headLen:]), true
+}
+
 func (s *Signer) sign(purpose byte, linkID, passwordID string, exp time.Time) string {
+	return s.encode(s.head(purpose, exp, func(b []byte) []byte {
+		if hasID(purpose) {
+			b = append(b, byte(len(passwordID)))
+			b = append(b, passwordID...)
+		}
+		return b
+	}), linkID, passwordID)
+}
+
+// head returns version, purpose and expiry, then what payload appends.
+func (s *Signer) head(purpose byte, exp time.Time, payload func([]byte) []byte) []byte {
 	body := []byte{tokenVersion, purpose}
 	body = binary.BigEndian.AppendUint64(body, uint64(exp.Unix()))
-	if hasID(purpose) {
-		body = append(body, byte(len(passwordID)))
-		body = append(body, passwordID...)
-	}
+	return payload(body)
+}
+
+// encode appends the MAC to body and encodes the token.
+func (s *Signer) encode(body []byte, linkID, passwordID string) string {
 	body = append(body, s.mac(body, linkID, passwordID)...)
 	return base64.RawURLEncoding.EncodeToString(body)
+}
+
+// headLen is the length of version, purpose and expiry.
+const headLen = 1 + 1 + 8
+
+// decodeToken checks the alphabet and length and decodes token.
+func decodeToken(token string) ([]byte, bool) {
+	if len(token) == 0 || len(token) > maxTokenLen || !isBase64URL(token) {
+		return nil, false
+	}
+	// Strict rejects non-zero padding bits. With the alphabet check above
+	// (the decoder skips \r and \n), each token has exactly one encoding.
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(token)
+	return raw, err == nil
+}
+
+// expired reports whether the expiry in body has passed at now.
+func expired(body []byte, now time.Time) bool {
+	return now.Unix() >= int64(binary.BigEndian.Uint64(body[2:headLen]))
 }
 
 // verify parses token, checks the MAC first and the expiry after, and
 // returns the id (empty for location tokens).
 func (s *Signer) verify(purpose byte, linkID, token string, now time.Time) (string, bool) {
-	if len(token) == 0 || len(token) > maxTokenLen || !isBase64URL(token) {
+	raw, ok := decodeToken(token)
+	if !ok {
 		return "", false
 	}
-	// Strict rejects non-zero padding bits. With the alphabet check above
-	// (the decoder skips \r and \n), each token has exactly one encoding.
-	raw, err := base64.RawURLEncoding.Strict().DecodeString(token)
-	if err != nil {
-		return "", false
-	}
-	const head = 1 + 1 + 8
+	const head = headLen
 	if len(raw) < head+sha256.Size || raw[0] != tokenVersion || raw[1] != purpose {
 		return "", false
 	}
@@ -165,8 +218,7 @@ func (s *Signer) verify(purpose byte, linkID, token string, now time.Time) (stri
 	if !hmac.Equal(sum, s.mac(body, linkID, passwordID)) {
 		return "", false
 	}
-	exp := int64(binary.BigEndian.Uint64(body[2:head]))
-	if now.Unix() >= exp {
+	if expired(body, now) {
 		return "", false
 	}
 	return passwordID, true

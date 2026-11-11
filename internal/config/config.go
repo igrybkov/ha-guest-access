@@ -1,11 +1,10 @@
-// Package config loads the process config (env and /data/options.json),
-// the HMAC key, and serves the YAML files of both sets as typed stores:
-// settings and templates in the config dir, secrets in the data dir.
-// Links have their own store in package links.
+// Package config loads the process config: env, and the app options in
+// /data/options.json (every setting the user can tune), plus the HMAC key.
+// It also serves templates.yaml of the config set as a typed store. Links
+// have their own store in package links.
 package config
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -22,7 +21,7 @@ import (
 type Config struct {
 	LogLevel    string // debug | info | warn | error
 	DataDir     string // links, secrets, HMAC key, options.json; default /data
-	ConfigDir   string // templates.yaml and settings.yaml; default /homeassistant/guest_access
+	ConfigDir   string // templates.yaml; default /homeassistant/guest_access
 	Listen      string // admin port; default :8099
 	GuestListen string // guest port; default :8888
 	HAURL       string // websocket URL
@@ -32,6 +31,8 @@ type Config struct {
 	// It is always false under Supervisor, where only the ingress proxy may
 	// reach it.
 	DevAdminAnyPeer bool
+	// Options are the app options, checked, with defaults filled in.
+	Options Options
 }
 
 const (
@@ -45,14 +46,11 @@ const (
 	DefaultGuestListen = ":8888"
 )
 
-// options is /data/options.json, written by Supervisor from the app options.
-type options struct {
-	LogLevel string `json:"log_level"`
-}
-
 // Load reads env (HA_URL, HA_TOKEN, SUPERVISOR_TOKEN, DATA_DIR, CONFIG_DIR,
-// LISTEN, GUEST_LISTEN, LOG_LEVEL, DEV_ADMIN_ANY_PEER) and
-// <DataDir>/options.json (log_level). A missing options.json is fine.
+// LISTEN, GUEST_LISTEN, LOG_LEVEL, DEV_ADMIN_ANY_PEER) and the app options
+// in <DataDir>/options.json. A missing options.json means all defaults, and
+// keys it leaves out keep theirs. Options that do not check out are an
+// error that names each bad key, so the app does not start half set up.
 //
 // Precedence: env, then options.json, then defaults. Env wins so a dev run
 // can reuse a copied options.json.
@@ -71,17 +69,20 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error)) (Co
 		GuestListen: firstNonEmpty(getenv("GUEST_LISTEN"), DefaultGuestListen),
 	}
 
-	var opts options
 	optsPath := filepath.Join(c.DataDir, "options.json")
 	raw, err := readFile(optsPath)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
+		raw = nil
 	case err != nil:
 		return Config{}, fmt.Errorf("read %s: %w", optsPath, err)
-	default:
-		if err := json.Unmarshal(raw, &opts); err != nil {
-			return Config{}, fmt.Errorf("parse %s: %w", optsPath, err)
-		}
+	}
+	opts, err := parseOptions(raw)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse %s: %w", optsPath, err)
+	}
+	if c.Options, err = opts.options(); err != nil {
+		return Config{}, fmt.Errorf("app options in %s: %w", optsPath, err)
 	}
 
 	c.LogLevel = strings.ToLower(firstNonEmpty(getenv("LOG_LEVEL"), opts.LogLevel, "info"))

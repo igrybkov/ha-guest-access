@@ -59,11 +59,19 @@ const (
 // no "--". The error wraps ErrBadSlug and says why. Uniqueness is the
 // caller's check.
 func ValidCustomSlug(s string) error {
+	return ValidCustomSlugLen(s, MinCustomSlugLen, MaxCustomSlugLen)
+}
+
+// ValidCustomSlugLen is ValidCustomSlug with the lengths from the app
+// options. minLen is raised to MinCustomSlugLen: a shorter slug is easy
+// to guess, and links.yaml refuses it.
+func ValidCustomSlugLen(s string, minLen, maxLen int) error {
+	minLen = max(minLen, MinCustomSlugLen)
 	switch {
-	case len(s) < MinCustomSlugLen:
-		return fmt.Errorf("%w: shorter than %d characters", ErrBadSlug, MinCustomSlugLen)
-	case len(s) > MaxCustomSlugLen:
-		return fmt.Errorf("%w: longer than %d characters", ErrBadSlug, MaxCustomSlugLen)
+	case len(s) < minLen:
+		return fmt.Errorf("%w: shorter than %d characters", ErrBadSlug, minLen)
+	case len(s) > maxLen:
+		return fmt.Errorf("%w: longer than %d characters", ErrBadSlug, maxLen)
 	case s[0] == '-' || s[len(s)-1] == '-':
 		return fmt.Errorf("%w: starts or ends with \"-\"", ErrBadSlug)
 	case strings.Contains(s, "--"):

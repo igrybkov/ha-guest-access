@@ -26,13 +26,6 @@ func TestFixturesOfEveryVersion(t *testing.T) {
 		if err := tpl.Validate(); err != nil || len(tpl.Templates) == 0 {
 			t.Errorf("config v%d templates: %d, %v", v, len(tpl.Templates), err)
 		}
-		st, err := store.In(set, SettingsFile, model.DefaultSettings).Load()
-		if err != nil {
-			t.Fatalf("config v%d %s: %v", v, SettingsFile, err)
-		}
-		if err := st.Validate(); err != nil {
-			t.Errorf("config v%d settings: %v", v, err)
-		}
 	}
 	for v := 1; v <= DataCurrent; v++ {
 		dir := fixtures(t, "data", v)
@@ -43,9 +36,6 @@ func TestFixturesOfEveryVersion(t *testing.T) {
 		}
 		if err := links.Validate(); err != nil || len(links.Links) == 0 {
 			t.Errorf("data v%d links: %d, %v", v, len(links.Links), err)
-		}
-		if _, err := store.In(set, SecretsFile, func() model.Secrets { return model.Secrets{} }).Load(); err != nil {
-			t.Errorf("data v%d %s: %v", v, SecretsFile, err)
 		}
 	}
 }
@@ -102,21 +92,20 @@ func copyDir(t *testing.T, dir string) string {
 	return out
 }
 
-// The data set holds slugs, password hashes and the MA token, so its files
-// are 0600. The config set stays 0644 for HA's git repo.
+// The data set holds slugs and password hashes, so its files are 0600. The config set stays 0644 for HA's git repo.
 func TestFileModes(t *testing.T) {
 	data := t.TempDir()
-	if err := store.In(OpenData(data, quietLog), SecretsFile, func() model.Secrets { return model.Secrets{} }).Save(model.Secrets{MusicAssistantToken: "t"}); err != nil {
+	if err := store.In(OpenData(data, quietLog), LinksFile, func() model.Links { return model.Links{} }).Save(model.Links{Version: DataCurrent}); err != nil {
 		t.Fatal(err)
 	}
 	config := t.TempDir()
-	if err := store.In(OpenConfig(config, quietLog), SettingsFile, model.DefaultSettings).Save(model.DefaultSettings()); err != nil {
+	if err := store.In(OpenConfig(config, quietLog), TemplatesFile, func() model.Templates { return model.Templates{} }).Save(model.Templates{Version: ConfigCurrent}); err != nil {
 		t.Fatal(err)
 	}
 	for _, tc := range []struct {
 		path string
 		want os.FileMode
-	}{{filepath.Join(data, SecretsFile), 0o600}, {filepath.Join(config, SettingsFile), 0o644}} {
+	}{{filepath.Join(data, LinksFile), 0o600}, {filepath.Join(config, TemplatesFile), 0o644}} {
 		st, err := os.Stat(tc.path)
 		if err != nil {
 			t.Fatal(err)

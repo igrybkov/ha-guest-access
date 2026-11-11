@@ -261,3 +261,38 @@ func FuzzVerify(f *testing.F) {
 		}
 	})
 }
+
+// Every token kind passes only its own check. Each kind is verified
+// against every other kind. The near distance 0x03616263 has the same
+// bytes as a session or device id "abc", so the layouts line up and only
+// the purpose byte keeps them apart.
+func TestSignerPurposesExclusive(t *testing.T) {
+	s := NewSigner(testKey)
+	exp := t0.Add(time.Hour)
+	tokens := map[string]string{
+		"location": s.Sign("l1", exp),
+		"session":  s.SignSession("l1", "abc", exp),
+		"near":     s.SignNear("l1", 0x03616263, exp),
+		"device":   s.SignDevice("l1", "abc", exp),
+	}
+	checks := map[string]func(string) bool{
+		"location": func(tk string) bool { return s.Verify("l1", tk, t0) },
+		"session":  func(tk string) bool { return ok2(s.VerifySession("l1", tk, t0)) },
+		"near":     func(tk string) bool { return okNear(s.VerifyNear("l1", tk, t0)) },
+		"device":   func(tk string) bool { return ok3(s.VerifyDevice("l1", tk, t0)) },
+	}
+	for kind, tk := range tokens {
+		for as, check := range checks {
+			if got, want := check(tk), kind == as; got != want {
+				t.Errorf("%s token checked as %s: %v, want %v", kind, as, got, want)
+			}
+		}
+	}
+	purposes := map[byte]bool{}
+	for _, p := range []byte{purposeLocation, purposeSession, purposeNear, purposeDevice} {
+		if purposes[p] {
+			t.Errorf("purpose byte %d used twice", p)
+		}
+		purposes[p] = true
+	}
+}

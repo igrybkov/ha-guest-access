@@ -261,3 +261,29 @@ func TestBuildIncludesStateOnlyEntities(t *testing.T) {
 		t.Errorf("%d entities, want 6", len(inv.Entities))
 	}
 }
+
+func TestCacheSetMaxAge(t *testing.T) {
+	ctx := context.Background()
+	f := fake()
+	f.StateList = nil
+	c := New(f, quietLog)
+	c.SetMaxAge(time.Minute)
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	c.now = func() time.Time { return now }
+	if inv, _ := c.Inventory(ctx); len(inv.Entities) != 4 {
+		t.Fatalf("first: %d", len(inv.Entities))
+	}
+	f.EntityList = f.EntityList[:1]
+	now = now.Add(59 * time.Second)
+	if inv, _ := c.Inventory(ctx); len(inv.Entities) != 4 {
+		t.Error("dropped before the set age")
+	}
+	now = now.Add(time.Second)
+	if inv, _ := c.Inventory(ctx); len(inv.Entities) != 1 {
+		t.Error("kept past the set age")
+	}
+	c.SetMaxAge(0)
+	if c.maxAge != MaxAge {
+		t.Errorf("SetMaxAge(0) = %v", c.maxAge)
+	}
+}

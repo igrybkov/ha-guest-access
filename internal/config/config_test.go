@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io/fs"
 	"log/slog"
+	"reflect"
 	"testing"
 )
 
@@ -33,8 +34,20 @@ func TestLoadSupervisor(t *testing.T) {
 		Listen: ":8099", GuestListen: ":8888",
 		HAURL: "ws://supervisor/core/websocket", HAToken: "tok", Supervisor: true,
 	}
-	if c != want {
+	checkConfig(t, c, want)
+}
+
+// checkConfig compares c to want, Options apart, and checks Options are
+// the defaults.
+func checkConfig(t *testing.T, c, want Config) {
+	t.Helper()
+	opts := c.Options
+	c.Options, want.Options = Options{}, Options{}
+	if !reflect.DeepEqual(c, want) {
 		t.Fatalf("got %+v\nwant %+v", c, want)
+	}
+	if !reflect.DeepEqual(opts, DefaultOptions()) {
+		t.Errorf("options = %+v, want the defaults", opts)
 	}
 }
 
@@ -52,9 +65,7 @@ func TestLoadDevMode(t *testing.T) {
 		Listen: "127.0.0.1:9000", GuestListen: "127.0.0.1:9001",
 		HAURL: "wss://hass.example/api/websocket", HAToken: "t", DevAdminAnyPeer: true,
 	}
-	if c != want {
-		t.Fatalf("got %+v\nwant %+v", c, want)
-	}
+	checkConfig(t, c, want)
 }
 
 func TestLoadErrors(t *testing.T) {
@@ -70,6 +81,11 @@ func TestLoadErrors(t *testing.T) {
 		{"bad options JSON", sup, map[string]string{"/data/options.json": `{`}},
 		{"bad level in options", sup, map[string]string{"/data/options.json": `{"log_level":"loud"}`}},
 		{"bad level in env", map[string]string{"SUPERVISOR_TOKEN": "t", "LOG_LEVEL": "loud"}, nil},
+		{"unknown option", sup, map[string]string{"/data/options.json": `{"log_level":"info","colour":"red"}`}},
+		{"bad trusted proxy", sup, map[string]string{"/data/options.json": `{"trusted_proxies":["npm"]}`}},
+		{"zero rate limit", sup, map[string]string{"/data/options.json": `{"rate_limits":{"guest_per_min":-1}}`}},
+		{"bad public url", sup, map[string]string{"/data/options.json": `{"public_base_url":"guest.example.com"}`}},
+		{"slug min too small", sup, map[string]string{"/data/options.json": `{"links":{"custom_slug_min_len":4}}`}},
 	} {
 		if _, err := load(env(tc.env), files(tc.files)); err == nil {
 			t.Errorf("%s: no error", tc.name)
