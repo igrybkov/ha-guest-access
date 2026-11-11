@@ -19,6 +19,19 @@ type Client struct {
 	// ViaProxy is true when the peer is a trusted proxy, so the forwarding
 	// headers were used.
 	ViaProxy bool
+	// Unresolved is true when the peer is trusted but no untrusted client
+	// address was found: no X-Forwarded-For, garbage in it, or only
+	// trusted hops. IP is then a proxy's own address. It still keys rate
+	// limits, but it must never count as local.
+	Unresolved bool
+}
+
+// Local reports whether the client is in one of nets. An unresolved
+// client is never local: a proxy that drops or mangles X-Forwarded-For
+// would otherwise make every internet request look local. Use this, not
+// IsLocal(c.IP, ...), for access decisions.
+func (c Client) Local(nets []netip.Prefix) bool {
+	return !c.Unresolved && IsLocal(c.IP, nets)
 }
 
 // ClientFrom derives the Client of r.
@@ -37,6 +50,9 @@ type Client struct {
 //     came through a hop we can't vouch for, so we never trust it.
 //   - When every entry is trusted, the client is the left-most one.
 //
+// In both cases, and with no X-Forwarded-For at all, IP is a trusted hop
+// and Unresolved is true, so Local says no.
+//
 // HTTPS then comes from the right-most X-Forwarded-Proto value, the one
 // set by the nearest proxy. Without that header, r.TLS decides.
 //
@@ -49,10 +65,11 @@ func ClientFrom(r *http.Request, trusted []netip.Prefix) Client {
 	if !peer.IsValid() || !IsLocal(peer, trusted) {
 		return direct
 	}
-	c := Client{IP: peer, HTTPS: r.TLS != nil, ViaProxy: true}
-
+	c := Client{IP: peer, HTTPS: r.TLS != nil, ViaProxy: true, Unresolved: true}
 	if xff := headerList(r.Header, "X-Forwarded-For"); len(xff) > 0 {
-		c.IP = walkXFF(xff, peer, trusted)
+		var found bool
+		c.IP, found = walkXFF(xff, peer, trusted)
+		c.Unresolved = !found
 	}
 	if xfp := headerList(r.Header, "X-Forwarded-Proto"); len(xfp) > 0 {
 		c.HTTPS = strings.EqualFold(xfp[len(xfp)-1], "https")
@@ -61,20 +78,21 @@ func ClientFrom(r *http.Request, trusted []netip.Prefix) Client {
 }
 
 // walkXFF returns the client from a forwarded-for list sent by a trusted
-// peer. See ClientFrom for the rules.
-func walkXFF(xff []string, peer netip.Addr, trusted []netip.Prefix) netip.Addr {
+// peer. found is false when the walk ends on a trusted hop. See
+// ClientFrom for the rules.
+func walkXFF(xff []string, peer netip.Addr, trusted []netip.Prefix) (ip netip.Addr, found bool) {
 	last := peer // the last trusted hop seen
 	for i := len(xff) - 1; i >= 0; i-- {
 		ip, ok := parseHop(xff[i])
 		if !ok {
-			return last
+			return last, false
 		}
 		if !IsLocal(ip, trusted) {
-			return ip
+			return ip, true
 		}
 		last = ip
 	}
-	return last
+	return last, false
 }
 
 // headerList joins every line of header name into one comma list. Each

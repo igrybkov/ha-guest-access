@@ -99,21 +99,21 @@ func TestClientFrom(t *testing.T) {
 			peer:    npm + ":443",
 			trusted: trusted,
 			headers: map[string][]string{"X-Forwarded-For": {"10.0.0.5, nonsense"}},
-			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true},
+			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true, Unresolved: true},
 		},
 		{
 			name:    "garbage behind a trusted hop: the last trusted hop",
 			peer:    npm + ":443",
 			trusted: trusted,
 			headers: map[string][]string{"X-Forwarded-For": {"10.0.0.5, unknown, " + cloudflared}},
-			want:    Client{IP: netip.MustParseAddr(cloudflared), ViaProxy: true},
+			want:    Client{IP: netip.MustParseAddr(cloudflared), ViaProxy: true, Unresolved: true},
 		},
 		{
 			name:    "empty entry is garbage",
 			peer:    npm + ":443",
 			trusted: trusted,
 			headers: map[string][]string{"X-Forwarded-For": {"10.0.0.5,,"}},
-			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true},
+			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true, Unresolved: true},
 		},
 		{
 			name:    "garbage left of the client does not matter",
@@ -155,7 +155,7 @@ func TestClientFrom(t *testing.T) {
 			peer:    npm + ":443",
 			trusted: trusted,
 			headers: map[string][]string{"X-Forwarded-For": {"[203.0.113.9]"}},
-			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true},
+			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true, Unresolved: true},
 		},
 		{
 			name:    "4in6 entry is unmapped",
@@ -176,20 +176,20 @@ func TestClientFrom(t *testing.T) {
 			peer:    npm + ":443",
 			trusted: trusted,
 			headers: map[string][]string{"X-Forwarded-For": {""}},
-			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true},
+			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true, Unresolved: true},
 		},
 		{
 			name:    "no XFF: the peer",
 			peer:    npm + ":443",
 			trusted: trusted,
-			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true},
+			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true, Unresolved: true},
 		},
 		{
 			name:    "every entry trusted: the left-most",
 			peer:    npm + ":443",
 			trusted: trusted,
 			headers: map[string][]string{"X-Forwarded-For": {cloudflared + ", " + npm}},
-			want:    Client{IP: netip.MustParseAddr(cloudflared), ViaProxy: true},
+			want:    Client{IP: netip.MustParseAddr(cloudflared), ViaProxy: true, Unresolved: true},
 		},
 		{
 			name:    "peer is 4in6",
@@ -243,35 +243,35 @@ func TestClientFrom(t *testing.T) {
 			peer:    npm + ":443",
 			trusted: trusted,
 			headers: map[string][]string{"X-Forwarded-Proto": {"http, https"}},
-			want:    Client{IP: netip.MustParseAddr(npm), HTTPS: true, ViaProxy: true},
+			want:    Client{IP: netip.MustParseAddr(npm), HTTPS: true, ViaProxy: true, Unresolved: true},
 		},
 		{
 			name:    "proto: forged https on the left loses",
 			peer:    npm + ":443",
 			trusted: trusted,
 			headers: map[string][]string{"X-Forwarded-Proto": {"https", "http"}},
-			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true},
+			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true, Unresolved: true},
 		},
 		{
 			name:    "proto: case does not matter",
 			peer:    npm + ":443",
 			trusted: trusted,
 			headers: map[string][]string{"X-Forwarded-Proto": {"HTTPS"}},
-			want:    Client{IP: netip.MustParseAddr(npm), HTTPS: true, ViaProxy: true},
+			want:    Client{IP: netip.MustParseAddr(npm), HTTPS: true, ViaProxy: true, Unresolved: true},
 		},
 		{
 			name: "proto http overrides TLS to the proxy",
 			peer: npm + ":443", tls: true,
 			trusted: trusted,
 			headers: map[string][]string{"X-Forwarded-Proto": {"http"}},
-			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true},
+			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true, Unresolved: true},
 		},
 		{
 			name:    "CF-Connecting-IP ignored even from a trusted peer",
 			peer:    npm + ":443",
 			trusted: trusted,
 			headers: map[string][]string{"Cf-Connecting-Ip": {"192.168.1.10"}, "X-Real-Ip": {"192.168.1.10"}},
-			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true},
+			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true, Unresolved: true},
 		},
 		{
 			name:    "peer that does not parse: invalid client",
@@ -295,8 +295,15 @@ func TestClientFrom(t *testing.T) {
 			for k, vs := range tc.headers {
 				r.Header[k] = vs
 			}
-			if got := ClientFrom(r, tc.trusted); got != tc.want {
+			got := ClientFrom(r, tc.trusted)
+			if got != tc.want {
 				t.Errorf("ClientFrom = %+v, want %+v", got, tc.want)
+			}
+			// The trusted proxies sit inside these nets. An unresolved
+			// client must still not be local.
+			nets := append(prefixes(t, "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fe80::/10"), tc.trusted...)
+			if local := got.Local(nets); local != (!got.Unresolved && IsLocal(got.IP, nets)) || got.Unresolved && local {
+				t.Errorf("Local = %v for %+v", local, got)
 			}
 		})
 	}
@@ -371,6 +378,14 @@ func FuzzClientFrom(f *testing.F) {
 		if !c.ViaProxy {
 			t.Fatalf("trusted peer without ViaProxy")
 		}
+		// A trusted address is never local, whatever the nets.
+		everything := prefixes(t, "0.0.0.0/0", "::/0")
+		if IsLocal(c.IP, trusted) && (!c.Unresolved || c.Local(everything)) {
+			t.Fatalf("XFF %q: trusted client %s counts as resolved or local: %+v", xff, c.IP, c)
+		}
+		if !c.Unresolved && IsLocal(c.IP, trusted) {
+			t.Fatalf("XFF %q: resolved to a trusted hop", xff)
+		}
 		// Recompute what the walk may see.
 		var entries []netip.Addr
 		cleanTail := true // every entry parsed so far, from the right
@@ -406,4 +421,44 @@ func contains(as []netip.Addr, a netip.Addr) bool {
 		}
 	}
 	return false
+}
+
+// Every way the walk can end on a proxy gives an unresolved client that
+// is never local, though the proxy's own IP is in the local nets.
+func TestClientUnresolvedNeverLocal(t *testing.T) {
+	trusted := prefixes(t, "172.30.33.0/24")
+	local := prefixes(t, "172.16.0.0/12", "192.168.0.0/16")
+	for name, xff := range map[string][]string{
+		"no XFF":         nil,
+		"empty XFF":      {""},
+		"garbage":        {"unknown"},
+		"garbage behind": {"203.0.113.9, junk, " + cloudflared},
+		"only trusted":   {cloudflared + ", " + npm},
+		"empty entry":    {"192.168.1.10,,"},
+	} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = npm + ":443"
+		if xff != nil {
+			r.Header["X-Forwarded-For"] = xff
+		}
+		c := ClientFrom(r, trusted)
+		if !c.Unresolved || c.Local(local) {
+			t.Errorf("%s: %+v, Local=%v", name, c, c.Local(local))
+		}
+		if !IsLocal(c.IP, local) {
+			t.Errorf("%s: test is weak, %s is not in the local nets", name, c.IP)
+		}
+	}
+	// A resolved LAN client behind the proxy is local.
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = npm + ":443"
+	r.Header.Set("X-Forwarded-For", "192.168.1.10")
+	if c := ClientFrom(r, trusted); c.Unresolved || !c.Local(local) {
+		t.Errorf("LAN client behind proxy: %+v", c)
+	}
+	// A direct LAN peer with no proxies is local.
+	r.RemoteAddr = "192.168.1.10:5555"
+	if c := ClientFrom(r, nil); c.Unresolved || !c.Local(local) {
+		t.Errorf("direct LAN peer: %+v", c)
+	}
 }
