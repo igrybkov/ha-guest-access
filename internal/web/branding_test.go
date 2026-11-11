@@ -162,3 +162,71 @@ func TestBrandingHiddenWhenInactive(t *testing.T) {
 		noLinkText(t, name+" events", h.g(req{method: "GET", path: base + "/events"}))
 	}
 }
+
+// The page shell carries the global title and welcome, escaped, and
+// nothing of the link.
+func TestPageShellBranding(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		title, welcome string
+		want, notWant  []string
+	}{
+		{"global text", "Global title", "Global welcome",
+			[]string{"<title>Global title</title>", `<h1 id="title">Global title</h1>`, `<p id="welcome">Global welcome</p>`}, []string{"{{"}},
+		{"no welcome", "Casa", "",
+			[]string{"<title>Casa</title>", `<p id="welcome" hidden></p>`}, []string{"{{"}},
+		{"empty title", "", "",
+			[]string{"<title>Welcome</title>"}, nil},
+		{"escaped", `<b>&"x"`, `<script>alert(1)</script>`,
+			[]string{"<title>&lt;b&gt;&amp;&#34;x&#34;</title>", "&lt;script&gt;alert(1)&lt;/script&gt;"}, []string{"<b>", "<script>alert"}},
+		{"no recursion", "{{WELCOME}}", "w",
+			[]string{"<title>{{WELCOME}}</title>"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, func(o *config.Options, _ *Deps) {
+				o.Settings.Guest.Title, o.Settings.Guest.Welcome = tc.title, tc.welcome
+			})
+			l := h.brandLink(ownText)
+			rec := h.g(req{method: "GET", path: "/g/" + l.Slug})
+			body := rec.Body.String()
+			for _, s := range tc.want {
+				if !strings.Contains(body, s) {
+					t.Errorf("page lacks %q", s)
+				}
+			}
+			for _, s := range tc.notWant {
+				if strings.Contains(body, s) {
+					t.Errorf("page has %q", s)
+				}
+			}
+			noLinkText(t, "page", rec)
+		})
+	}
+}
+
+// The admin API returns the guest text, and a save of what it returned
+// keeps it.
+func TestAdminLinkGuestText(t *testing.T) {
+	h := newHarness(t)
+	draft := map[string]any{"name": "Anna", "valid_until": t0.Add(48 * time.Hour), "templates": []string{"guest_room"},
+		"guest_title": "Hi Anna", "guest_welcome": "Line 1\nLine 2"}
+	rec := h.a(req{method: "POST", path: "/api/links", body: draft})
+	if rec.Code != 201 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	id := decode[linkView](t, rec).ID
+	got := decode[map[string]any](t, h.a(req{method: "GET", path: "/api/links/" + id}))
+	if got["guest_title"] != "Hi Anna" || got["guest_welcome"] != "Line 1\nLine 2" {
+		t.Fatalf("get: %v %v", got["guest_title"], got["guest_welcome"])
+	}
+	if rec := h.a(req{method: "PUT", path: "/api/links/" + id, body: draft}); rec.Code != 200 {
+		t.Fatalf("put: %d %s", rec.Code, rec.Body)
+	}
+	if l, _ := h.links.Get(id); l.GuestTitle != "Hi Anna" || l.GuestWelcome != "Line 1\nLine 2" {
+		t.Errorf("after put: %q %q", l.GuestTitle, l.GuestWelcome)
+	}
+	draft["guest_title"] = "a\nb"
+	if rec := h.a(req{method: "PUT", path: "/api/links/" + id, body: draft}); rec.Code != 400 || !strings.Contains(rec.Body.String(), "guest_title") {
+		t.Errorf("bad title: %d %s", rec.Code, rec.Body)
+	}
+}

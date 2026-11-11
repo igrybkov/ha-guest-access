@@ -2,8 +2,10 @@ package web
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
+	"html"
 	"html/template"
 	"io/fs"
 	"mime"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/igrybkov/ha-guest-access/internal/model"
 	"github.com/igrybkov/ha-guest-access/internal/web/ui"
 )
 
@@ -126,11 +129,21 @@ func (a *assetSet) renderNotFound(title, message string) []byte {
 	return b.Bytes()
 }
 
-// servePage writes the guest page shell. It holds no link data: the page
-// script asks the API.
-func (a *assetSet) servePage(w http.ResponseWriter) {
+// servePage writes the guest page shell with the global title and
+// welcome, escaped. It holds no link data: the page script asks the API,
+// and /state replaces the text once the guest is in.
+func (a *assetSet) servePage(w http.ResponseWriter, gs model.GuestSettings) {
+	hidden := ""
+	if gs.Welcome == "" {
+		hidden = " hidden"
+	}
+	page := strings.NewReplacer(
+		"{{TITLE}}", html.EscapeString(cmp.Or(gs.Title, "Welcome")),
+		"{{WELCOME_HIDDEN}}", hidden,
+		"{{WELCOME}}", html.EscapeString(gs.Welcome),
+	).Replace(string(a.page))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(a.page)
+	_, _ = w.Write([]byte(page))
 }
 
 // adminCSP goes on the admin page. HA shows it in an iframe on its own

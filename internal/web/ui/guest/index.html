@@ -5,15 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="light dark">
-<title>Welcome</title>
+<title>{{TITLE}}</title>
 <link rel="stylesheet" href="{{ASSETS}}/guest.css">
 <script type="module" src="{{ASSETS}}/guest.js"></script>
 </head>
 <body>
 <main id="app">
   <header>
-    <h1 id="title">Welcome</h1>
-    <p id="welcome" hidden></p>
+    <h1 id="title">{{TITLE}}</h1>
+    <p id="welcome"{{WELCOME_HIDDEN}}>{{WELCOME}}</p>
   </header>
 
   <section id="view-loading" class="view">

@@ -26,7 +26,7 @@ const (
 	eventLockout = "guest_access_lockout"
 )
 
-func (s *Server) guestPage(g *guestReq) { s.assets.servePage(g.w) }
+func (s *Server) guestPage(g *guestReq) { s.assets.servePage(g.w, g.st.Guest) }
 
 // passwordBody is POST /g/{slug}/password.
 type passwordBody struct {
