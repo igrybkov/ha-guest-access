@@ -96,6 +96,8 @@ button[aria-pressed="true"] { border-color: var(--primary); outline: 2px solid v
 .field > span { font-size: 0.85em; color: var(--muted); }
 .field input, .field select { width: 100%; }
 .check { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.tpl-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tpl-move { display: flex; gap: 2px; }
 .hint { display: block; margin: -6px 0 4px 26px; }
 fieldset { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 legend { padding: 0 4px; font-weight: 600; }

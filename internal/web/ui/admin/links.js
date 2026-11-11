@@ -5,7 +5,7 @@ import {
 } from './dom.js';
 import {
   paths, PRESETS, preset, toLocalInput, fromLocalInput, zoneNote, fmtTime, fmtWindow, buildLink, linkForm,
-  approvalMode, splitTemplates, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
+  approvalMode, splitTemplates, templateRows, moveItem, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
   linkProblems, brokenLinkNote, removePasswordPrompt,
 } from './lib.js';
 import { Slots, ruleEditor, loadInventory } from './rules.js';
@@ -146,21 +146,43 @@ async function editor(view, id) {
   from.addEventListener('change', readWindow);
   until.addEventListener('change', readWindow);
 
-  // Templates to tick.
-  const tplBox = h('div', { class: 'stack tight' }, templates.length
-    ? templates.map((t) => {
-      const cb = h('input', { type: 'checkbox', checked: f.templates.includes(t.id) });
+  // Templates to tick. Ticked ones can be moved up and down: the guest
+  // page shows its groups in this order.
+  const tplBox = h('div', { class: 'stack tight' });
+  const missingNotes = missingTpls.map((tid) =>
+    h('p', { class: 'warning small', text: `Template "${tid}" no longer exists. It is left out when you save.` }));
+  const drawTemplates = () => {
+    if (!templates.length) {
+      fill(tplBox, h('p', { class: 'muted' }, 'No templates yet. ', h('a', { href: '#/templates/new', text: 'Make one' }), ' or add a rule below.'), ...missingNotes);
+      return;
+    }
+    const n = f.templates.length;
+    // A redraw drops focus, so give it back to the same button on the
+    // moved row. The keyboard user can then press it again.
+    const move = (i, d) => (e) => {
+      const label = e.currentTarget.getAttribute('aria-label');
+      moveItem(f.templates, i, d);
+      drawTemplates();
+      schedule();
+      const btn = [...tplBox.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === label);
+      if (btn && !btn.disabled) btn.focus();
+    };
+    fill(tplBox, ...templateRows(f.templates, templates).map(({ t, ticked }, i) => {
+      const cb = h('input', { type: 'checkbox', checked: ticked });
       cb.addEventListener('change', () => {
         if (cb.checked) f.templates.push(t.id);
         else f.templates.splice(f.templates.indexOf(t.id), 1);
+        drawTemplates();
         schedule();
       });
-      return h('label', { class: 'check' }, cb, h('span', { text: t.name }), h('code', { class: 'muted small', text: t.id }));
-    })
-    : h('p', { class: 'muted' }, 'No templates yet. ', h('a', { href: '#/templates/new', text: 'Make one' }), ' or add a rule below.'));
-  for (const tid of missingTpls) {
-    tplBox.append(h('p', { class: 'warning small', text: `Template "${tid}" no longer exists. It is left out when you save.` }));
-  }
+      return h('div', { class: 'tpl-row' },
+        h('label', { class: 'check' }, cb, h('span', { text: t.name }), h('code', { class: 'muted small', text: t.id })),
+        ticked && n > 1 && h('span', { class: 'tpl-move' },
+          h('button', { type: 'button', class: 'icon', text: '↑', disabled: i === 0, 'aria-label': `Move ${t.name} up`, onclick: move(i, -1) }),
+          h('button', { type: 'button', class: 'icon', text: '↓', disabled: i === n - 1, 'aria-label': `Move ${t.name} down`, onclick: move(i, 1) })));
+    }), ...missingNotes);
+  };
+  drawTemplates();
 
   // Extra rules.
   const rulesBox = h('div', { class: 'stack' });

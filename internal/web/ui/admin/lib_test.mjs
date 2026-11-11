@@ -5,7 +5,7 @@ import {
   wildcardOnly, patternProblem, selectorProblems, matchPattern, pickedEntities, actionChoices, searchOptions,
   preset, toLocalInput, fromLocalInput, buildTemplate, buildLink, buildRule, ruleState, linkForm, cleanAccess,
   parseVarValue, slugifyID, normalizeTemplatePath, parentPath, fieldFor, groupProblems,
-  approvalMode, splitTemplates, linkBadges, rotateWarning, grantSummary,
+  approvalMode, splitTemplates, templateRows, moveItem, linkBadges, rotateWarning, grantSummary,
   auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections, settingsWarnings, addMonth, PRESETS,
   linkProblems, removePasswordPrompt, wallToUTC, wallParts, usableZone, browserZone, zoneNote, fmtTime, fmtWindow,
   PENDING_ROUTE, wantsPending, haRoutePath, pollMs, ago, pendingRows, pendingBadge,
@@ -397,6 +397,21 @@ test('splitTemplates drops ids that no longer exist', () => {
   const ts = [{ id: 'a' }, { id: 'b' }];
   assert.deepEqual(splitTemplates(['a', 'gone', 'b'], ts), { keep: ['a', 'b'], missing: ['gone'] });
   assert.deepEqual(splitTemplates([], ts), { keep: [], missing: [] });
+});
+
+test('templateRows puts ticked templates first, in link order', () => {
+  const ts = [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }];
+  const rows = templateRows(['c', 'gone', 'a'], ts);
+  assert.deepEqual(rows.map((r) => [r.t.id, r.ticked]), [['c', true], ['a', true], ['b', false], ['d', false]]);
+  assert.deepEqual(templateRows([], ts).map((r) => r.t.id), ['a', 'b', 'c', 'd']);
+});
+
+test('moveItem swaps neighbours and ignores moves past the ends', () => {
+  assert.deepEqual(moveItem(['a', 'b', 'c'], 2, -1), ['a', 'c', 'b']);
+  assert.deepEqual(moveItem(['a', 'b', 'c'], 0, 1), ['b', 'a', 'c']);
+  assert.deepEqual(moveItem(['a', 'b', 'c'], 0, -1), ['a', 'b', 'c']);
+  assert.deepEqual(moveItem(['a', 'b', 'c'], 2, 1), ['a', 'b', 'c']);
+  assert.deepEqual(moveItem([], 0, 1), []);
 });
 
 test('grantSummary groups by entity', () => {

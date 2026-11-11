@@ -423,6 +423,25 @@ export function splitTemplates(ids, templates) {
   return { keep: ids.filter((id) => have.has(id)), missing: ids.filter((id) => !have.has(id)) };
 }
 
+// templateRows orders the template picker. Ticked templates come first,
+// in the link's order, which is also the order of the groups the guest
+// sees. Unticked templates follow in templates.yaml order.
+export function templateRows(ids, templates) {
+  const byID = new Map(templates.map((t) => [t.id, t]));
+  const ticked = ids.filter((id) => byID.has(id)).map((id) => byID.get(id));
+  const rest = templates.filter((t) => !ids.includes(t.id));
+  return [...ticked.map((t) => ({ t, ticked: true })), ...rest.map((t) => ({ t, ticked: false }))];
+}
+
+// moveItem moves ids[i] by delta places in place. A move past either end
+// does nothing.
+export function moveItem(ids, i, delta) {
+  const j = i + delta;
+  if (i < 0 || i >= ids.length || j < 0 || j >= ids.length) return ids;
+  [ids[i], ids[j]] = [ids[j], ids[i]];
+  return ids;
+}
+
 // approvalMode names a link's approval setting.
 export function approvalMode(a) {
   if (!a || (!a.manual && !a.self_service)) return 'off';

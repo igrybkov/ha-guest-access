@@ -326,14 +326,16 @@ const DRAW = {
     return parts;
   },
 
+  // Like a light, the speed slider shows only while the fan is on. A fan
+  // with no on/off grant keeps the slider, since it is the only way to
+  // start it.
   fan(card, actions, st) {
     const parts = [];
-    if (findAction(actions, 'fan.turn_on') || findAction(actions, 'fan.turn_off')) {
-      parts.push(row(toggle(card, 'fan', actions, st)));
-    }
+    const canToggle = !!(findAction(actions, 'fan.turn_on') || findAction(actions, 'fan.turn_off'));
+    if (canToggle) parts.push(row(toggle(card, 'fan', actions, st)));
     const sp = findAction(actions, 'fan.set_percentage');
     const b = sp && !sp.used && sliderBounds((sp.fields || {}).percentage, {});
-    if (b) {
+    if (b && (!canToggle || (st && st.state === 'on'))) {
       const attrs = (st && st.attributes) || {};
       parts.push(slider(card, 'speed', 'Speed', b, clamp(attrs.percentage, b), pct,
         (v) => card.send('fan.set_percentage', { percentage: v })));
