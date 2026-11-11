@@ -22,4 +22,8 @@ type Client interface {
 	// JSON-RPC over POST /api). It is fetched fresh on each guest page
 	// load.
 	PartyURL(ctx context.Context) (string, error)
+	// CheckToken reports whether MA takes the token, with a command that
+	// changes nothing in MA. It returns nil, ErrUnauthorized, or another
+	// error that wraps ErrUnavailable.
+	CheckToken(ctx context.Context) error
 }

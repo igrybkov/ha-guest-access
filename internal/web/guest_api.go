@@ -603,8 +603,9 @@ func (s *Server) RunMACheck(ctx context.Context) {
 	}
 }
 
-// checkMA asks Music Assistant for the party URL once and notes whether
-// it took the token. MA down or slow changes nothing.
+// checkMA asks Music Assistant once whether it takes the token, with
+// ma.Client.CheckToken, which changes nothing in MA. MA down or slow
+// changes nothing here.
 func (s *Server) checkMA(ctx context.Context) {
 	o := s.deps.Options
 	client, err := s.newMA(o.Settings.MusicAssistant.URL, o.MusicAssistantToken, o.MATimeout)
@@ -614,7 +615,7 @@ func (s *Server) checkMA(ctx context.Context) {
 	}
 	mctx, cancel := context.WithTimeout(ctx, o.MATimeout)
 	defer cancel()
-	_, err = client.PartyURL(mctx)
+	err = client.CheckToken(mctx)
 	if ctx.Err() != nil {
 		return
 	}

@@ -799,7 +799,17 @@ func (f failMA) PartyURL(context.Context) (string, error) {
 	return "", ma.ErrUnavailable
 }
 
+func (f failMA) CheckToken(context.Context) error {
+	f.t.Error("MA called while not configured")
+	return ma.ErrUnavailable
+}
+
 type blockMA struct{}
+
+func (blockMA) CheckToken(ctx context.Context) error {
+	<-ctx.Done()
+	return ma.ErrUnavailable
+}
 
 func (blockMA) PartyURL(ctx context.Context) (string, error) {
 	<-ctx.Done()
@@ -809,6 +819,7 @@ func (blockMA) PartyURL(ctx context.Context) (string, error) {
 type urlMA string
 
 func (u urlMA) PartyURL(context.Context) (string, error) { return string(u), nil }
+func (urlMA) CheckToken(context.Context) error           { return nil }
 
 // A bad HMAC key stops startup; it is never replaced.
 func TestE2EBadKeyStopsStartup(t *testing.T) {

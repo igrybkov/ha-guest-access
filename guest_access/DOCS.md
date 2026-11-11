@@ -465,7 +465,7 @@ To turn it on:
 
 The app asks MA for the join URL each time the page needs it. The call times out after `music_assistant.timeout_ms` milliseconds (2000). If MA is down, slow or refuses the token, the button is left out and nothing else changes.
 
-The app also checks the token once at start, and then every `music_assistant.check_interval_min` minutes (60). A refused token shows as a warning on the Settings and Diagnostics pages, before a guest finds the button missing. Without Music Assistant set up, the app never calls it.
+The app also checks the token once at start, and then every `music_assistant.check_interval_min` minutes (60). The check asks MA who the token belongs to (`auth/me`). It creates nothing in MA: only a guest's tap on the party button asks for a join URL, and MA may make a join code then. A refused token shows as a warning on the Settings and Diagnostics pages, before a guest finds the button missing. Without Music Assistant set up, the app never calls it.
 
 A long-lived token expires. When it does, the party button disappears. Make a new token and update the option.
 

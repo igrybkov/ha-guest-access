@@ -259,6 +259,11 @@ type stubMA struct {
 	block bool
 }
 
+func (m stubMA) CheckToken(ctx context.Context) error {
+	_, err := m.PartyURL(ctx)
+	return err
+}
+
 func (m stubMA) PartyURL(ctx context.Context) (string, error) {
 	if m.block {
 		<-ctx.Done()

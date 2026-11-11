@@ -74,38 +74,66 @@ func NewWithTimeout(baseURL, token string, timeout time.Duration) (Client, error
 	}, nil
 }
 
+// tokenCheckCommand is the command CheckToken sends. In the MA server it
+// is "auth/me" (music_assistant/controllers/webserver/auth.py,
+// AuthenticationManager.get_current_user_info): it needs an authenticated
+// token, asks for no scope, and only reads the caller's user record. A
+// bad token gets 401 from _authenticate_api_command in
+// music_assistant/controllers/webserver/controller.py. "party/url" is no
+// good here: it creates a join code and a guest user when none is active.
+const tokenCheckCommand = "auth/me"
+
 // PartyURL runs "party/url". Every failure wraps ErrUnavailable. Errors
-// never hold the token or the join URL, which carries a join code.
+// never hold the token or the join URL, which carries a join code. It may
+// make MA create a join code, so call it only for a guest's tap.
 func (c *HTTPClient) PartyURL(ctx context.Context) (string, error) {
+	raw, err := c.call(ctx, "party/url")
+	if err != nil {
+		return "", err
+	}
+	return parsePartyURL(raw)
+}
+
+// CheckToken runs tokenCheckCommand and drops the reply. It changes
+// nothing in MA.
+func (c *HTTPClient) CheckToken(ctx context.Context) error {
+	_, err := c.call(ctx, tokenCheckCommand)
+	return err
+}
+
+// call sends one command with no arguments and returns the raw reply.
+// 401 and 403 are ErrUnauthorized; every other failure wraps
+// ErrUnavailable.
+func (c *HTTPClient) call(ctx context.Context, command string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
-	body, _ := json.Marshal(map[string]any{"message_id": messageID(), "command": "party/url", "args": map[string]any{}})
+	body, _ := json.Marshal(map[string]any{"message_id": messageID(), "command": command, "args": map[string]any{}})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrUnavailable, errors.Unwrap(err)) // *url.Error repeats the URL
+		return nil, fmt.Errorf("%w: %v", ErrUnavailable, errors.Unwrap(err)) // *url.Error repeats the URL
 	}
 	defer resp.Body.Close()
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
-		return "", ErrUnauthorized
+		return nil, ErrUnauthorized
 	case resp.StatusCode != http.StatusOK:
-		return "", fmt.Errorf("%w: status %d", ErrUnavailable, resp.StatusCode)
+		return nil, fmt.Errorf("%w: status %d", ErrUnavailable, resp.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponse+1))
 	if err != nil {
-		return "", fmt.Errorf("%w: read: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: read: %v", ErrUnavailable, err)
 	}
 	if len(raw) > maxResponse {
-		return "", fmt.Errorf("%w: reply over %d bytes", ErrUnavailable, maxResponse)
+		return nil, fmt.Errorf("%w: reply over %d bytes", ErrUnavailable, maxResponse)
 	}
-	return parsePartyURL(raw)
+	return raw, nil
 }
 
 // parsePartyURL reads MA's reply to "party/url". Only an absolute http or

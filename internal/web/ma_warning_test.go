@@ -2,7 +2,10 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,6 +35,11 @@ func (m *switchMA) PartyURL(context.Context) (string, error) {
 		return "", m.err
 	}
 	return "https://ma.example/party?code=x", nil
+}
+
+func (m *switchMA) CheckToken(ctx context.Context) error {
+	_, err := m.PartyURL(ctx)
+	return err
 }
 
 // A token MA refuses shows as a warning in the settings and the
@@ -87,14 +95,21 @@ func withLog(buf *lockedBuffer) harnessOpt {
 	return func(_ *config.Options, d *Deps) { d.Logger = slog.New(slog.NewTextHandler(buf, nil)) }
 }
 
-// countMA counts PartyURL calls and answers with switchMA.
+// countMA counts token checks and party calls, and answers with
+// switchMA.
 type countMA struct {
 	switchMA
-	n atomic.Int32
+	n     atomic.Int32 // token checks
+	party atomic.Int32 // PartyURL calls
+}
+
+func (m *countMA) CheckToken(ctx context.Context) error {
+	m.n.Add(1)
+	return m.switchMA.CheckToken(ctx)
 }
 
 func (m *countMA) PartyURL(ctx context.Context) (string, error) {
-	m.n.Add(1)
+	m.party.Add(1)
 	return m.switchMA.PartyURL(ctx)
 }
 
@@ -134,6 +149,9 @@ func TestMATokenCheckOnce(t *testing.T) {
 	if n := stub.n.Load(); n != 1 {
 		t.Errorf("%d checks, want 1", n)
 	}
+	if n := stub.party.Load(); n != 0 {
+		t.Errorf("the token check called party/url %d times", n)
+	}
 }
 
 // Without Music Assistant set up there is no check and no call.
@@ -145,5 +163,53 @@ func TestMATokenCheckOff(t *testing.T) {
 	h.srv.RunMACheck(t.Context())
 	if n := stub.n.Load(); n != 0 {
 		t.Errorf("%d calls with MA off", n)
+	}
+}
+
+// The token check, through the real MA client against an httptest MA,
+// sends only auth/me. A 401 marks the token refused and a later success
+// clears the mark. party/url is never sent.
+func TestMATokenCheckOverHTTP(t *testing.T) {
+	var mu sync.Mutex
+	var sent []string
+	status := http.StatusUnauthorized
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg struct {
+			Command string `json:"command"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		mu.Lock()
+		sent = append(sent, msg.Command)
+		code := status
+		mu.Unlock()
+		if code != http.StatusOK {
+			http.Error(w, "Authentication required", code)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"user_id":"u1"}`))
+	}))
+	t.Cleanup(srv.Close)
+	h := newHarness(t, func(o *config.Options, d *Deps) {
+		o.Settings.MusicAssistant.URL = srv.URL
+		o.MusicAssistantToken = "tok"
+		o.MACheckInterval = 20 * time.Millisecond
+		d.NewMA = nil // the real HTTP client
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { h.srv.RunMACheck(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	waitUntil(t, func() bool { return h.srv.maRefused.Load() })
+	mu.Lock()
+	status = http.StatusOK
+	mu.Unlock()
+	waitUntil(t, func() bool { return !h.srv.maRefused.Load() })
+	mu.Lock()
+	defer mu.Unlock()
+	for _, c := range sent {
+		if c != "auth/me" {
+			t.Errorf("the token check sent %q", c)
+		}
 	}
 }
