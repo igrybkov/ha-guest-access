@@ -1,11 +1,11 @@
 // Links screen: the list and the editor. After a save the editor also
 // shows the URL and QR code, passwords, devices and recent activity.
 import {
-  h, fill, get, post, put, del, toast, run, ask, field, check, back, debounce, table, copyText, APIError,
+  h, fill, get, post, put, del, toast, run, ask, field, check, back, debounce, table, copyText, settings, APIError,
 } from './dom.js';
 import {
   paths, PRESETS, preset, toLocalInput, fromLocalInput, fmtTime, fmtWindow, buildLink, linkForm,
-  approvalMode, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult,
+  approvalMode, splitTemplates, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult,
 } from './lib.js';
 import { Slots, ruleEditor, loadInventory } from './rules.js';
 
@@ -95,6 +95,10 @@ async function editor(view, id) {
   ]);
   const templates = tpls.templates || [];
   const f = linkForm(linkView || {});
+  // A template the link names but that no longer exists is dropped from
+  // the form, or every save would fail.
+  const { keep, missing: missingTpls } = splitTemplates(f.templates, templates);
+  f.templates = keep;
   const slots = new Slots();
   const reload = () => editor(view, id);
 
@@ -150,9 +154,8 @@ async function editor(view, id) {
       return h('label', { class: 'check' }, cb, h('span', { text: t.name }), h('code', { class: 'muted small', text: t.id }));
     })
     : h('p', { class: 'muted' }, 'No templates yet. ', h('a', { href: '#/templates/new', text: 'Make one' }), ' or add a rule below.'));
-  // A template the link names but that no longer exists stays visible.
-  for (const tid of f.templates.filter((x) => !templates.some((t) => t.id === x))) {
-    tplBox.append(h('p', { class: 'warning small', text: `Template "${tid}" no longer exists. Save to drop it.` }));
+  for (const tid of missingTpls) {
+    tplBox.append(h('p', { class: 'warning small', text: `Template "${tid}" no longer exists. It is left out when you save.` }));
   }
 
   // Extra rules.
@@ -173,7 +176,8 @@ async function editor(view, id) {
   const oneTime = h('input', { type: 'checkbox', checked: f.one_time });
   oneTime.addEventListener('change', () => { f.one_time = oneTime.checked; });
   const customSlug = h('input', { type: 'checkbox' });
-  const slug = h('input', { placeholder: 'at least 12 of a-z, 0-9 and -', hidden: true, autocomplete: 'off', spellcheck: 'false' });
+  const minSlug = settings().tunables?.custom_slug_min_len;
+  const slug = h('input', { placeholder: minSlug ? `at least ${minSlug} of a-z, 0-9 and -` : 'a-z, 0-9 and -', hidden: true, autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Custom slug' });
   const slugWarn = h('p', { class: 'warning small', hidden: true, text: 'A custom slug is easier to guess than a random one. Use a long one, and add a password.' });
   customSlug.addEventListener('change', () => {
     f.customSlug = customSlug.checked;

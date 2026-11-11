@@ -312,6 +312,13 @@ export function linkForm(v = {}) {
   };
 }
 
+// splitTemplates splits a link's template ids into those that exist and
+// those that don't. The server refuses a save that names a missing one.
+export function splitTemplates(ids, templates) {
+  const have = new Set(templates.map((t) => t.id));
+  return { keep: ids.filter((id) => have.has(id)), missing: ids.filter((id) => !have.has(id)) };
+}
+
 // approvalMode names a link's approval setting.
 export function approvalMode(a) {
   if (!a || (!a.manual && !a.self_service)) return 'off';

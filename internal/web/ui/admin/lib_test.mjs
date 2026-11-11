@@ -5,7 +5,7 @@ import {
   wildcardOnly, patternProblem, selectorProblems, matchPattern, pickedEntities, actionChoices, searchOptions,
   preset, toLocalInput, fromLocalInput, buildTemplate, buildLink, buildRule, ruleState, linkForm, cleanAccess,
   parseVarValue, slugifyID, normalizeTemplatePath, parentPath, fieldFor, groupProblems,
-  approvalMode, linkBadges, rotateWarning, grantSummary,
+  approvalMode, splitTemplates, linkBadges, rotateWarning, grantSummary,
   auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths,
 } from './lib.js';
 
@@ -299,6 +299,12 @@ test('approval modes, badges and the rotate warning', () => {
   assert.deepEqual(linkBadges({}), []);
   assert.match(rotateWarning(linkView), /Reset devices/);
   assert.equal(rotateWarning({}), '');
+});
+
+test('splitTemplates drops ids that no longer exist', () => {
+  const ts = [{ id: 'a' }, { id: 'b' }];
+  assert.deepEqual(splitTemplates(['a', 'gone', 'b'], ts), { keep: ['a', 'b'], missing: ['gone'] });
+  assert.deepEqual(splitTemplates([], ts), { keep: [], missing: [] });
 });
 
 test('grantSummary groups by entity', () => {

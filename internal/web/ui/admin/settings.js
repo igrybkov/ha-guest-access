@@ -63,7 +63,7 @@ export async function render(view) {
       ['Max location accuracy (m)', t.max_accuracy_m],
       ['Password window per IP (min)', t.password_window_per_ip_min],
       ['Password window per link (min)', t.password_window_per_link_min],
-      ['Custom slug length', `${t.custom_slug_min_len} to ${t.custom_slug_max_len}`],
+      ['Custom slug length', t.custom_slug_min_len != null ? `${t.custom_slug_min_len} to ${t.custom_slug_max_len}` : null],
       ['Guest body limit (KiB)', t.guest_body_kib],
       ['Admin body limit (KiB)', t.admin_body_kib],
       ['Diagnostics kept', t.diagnostics_requests],
