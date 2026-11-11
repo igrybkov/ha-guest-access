@@ -87,10 +87,9 @@ func main() {
 // options are the parts of run that tests replace. Zero values mean the
 // production defaults.
 type options struct {
-	Logger      *slog.Logger
-	Now         func() time.Time
-	NewMA       func(url, token string, timeout time.Duration) (ma.Client, error)
-	StreamCheck time.Duration
+	Logger *slog.Logger
+	Now    func() time.Time
+	NewMA  func(url, token string, timeout time.Duration) (ma.Client, error)
 }
 
 // run wires the app, serves the admin port on adminLn and the guest port
@@ -153,6 +152,7 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		EventsPerHour: o.Approval.EventsPerHour,
 		TouchThrottle: o.Approval.TouchThrottle,
 		MaxBodyBytes:  o.GuestBodyBytes,
+		EventTimeout:  o.HAEventTimeout,
 	})
 	if err := devices.Run(ctx, client.SubscribeEvents); err != nil { // returns once subscribed
 		closeAll()
@@ -170,7 +170,6 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		NewMA:           opts.NewMA,
 		DevAdminAnyPeer: cfg.DevAdminAnyPeer,
 		Now:             opts.Now,
-		StreamCheck:     opts.StreamCheck,
 		Version:         version,
 		Logger:          log,
 	})

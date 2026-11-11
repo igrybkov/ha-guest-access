@@ -121,6 +121,7 @@ func startApp(t *testing.T, o appOpts) *app {
 	}
 	opts := config.DefaultOptions()
 	opts.PublicBaseURL = "https://guest.example.com"
+	opts.StreamCheck = 20 * time.Millisecond
 	if o.options != nil {
 		o.options(&opts)
 	}
@@ -146,9 +147,8 @@ func startApp(t *testing.T, o appOpts) *app {
 	a := &app{t: t, admin: "http://" + adminLn.Addr().String(), guest: "http://" + guestLn.Addr().String(),
 		ha: srv, fake: fake, failHA: failHA, now: now, done: make(chan error, 1), stop: cancel}
 	ro := options{
-		Logger:      slog.New(slog.DiscardHandler),
-		Now:         func() time.Time { return *now.Load() },
-		StreamCheck: 20 * time.Millisecond,
+		Logger: slog.New(slog.DiscardHandler),
+		Now:    func() time.Time { return *now.Load() },
 	}
 	if o.ma != nil {
 		c := o.ma

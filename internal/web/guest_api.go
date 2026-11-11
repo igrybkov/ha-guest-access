@@ -383,7 +383,7 @@ func (s *Server) guestAct(g *guestReq) {
 
 	// A guest who closes the tab must not cancel a call that may already
 	// have run: the refund would then be wrong.
-	hctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), haCallTimeout)
+	hctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.deps.Options.HACallTimeout)
 	defer cancel()
 	if _, err := s.deps.HA.CallService(hctx, call.Domain, call.Service, call.Data,
 		&ha.Target{EntityID: []string{call.EntityID}}, false); err != nil {
@@ -404,7 +404,7 @@ func (s *Server) guestAct(g *guestReq) {
 // fire sends an HA event. A failure is logged and never fails the
 // request.
 func (s *Server) fire(ctx context.Context, typ string, data map[string]any) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), haEventTimeout)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.deps.Options.HAEventTimeout)
 	defer cancel()
 	if err := s.deps.HA.FireEvent(ctx, typ, data); err != nil {
 		s.log.Warn("fire event", "type", typ, "err", err)

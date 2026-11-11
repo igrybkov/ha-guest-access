@@ -53,6 +53,22 @@ type Options struct {
 	InventoryMaxAge time.Duration
 	// Approval tunes device approval.
 	Approval ApprovalOptions
+	// HACallTimeout bounds one service call to HA. HAEventTimeout bounds
+	// one event the app fires.
+	HACallTimeout  time.Duration
+	HAEventTimeout time.Duration
+	// StreamCheck is how often an open event stream checks its link,
+	// password and device again. StreamHeartbeat is how often an idle
+	// stream sends a comment, so proxies keep it open. StreamRetry is the
+	// Retry-After for a link at its stream cap.
+	StreamCheck     time.Duration
+	StreamHeartbeat time.Duration
+	StreamRetry     time.Duration
+	// AuditEnabled writes the audit file. The audit log line goes to the
+	// app log either way. AuditMaxFileBytes is the size at which the file
+	// is rotated.
+	AuditEnabled      bool
+	AuditMaxFileBytes int64
 }
 
 // ApprovalOptions tune device approval.
@@ -111,6 +127,19 @@ type rawOptions struct {
 		EventsPerHour    int `json:"events_per_hour"`
 		TouchThrottleMin int `json:"touch_throttle_min"`
 	} `json:"approval"`
+	HA struct {
+		CallTimeoutS  int `json:"call_timeout_s"`
+		EventTimeoutS int `json:"event_timeout_s"`
+	} `json:"ha"`
+	Streams struct {
+		RecheckS    int `json:"recheck_s"`
+		HeartbeatS  int `json:"heartbeat_s"`
+		RetryAfterS int `json:"retry_after_s"`
+	} `json:"streams"`
+	Audit struct {
+		Enabled    bool `json:"enabled"`
+		MaxFileKiB int  `json:"max_file_kib"`
+	} `json:"audit"`
 }
 
 // defaultRaw returns the defaults, as in guest_access/config.yaml.
@@ -140,6 +169,13 @@ func defaultRaw() rawOptions {
 	r.Approval.MaxDevices = 10
 	r.Approval.EventsPerHour = 5
 	r.Approval.TouchThrottleMin = 5
+	r.HA.CallTimeoutS = 10
+	r.HA.EventTimeoutS = 5
+	r.Streams.RecheckS = 5
+	r.Streams.HeartbeatS = 25
+	r.Streams.RetryAfterS = 30
+	r.Audit.Enabled = true
+	r.Audit.MaxFileKiB = 2048
 	return r
 }
 
@@ -217,6 +253,12 @@ func (r rawOptions) options() (Options, error) {
 		{"approval.max_devices", r.Approval.MaxDevices, 1, 1000, ""},
 		{"approval.events_per_hour", r.Approval.EventsPerHour, 1, 1000, ""},
 		{"approval.touch_throttle_min", r.Approval.TouchThrottleMin, 1, 24 * 60, ""},
+		{"ha.call_timeout_s", r.HA.CallTimeoutS, 1, 300, ""},
+		{"ha.event_timeout_s", r.HA.EventTimeoutS, 1, 300, ""},
+		{"streams.recheck_s", r.Streams.RecheckS, 1, 300, ""},
+		{"streams.heartbeat_s", r.Streams.HeartbeatS, 5, 600, ""},
+		{"streams.retry_after_s", r.Streams.RetryAfterS, 1, 3600, ""},
+		{"audit.max_file_kib", r.Audit.MaxFileKiB, 64, 1 << 20, ""},
 	} {
 		if f.v < f.lo || f.v > f.hi {
 			msg := fmt.Sprintf("%s: must be between %d and %d", f.name, f.lo, f.hi)
@@ -230,6 +272,7 @@ func (r rawOptions) options() (Options, error) {
 		return Options{}, err
 	}
 	minutes := func(n int) time.Duration { return time.Duration(n) * time.Minute }
+	seconds := func(n int) time.Duration { return time.Duration(n) * time.Second }
 	return Options{
 		Settings:              s,
 		PublicBaseURL:         r.PublicBaseURL,
@@ -253,6 +296,13 @@ func (r rawOptions) options() (Options, error) {
 			EventsPerHour: r.Approval.EventsPerHour,
 			TouchThrottle: minutes(r.Approval.TouchThrottleMin),
 		},
+		HACallTimeout:     seconds(r.HA.CallTimeoutS),
+		HAEventTimeout:    seconds(r.HA.EventTimeoutS),
+		StreamCheck:       seconds(r.Streams.RecheckS),
+		StreamHeartbeat:   seconds(r.Streams.HeartbeatS),
+		StreamRetry:       seconds(r.Streams.RetryAfterS),
+		AuditEnabled:      r.Audit.Enabled,
+		AuditMaxFileBytes: int64(r.Audit.MaxFileKiB) << 10,
 	}, nil
 }
 

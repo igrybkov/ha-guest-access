@@ -123,10 +123,10 @@ func newHarness(t testing.TB, opts ...harnessOpt) *harness {
 	}
 	o := config.DefaultOptions()
 	o.PublicBaseURL = "https://guest.example.com"
+	o.StreamCheck = 20 * time.Millisecond
 	d := Deps{
 		Templates: tpl, Links: h.links, Inventory: inv, HA: h.fake,
 		Signer: access.NewSigner(bytes.Repeat([]byte{7}, 32)), Now: h.clock, Logger: quietLog,
-		StreamCheck: 20 * time.Millisecond,
 	}
 	for _, f := range opts {
 		f(&o, &d)

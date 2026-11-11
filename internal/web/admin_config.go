@@ -41,6 +41,13 @@ type tunablesView struct {
 	DiagRequests             int            `json:"diagnostics_requests"`
 	InventoryMaxAgeS         int64          `json:"inventory_max_age_s"`
 	Approval                 approvalTuning `json:"approval"`
+	HACallTimeoutS           int64          `json:"ha_call_timeout_s"`
+	HAEventTimeoutS          int64          `json:"ha_event_timeout_s"`
+	StreamRecheckS           int64          `json:"stream_recheck_s"`
+	StreamHeartbeatS         int64          `json:"stream_heartbeat_s"`
+	StreamRetryAfterS        int64          `json:"stream_retry_after_s"`
+	AuditEnabled             bool           `json:"audit_enabled"`
+	AuditMaxFileKiB          int64          `json:"audit_max_file_kib"`
 }
 
 type approvalTuning struct {
@@ -73,6 +80,13 @@ func newSettingsView(o config.Options) settingsView {
 			EventsPerHour:    o.Approval.EventsPerHour,
 			TouchThrottleMin: int64(o.Approval.TouchThrottle.Minutes()),
 		},
+		HACallTimeoutS:    int64(o.HACallTimeout.Seconds()),
+		HAEventTimeoutS:   int64(o.HAEventTimeout.Seconds()),
+		StreamRecheckS:    int64(o.StreamCheck.Seconds()),
+		StreamHeartbeatS:  int64(o.StreamHeartbeat.Seconds()),
+		StreamRetryAfterS: int64(o.StreamRetry.Seconds()),
+		AuditEnabled:      o.AuditEnabled,
+		AuditMaxFileKiB:   o.AuditMaxFileBytes >> 10,
 	}
 	return v
 }

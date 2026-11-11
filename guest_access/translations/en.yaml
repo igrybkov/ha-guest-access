@@ -152,5 +152,35 @@ configuration:
       touch_throttle_min:
         name: Last seen updates
         description: Least minutes between "last seen" updates of a device.
+  ha:
+    name: Home Assistant calls
+    fields:
+      call_timeout_s:
+        name: Action timeout
+        description: Seconds to wait for HA to run a guest action.
+      event_timeout_s:
+        name: Event timeout
+        description: Seconds to wait for HA to take an event the app sends.
+  streams:
+    name: Live updates
+    fields:
+      recheck_s:
+        name: Check link every
+        description: Seconds between checks that an open guest page may still see the link. A revoke ends the page's updates within this time.
+      heartbeat_s:
+        name: Keep-alive every
+        description: Seconds between keep-alive messages, so proxies keep the connection open.
+      retry_after_s:
+        name: Retry after
+        description: Seconds a guest page waits when the link has the most open pages.
+  audit:
+    name: Audit log
+    fields:
+      enabled:
+        name: Write audit file
+        description: Keep a record of guest and admin actions in /data/audit.jsonl. The app log gets each record either way.
+      max_file_kib:
+        name: Audit file size
+        description: KiB at which the audit file starts over. The app keeps one older file.
 network:
   8888/tcp: Guest links. Point your reverse proxy here.

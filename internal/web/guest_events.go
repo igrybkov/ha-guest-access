@@ -16,10 +16,6 @@ const (
 	// streamBuffer holds state changes waiting to be written. When it
 	// overflows, the stream ends with "reload" and the page reconnects.
 	streamBuffer = 64
-	// heartbeat keeps proxies from closing an idle stream.
-	heartbeat = 25 * time.Second
-	// streamRetry is the Retry-After for a link at its stream cap.
-	streamRetry = 30 * time.Second
 )
 
 // guestEvents streams state changes of the entities the guest may see
@@ -45,7 +41,7 @@ func (s *Server) guestEvents(g *guestReq) {
 		return
 	}
 	if !s.streams.acquire(g.link.ID, g.lim.streams) {
-		tooMany(g.w, streamRetry)
+		tooMany(g.w, s.deps.Options.StreamRetry)
 		return
 	}
 	defer s.streams.release(g.link.ID)
@@ -96,9 +92,9 @@ func (s *Server) guestEvents(g *guestReq) {
 		return
 	}
 
-	check := time.NewTicker(s.deps.StreamCheck)
+	check := time.NewTicker(s.deps.Options.StreamCheck)
 	defer check.Stop()
-	beat := time.NewTicker(heartbeat)
+	beat := time.NewTicker(s.deps.Options.StreamHeartbeat)
 	defer beat.Stop()
 	expiry := time.NewTimer(max(0, g.link.ValidUntil.Sub(s.now())))
 	defer expiry.Stop()

@@ -188,3 +188,35 @@ func TestTranslationsCoverEveryOption(t *testing.T) {
 		t.Errorf("rate_limits.enabled description = %q", s)
 	}
 }
+
+// The HA timeouts, stream timings and audit options reach Options.
+func TestParseOptionsTimeoutsAndAudit(t *testing.T) {
+	r, err := parseOptions([]byte(`{
+		"ha": {"call_timeout_s": 3, "event_timeout_s": 2},
+		"streams": {"recheck_s": 7, "heartbeat_s": 40, "retry_after_s": 60},
+		"audit": {"enabled": false, "max_file_kib": 128}
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o, err := r.options()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.HACallTimeout != 3*time.Second || o.HAEventTimeout != 2*time.Second ||
+		o.StreamCheck != 7*time.Second || o.StreamHeartbeat != 40*time.Second || o.StreamRetry != time.Minute ||
+		o.AuditEnabled || o.AuditMaxFileBytes != 128<<10 {
+		t.Errorf("options = %+v", o)
+	}
+	d := DefaultOptions()
+	if d.HACallTimeout != 10*time.Second || d.HAEventTimeout != 5*time.Second || d.StreamCheck != 5*time.Second ||
+		d.StreamHeartbeat != 25*time.Second || d.StreamRetry != 30*time.Second || !d.AuditEnabled || d.AuditMaxFileBytes != 2048<<10 {
+		t.Errorf("defaults = %+v", d)
+	}
+	if _, err := (func() (Options, error) {
+		r, _ := parseOptions([]byte(`{"streams": {"heartbeat_s": 1}}`))
+		return r.options()
+	})(); err == nil || !strings.Contains(err.Error(), "streams.heartbeat_s") {
+		t.Errorf("short heartbeat: %v", err)
+	}
+}

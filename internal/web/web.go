@@ -95,9 +95,6 @@ type Deps struct {
 
 	// Now is the clock. nil = time.Now.
 	Now func() time.Time
-	// StreamCheck is how often an open event stream checks its link
-	// again. 0 = defaultStreamCheck.
-	StreamCheck time.Duration
 
 	Version string
 	Logger  *slog.Logger
@@ -106,9 +103,11 @@ type Deps struct {
 // Timeouts for calls into HA, and fallbacks for zero options (tests).
 // The real values come from the app options.
 const (
-	haCallTimeout       = 10 * time.Second
-	haEventTimeout      = 5 * time.Second
+	defaultHACall       = 10 * time.Second
+	defaultHAEvent      = 5 * time.Second
 	defaultStreamCheck  = 5 * time.Second
+	defaultHeartbeat    = 25 * time.Second
+	defaultStreamRetry  = 30 * time.Second
 	defaultGuestBody    = 16 << 10
 	defaultAdminBody    = 1 << 20
 	defaultNearTTL      = 15 * time.Minute
@@ -173,8 +172,19 @@ func New(d Deps) *Server {
 	s.trusted = parsePrefixes(o.Settings.TrustedProxies, s.log, "trusted proxy")
 	s.nets = parsePrefixes(o.Settings.LocalAccess.Networks, s.log, "local network")
 	s.lim = newLimitSet(*o)
-	if s.deps.StreamCheck <= 0 {
-		s.deps.StreamCheck = defaultStreamCheck
+	for _, f := range []struct {
+		v   *time.Duration
+		def time.Duration
+	}{
+		{&o.HACallTimeout, defaultHACall},
+		{&o.HAEventTimeout, defaultHAEvent},
+		{&o.StreamCheck, defaultStreamCheck},
+		{&o.StreamHeartbeat, defaultHeartbeat},
+		{&o.StreamRetry, defaultStreamRetry},
+	} {
+		if *f.v <= 0 {
+			*f.v = f.def
+		}
 	}
 	if s.devices == nil {
 		a := s.deps.Options.Approval
@@ -182,7 +192,7 @@ func New(d Deps) *Server {
 			Links: d.Links, FireEvent: d.HA.FireEvent, Signer: d.Signer, Now: s.deps.Now, Logger: s.log,
 			PendingTTL: a.PendingTTL, MaxPending: a.MaxPending, MaxDevices: a.MaxDevices,
 			EventsPerHour: a.EventsPerHour, TouchThrottle: a.TouchThrottle,
-			MaxBodyBytes: s.deps.Options.GuestBodyBytes,
+			MaxBodyBytes: s.deps.Options.GuestBodyBytes, EventTimeout: s.deps.Options.HAEventTimeout,
 		})
 	}
 	return s
