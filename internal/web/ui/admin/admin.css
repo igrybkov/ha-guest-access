@@ -96,8 +96,6 @@ button[aria-pressed="true"] { border-color: var(--primary); outline: 2px solid v
 .field > span { font-size: 0.85em; color: var(--muted); }
 .field input, .field select { width: 100%; }
 .check { display: flex; align-items: center; gap: 8px; min-height: 36px; }
-.tpl-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.tpl-move { display: flex; gap: 2px; }
 .hint { display: block; margin: -6px 0 4px 26px; }
 fieldset { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; margin: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 legend { padding: 0 4px; font-weight: 600; }
@@ -153,6 +151,44 @@ a.title { color: var(--fg); }
 details > summary { cursor: pointer; padding: 4px 0; }
 .resolved code { font-size: 0.85em; }
 
+/* Two lists with drag and drop (dnd.js). Only the handle takes touch,
+   so a swipe on the rest of a row still scrolls the page. */
+.dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; align-items: start; }
+.dl-list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); min-width: 0; }
+.dl-list:focus { outline: none; }
+.dl-list:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.dl-list.dl-over { border-color: var(--primary); }
+.dl-head { display: flex; align-items: baseline; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--line); font-weight: 600; font-size: 0.9em; }
+.dl-count { font-weight: normal; font-size: 0.9em; }
+.dl-body { list-style: none; margin: 0; padding: 4px; min-height: 52px; display: flex; flex-direction: column; gap: 4px; }
+.dl-row { display: flex; align-items: center; gap: 4px; padding: 2px 2px 2px 0; background: var(--card); border: 1px solid var(--line); border-radius: 6px; min-width: 0; }
+.dl-row:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+.dl-row.locked { border-style: dashed; }
+.dl-row.dl-dragging { display: none; }
+.dl-text { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 4px 0; overflow-wrap: anywhere; }
+.dl-text code { font-size: 0.8em; }
+.dl-note { margin-top: 2px; }
+.dl-handle, .dl-nohandle { flex: none; width: 32px; min-height: 40px; }
+.dl-handle {
+  padding: 0; border: none; background: transparent; color: var(--muted); cursor: grab;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+/* Six dots, drawn with a gradient so no icon file or font is needed. */
+.dl-handle::before {
+  content: ""; display: block; width: 10px; height: 16px; margin: auto;
+  background-image: radial-gradient(circle, currentColor 1.4px, transparent 1.6px);
+  background-size: 5px 5.33px;
+}
+.dl-handle:hover { color: var(--fg); }
+.dl-btn { flex: none; min-width: 40px; min-height: 40px; font-size: 1.2em; line-height: 1; color: var(--primary); }
+.dl-btn[data-role="remove"] { color: var(--danger); }
+.dl-empty { padding: 10px 8px; text-align: center; }
+.dl-body:has(.dl-placeholder) .dl-empty { display: none; }
+.dl-placeholder { border: 2px dashed var(--primary); border-radius: 6px; background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.dl-ghost { position: fixed; z-index: 20; margin: 0; pointer-events: none; list-style: none; box-shadow: 0 6px 18px rgb(0 0 0 / 0.3); opacity: 0.95; }
+body.dl-active, body.dl-active * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
 /* Tables */
 .table-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; }
@@ -182,6 +218,6 @@ dialog p { margin: 0; }
 
 @media (max-width: 760px) {
   main { padding: 12px; }
-  .cols, .grid2, .grid3, .kv { grid-template-columns: minmax(0, 1fr); }
+  .cols, .grid2, .grid3, .kv, .dl { grid-template-columns: minmax(0, 1fr); }
   .cols > aside { position: static; }
 }

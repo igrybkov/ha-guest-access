@@ -196,6 +196,42 @@ func TestFindBySlugSeesFileChange(t *testing.T) {
 	}
 }
 
+// A hand-written links.yaml with a link that has no templates and no
+// rules loads with no error: such a link is valid and grants nothing.
+func TestEmptyLinkLoadsFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	s := newStore(t, dir)
+	l := mustCreate(t, s, draft(), "")
+	path := filepath.Join(dir, migrate.LinksFile)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept []string
+	for line := range strings.Lines(string(raw)) {
+		if !strings.HasPrefix(strings.TrimSpace(line), "templates:") && !strings.HasPrefix(strings.TrimSpace(line), "- house_entry") {
+			kept = append(kept, line)
+		}
+	}
+	edited := strings.Join(kept, "")
+	if edited == string(raw) {
+		t.Fatalf("the edit changed nothing:\n%s", raw)
+	}
+	if err := os.WriteFile(path, []byte(edited), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	future := t0.Add(time.Hour)
+	_ = os.Chtimes(path, future, future)
+	all, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := s.FindBySlug(l.Slug)
+	if !ok || len(got.TemplateIDs) != 0 || len(got.Extra) != 0 || got.Validate() != nil || len(all.Links) != 1 {
+		t.Errorf("empty link from disk = %+v, %v (file:\n%s)", got, ok, edited)
+	}
+}
+
 func TestUpdateKeepsServerFields(t *testing.T) {
 	s := newStore(t, t.TempDir())
 	l := mustCreate(t, s, draft(), "")
@@ -220,9 +256,15 @@ func TestUpdateKeepsServerFields(t *testing.T) {
 		t.Errorf("server fields changed: %+v", got)
 	}
 	bad := edit
-	bad.TemplateIDs = nil
+	bad.ValidUntil = time.Time{}
 	if _, err := s.Update(l.ID, bad); err == nil {
-		t.Error("saved a link that grants nothing")
+		t.Error("saved a link with no end")
+	}
+	// A link with no templates and no rules is valid. It grants nothing.
+	empty := edit
+	empty.TemplateIDs, empty.Extra = nil, nil
+	if got, err := s.Update(l.ID, empty); err != nil || len(got.TemplateIDs) != 0 || len(got.Extra) != 0 {
+		t.Errorf("empty link = %+v, %v", got, err)
 	}
 	if _, err := s.Update("nope", edit); !errors.Is(err, ErrNotFound) {
 		t.Errorf("update unknown: %v", err)

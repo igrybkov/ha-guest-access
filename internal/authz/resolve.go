@@ -176,6 +176,8 @@ func RuleEntities(r model.Rule, inv model.Inventory) []string {
 //
 // Problems never stop it. Each gives a Warning instead:
 //   - a template id the link names that templates does not hold
+//   - a template with no rules, and a link with no templates and no
+//     extra rules (both are valid and grant nothing)
 //   - an action that is not in the catalog
 //   - a rule that grants nothing
 //   - a rule with network: local (Resolve can't see settings; the
@@ -198,6 +200,9 @@ func Resolve(link model.Link, templates []model.Template, inv model.Inventory) (
 			continue
 		}
 		t := templates[i]
+		if len(t.Rules) == 0 {
+			r.warn(id, -1, "This template has no rules yet, so it grants nothing.")
+		}
 		for j, rule := range t.Rules {
 			r.addRule(id, j, rule, t.RuleAccess(j))
 		}
@@ -208,6 +213,9 @@ func Resolve(link model.Link, templates []model.Template, inv model.Inventory) (
 			acc = *rule.Access
 		}
 		r.addRule("", j, rule, acc)
+	}
+	if len(link.TemplateIDs) == 0 && len(link.Extra) == 0 {
+		r.warn("", -1, "This link grants nothing yet. Add a template or a rule.")
 	}
 	return r.grants, r.warnings
 }

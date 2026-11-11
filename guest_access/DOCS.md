@@ -20,7 +20,7 @@ Saving options in the Configuration tab restarts the app.
 ## Quick start
 
 1. Open **Templates** and press **New template**. Name it "Guest room". Add a rule: pick the area "Guest room" and the actions `light.turn_on` and `light.turn_off`. Save.
-2. Open **Links** and press **New link**. Name it after the guest. Tick the template. Set an end date. Every link must end.
+2. Open **Links** and press **New link**. Name it after the guest. Press **+** on the template, or drag it into **In this link**. Set an end date. Every link must end.
 3. Save. Press **Share** to copy the URL or show the QR code.
 4. Send the URL to the guest. Add a password if you want one (see **Passwords**).
 
@@ -40,7 +40,14 @@ A template has a name, an icon, a list of rules and an optional default `access`
 
 You edit templates in the **Templates** screen. They are stored in `templates.yaml` in the config folder, so you can edit that file by hand or keep it in git. The app picks up a change to the file.
 
-The guest page shows one group per template. Inside a group, entities go by name. To set your own order, use the arrows under **Order on the guest page** in the template editor. This saves an `entity_order` list of entity ids. Entities you have not placed follow by name. An id that no longer matches an entity is ignored.
+You can save a template with no rules and add them later. It grants nothing until then, and the editor says so. Drag a rule by its handle to change the rule order, or focus the handle and press Alt+Up or Alt+Down. The order of rules changes no grant.
+
+The guest page shows one group per template. Inside a group, entities go by name. **Entities on the guest page** in the template editor has two lists:
+
+- **Shown** holds what the template grants, in guest page order. Drag an entity by its handle to move it, or focus the handle and press Alt+Up or Alt+Down. This saves an `entity_order` list of entity ids. Entities you have not placed follow by name. An id that no longer matches an entity is ignored.
+- **Removed** holds what the rules select but exclude. Press **−** on a shown entity, or drag it to **Removed**, to take its access away: the app adds its entity id to `exclude.entities` of each rule that picks it. Press **+**, or drag it back, to take that id out again. An entity that a label, area, device or pattern excludes has no **+**. Change the rule for it.
+
+The lists work with a mouse, touch and the keyboard. On a phone, drag by the handle; a swipe on the rest of the row scrolls the page.
 
 ### Select and exclude
 
@@ -266,7 +273,11 @@ templates:
 
 A link is a URL, a validity window and a set of templates plus optional extra rules.
 
-The guest page shows the templates' groups in the link's template order. The extra rules get one more group at the end. It holds only the entities that no template of the link grants. The link's own `entity_order` sets the order of that group, in the same way as on a template.
+The link editor lists the templates in two lists: **In this link** and **Available**. Press **+** or **−**, or drag a template between the lists. Drag within **In this link** to set the order. The guest page shows the templates' groups in that order.
+
+The extra rules get one more group at the end. It holds only the entities that no template of the link grants. **Extra rule entities on the guest page** sets its order and removes entities, in the same way as on a template. A remove there changes only the link's extra rules. You can sort the extra rules by their handles too.
+
+A link may have no templates and no rules yet. It is valid and grants nothing: the guest sees an empty page. The editor shows a warning until you add something.
 
 ### Title and welcome
 

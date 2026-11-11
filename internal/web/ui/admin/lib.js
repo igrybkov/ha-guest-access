@@ -80,14 +80,14 @@ export function matchPattern(p, s) {
 
 const matchAny = (ps, s) => (ps || []).some((p) => matchPattern(p, s));
 
-// pickedEntities mirrors authz expansion (select minus exclude), before
-// the domain filter. inv holds the picker lists: entities (area_id is the
-// effective area), areas, labels and devices. The editor uses it only to
-// offer actions; the server preview is the source of truth.
-export function pickedEntities(rule, inv) {
+// selectorTest returns a test for one selector, as authz expander.selects
+// does. all turns off the skip rules for hidden, disabled and categorized
+// entities; exclude uses it. inv holds the picker lists: entities
+// (area_id is the effective area), areas, labels and devices.
+export function selectorTest(sel, inv, all) {
   const areas = new Map((inv.areas || []).map((a) => [a.area_id, a]));
   const devices = new Map((inv.devices || []).map((d) => [d.id, d]));
-  const selects = (sel, all) => (e) => {
+  return (e) => {
     if (!sel) return false;
     const ents = sel.entities || [];
     if (ents.some((p) => isExact(p) && p === e.entity_id)) return true;
@@ -103,8 +103,14 @@ export function pickedEntities(rule, inv) {
     if (e.area_id && (matchAny(sel.areas, e.area_id) || labelHit(areas.get(e.area_id)?.labels))) return true;
     return false;
   };
-  const inc = selects(rule.select, false);
-  const exc = selects(rule.exclude, true);
+}
+
+// pickedEntities mirrors authz expansion (select minus exclude), before
+// the domain filter. The editor uses it only to offer actions; the server
+// preview is the source of truth.
+export function pickedEntities(rule, inv) {
+  const inc = selectorTest(rule.select, inv, false);
+  const exc = selectorTest(rule.exclude, inv, true);
   return (inv.entities || []).filter((e) => inc(e) && !exc(e));
 }
 
@@ -430,23 +436,56 @@ export function splitTemplates(ids, templates) {
   return { keep: ids.filter((id) => have.has(id)), missing: ids.filter((id) => !have.has(id)) };
 }
 
-// templateRows orders the template picker. Ticked templates come first,
-// in the link's order, which is also the order of the groups the guest
-// sees. Unticked templates follow in templates.yaml order.
-export function templateRows(ids, templates) {
+// templateLists splits the templates for the link editor. chosen holds
+// the link's templates in the link's order, which is also the order of
+// the groups the guest sees. Ids that no longer exist are left out.
+// available holds the rest in templates.yaml order.
+export function templateLists(ids, templates) {
   const byID = new Map(templates.map((t) => [t.id, t]));
-  const ticked = ids.filter((id) => byID.has(id)).map((id) => byID.get(id));
-  const rest = templates.filter((t) => !ids.includes(t.id));
-  return [...ticked.map((t) => ({ t, ticked: true })), ...rest.map((t) => ({ t, ticked: false }))];
+  return {
+    chosen: ids.filter((id) => byID.has(id)).map((id) => byID.get(id)),
+    available: templates.filter((t) => !ids.includes(t.id)),
+  };
 }
 
-// moveItem moves ids[i] by delta places in place. A move past either end
-// does nothing.
-export function moveItem(ids, i, delta) {
-  const j = i + delta;
-  if (i < 0 || i >= ids.length || j < 0 || j >= ids.length) return ids;
-  [ids[i], ids[j]] = [ids[j], ids[i]];
-  return ids;
+// ---- Two lists ----
+
+// placeItem returns ids with id at index. It takes id out first, so index
+// counts the list without it. No index, or one past the end, puts it
+// last.
+export function placeItem(ids, id, index) {
+  const out = ids.filter((x) => x !== id);
+  const i = index == null ? out.length : Math.max(0, Math.min(index, out.length));
+  out.splice(i, 0, id);
+  return out;
+}
+
+// dropItem returns ids without id.
+export const dropItem = (ids, id) => ids.filter((x) => x !== id);
+
+// moveIndex returns a copy of xs with xs[from] moved to place to. to
+// counts the list without the moved item.
+export function moveIndex(xs, from, to) {
+  const out = [...xs];
+  if (from < 0 || from >= out.length) return out;
+  const [x] = out.splice(from, 1);
+  out.splice(Math.max(0, Math.min(to, out.length)), 0, x);
+  return out;
+}
+
+// indexMap gives, for a move of from to to in a list of n, the new place
+// of each old index: map[old] = new.
+export function indexMap(n, from, to) {
+  return moveIndex([...Array(n).keys()], from, to).reduce((m, old, i) => { m[old] = i; return m; }, []);
+}
+
+// rekeyPath renames the index after prefix in a problem path, such as
+// "rules[2].select" to "rules[0].select", by map (map[old] = new).
+// Other paths come back as they were.
+export function rekeyPath(path, prefix, map) {
+  const m = new RegExp(`^${prefix.replace(/[.[\]]/g, '\\$&')}\\[(\\d+)\\]`).exec(path);
+  if (!m || map[+m[1]] == null) return path;
+  return `${prefix}[${map[+m[1]]}]${path.slice(m[0].length)}`;
 }
 
 // ---- Entity order ----
@@ -485,6 +524,140 @@ export function ownRuleEntities(grants) {
     if ((g.sources || []).some((s) => s.template)) viaTemplate.add(g.entity_id);
   }
   return grantedEntities(grants).filter((e) => !viaTemplate.has(e.entity_id));
+}
+
+// ---- Shown and removed entities ----
+//
+// The editors list a group's entities in two lists. Shown holds what the
+// preview grants. Removed holds what the rules select but their excludes
+// drop. Removing an entity adds its exact id to the exclude of each rule
+// that selects it, so the guest loses access to it, not only its place
+// on the page.
+
+// ruleDomains is the set of domains the rule's actions are in. As on the
+// server, only actions the catalog knows count. known is the set of
+// catalog action ids; null means every action counts.
+export function ruleDomains(rule, known) {
+  return new Set((rule.actions || []).filter((a) => !known || known.has(a)).map(domainOf));
+}
+
+// rulesPicking returns the indexes of the rules whose select picks e and
+// that allow an action in e's domain. It does not look at exclude.
+export function rulesPicking(rules, e, inv, known) {
+  const out = [];
+  rules.forEach((r, i) => {
+    if (ruleDomains(r, known).has(domainOf(e.entity_id)) && selectorTest(r.select, inv, false)(e)) out.push(i);
+  });
+  return out;
+}
+
+// excludeKinds names the parts of sel that exclude e other than its
+// exact id: "pattern", "label", "area" or "device".
+export function excludeKinds(sel, e, inv) {
+  const hit = (part) => selectorTest(part, inv, true)(e);
+  const out = [];
+  if (hit({ entities: (sel?.entities || []).filter((p) => !isExact(p)) })) out.push('pattern');
+  if (hit({ labels: sel?.labels })) out.push('label');
+  if (hit({ areas: sel?.areas })) out.push('area');
+  if (hit({ devices: sel?.devices })) out.push('device');
+  return out;
+}
+
+// withoutID returns sel with the exact id taken out of its entities.
+const withoutID = (sel, id) => ({ ...sel, entities: (sel?.entities || []).filter((p) => p !== id) });
+
+const byName = (a, b) => {
+  const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0);
+  return cmp(a.name.toLowerCase(), b.name.toLowerCase()) || cmp(a.entity_id, b.entity_id);
+};
+
+// entityLists computes the two lists of a group.
+//   - rules: the group's rules, as model rules or editor state.
+//   - granted: the group's entities from the preview, [{entity_id, name}].
+//   - hide: ids to leave out of removed, such as those a link's template
+//     grants, which show in another group.
+//   - order: the saved entity_order.
+// shown is granted in guest page order. removed lists, by name, each
+// entity that some rule selects in a domain it allows, while every such
+// rule excludes it. locked is true when taking the exact id out of those
+// excludes would not bring it back; by then names what still excludes
+// it. Without an inventory, removed is empty.
+export function entityLists({ rules, inv, known = null, granted = [], hide = [], order = [] }) {
+  const shown = effectiveOrder(order, granted);
+  if (!inv) return { shown, removed: [] };
+  const skip = new Set([...granted.map((e) => e.entity_id), ...hide]);
+  const tests = rules.map((r) => ({
+    domains: ruleDomains(r, known),
+    select: selectorTest(r.select, inv, false),
+    exclude: selectorTest(r.exclude, inv, true),
+  }));
+  const removed = [];
+  for (const e of inv.entities || []) {
+    if (skip.has(e.entity_id)) continue;
+    const idx = [];
+    tests.forEach((t, i) => { if (t.domains.has(domainOf(e.entity_id)) && t.select(e)) idx.push(i); });
+    // A rule that selects it and does not exclude it should grant it. The
+    // preview says it doesn't (a template with problems grants nothing),
+    // so it goes in neither list.
+    if (!idx.length || idx.some((i) => !tests[i].exclude(e))) continue;
+    const rest = idx.map((i) => withoutID(rules[i].exclude, e.entity_id));
+    const locked = rest.every((sel) => selectorTest(sel, inv, true)(e));
+    const by = locked ? [...new Set(rest.flatMap((sel) => excludeKinds(sel, e, inv)))] : [];
+    removed.push({ entity_id: e.entity_id, name: e.name || e.entity_id, locked, by });
+  }
+  removed.sort(byName);
+  return { shown, removed };
+}
+
+// grantRules returns the indexes of the rules that grant id in the
+// preview. template is the template id, or "" for a link's extra rules.
+export function grantRules(grants, id, template) {
+  const out = new Set();
+  for (const g of grants || []) {
+    if (g.entity_id !== id) continue;
+    for (const s of g.sources || []) if ((s.template || '') === template) out.add(s.rule);
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+// excludeEntity adds id to exclude.entities of each rule in targets,
+// once. It changes the rules in place, so editor state stays the same
+// object. It returns the indexes it changed.
+export function excludeEntity(rules, id, targets) {
+  const changed = [];
+  for (const i of targets) {
+    const r = rules[i];
+    if (!r) continue;
+    r.exclude ||= {};
+    r.exclude.entities ||= [];
+    if (!r.exclude.entities.includes(id)) {
+      r.exclude.entities.push(id);
+      changed.push(i);
+    }
+  }
+  return changed;
+}
+
+// includeEntity takes the exact id out of exclude.entities of each rule
+// in targets, in place. Patterns, labels, areas and devices stay. It
+// returns the indexes it changed.
+export function includeEntity(rules, id, targets) {
+  const changed = [];
+  for (const i of targets) {
+    const list = rules[i]?.exclude?.entities;
+    if (!list || !list.includes(id)) continue;
+    while (list.includes(id)) list.splice(list.indexOf(id), 1);
+    changed.push(i);
+  }
+  return changed;
+}
+
+const KIND_WORDS = { pattern: 'a pattern', label: 'a label', area: 'an area', device: 'a device' };
+
+// lockedNote says why a removed entity has no way back in the list.
+export function lockedNote(by) {
+  const what = (by || []).map((k) => KIND_WORDS[k] || k);
+  return `Excluded by ${what.length ? what.join(' or ') : 'a rule'}. Change the rule to bring it back.`;
 }
 
 // approvalMode names a link's approval setting.

@@ -253,9 +253,8 @@ func (l Link) validate(p *problems, path string) {
 	} else if !l.ValidFrom.IsZero() && !l.ValidUntil.After(l.ValidFrom) {
 		p.add(join(path, "valid_until"), "must be after valid_from")
 	}
-	if len(l.TemplateIDs) == 0 && len(l.Extra) == 0 {
-		p.add(join(path, "templates"), "pick a template or add a rule")
-	}
+	// A link with no templates and no extra rules is valid. It grants
+	// nothing, so the admin can build it up step by step.
 	seen := map[string]bool{}
 	for i, id := range l.TemplateIDs {
 		at := fmt.Sprintf("%s[%d]", join(path, "templates"), i)

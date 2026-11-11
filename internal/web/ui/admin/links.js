@@ -5,10 +5,11 @@ import {
 } from './dom.js';
 import {
   paths, PRESETS, preset, toLocalInput, fromLocalInput, zoneNote, fmtTime, fmtWindow, buildLink, linkForm,
-  approvalMode, splitTemplates, templateRows, moveItem, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
+  approvalMode, splitTemplates, templateLists, placeItem, dropItem, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
   linkProblems, brokenLinkNote, removePasswordPrompt, ownRuleEntities,
 } from './lib.js';
-import { Slots, ruleEditor, loadInventory, orderEditor } from './rules.js';
+import { Slots, ruleEditor, loadInventory, entityEditor, moveRule } from './rules.js';
+import { dualList } from './dnd.js';
 
 export async function render(view, rest) {
   if (rest[0] === 'new') return editor(view, null);
@@ -153,61 +154,67 @@ async function editor(view, id) {
   from.addEventListener('change', readWindow);
   until.addEventListener('change', readWindow);
 
-  // Templates to tick. Ticked ones can be moved up and down: the guest
-  // page shows its groups in this order.
-  const tplBox = h('div', { class: 'stack tight' });
+  // Templates: the chosen list is the link's template order, which is
+  // also the order of the groups on the guest page.
   const missingNotes = missingTpls.map((tid) =>
     h('p', { class: 'warning small', text: `Template "${tid}" no longer exists. It is left out when you save.` }));
-  const drawTemplates = () => {
-    if (!templates.length) {
-      fill(tplBox, h('p', { class: 'muted' }, 'No templates yet. ', h('a', { href: '#/templates/new', text: 'Make one' }), ' or add a rule below.'), ...missingNotes);
-      return;
-    }
-    const n = f.templates.length;
-    // A redraw drops focus, so give it back to the same button on the
-    // moved row. The keyboard user can then press it again.
-    const move = (i, d) => (e) => {
-      const label = e.currentTarget.getAttribute('aria-label');
-      moveItem(f.templates, i, d);
+  const tplList = dualList({
+    label: 'Templates',
+    chosen: { title: 'In this link', empty: 'No templates yet. Drag one here, or press + on it.', remove: (n) => `Remove ${n} from this link` },
+    other: { title: 'Available', empty: 'Every template is in this link.', add: (n) => `Add ${n} to this link` },
+    onMove: (tid, to, index) => {
+      f.templates = to === 'chosen' ? placeItem(f.templates, tid, index) : dropItem(f.templates, tid);
       drawTemplates();
       schedule();
-      const btn = [...tplBox.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === label);
-      if (btn && !btn.disabled) btn.focus();
-    };
-    fill(tplBox, ...templateRows(f.templates, templates).map(({ t, ticked }, i) => {
-      const cb = h('input', { type: 'checkbox', checked: ticked });
-      cb.addEventListener('change', () => {
-        if (cb.checked) f.templates.push(t.id);
-        else f.templates.splice(f.templates.indexOf(t.id), 1);
-        drawTemplates();
-        schedule();
-      });
-      return h('div', { class: 'tpl-row' },
-        h('label', { class: 'check' }, cb, h('span', { text: t.name }), h('code', { class: 'muted small', text: t.id })),
-        ticked && n > 1 && h('span', { class: 'tpl-move' },
-          h('button', { type: 'button', class: 'icon', text: '↑', disabled: i === 0, 'aria-label': `Move ${t.name} up`, onclick: move(i, -1) }),
-          h('button', { type: 'button', class: 'icon', text: '↓', disabled: i === n - 1, 'aria-label': `Move ${t.name} down`, onclick: move(i, 1) })));
-    }), ...missingNotes);
+    },
+  });
+  const tplRow = (t) => ({ id: t.id, name: t.name, sub: t.id });
+  const drawTemplates = () => {
+    const { chosen, available } = templateLists(f.templates, templates);
+    tplList.set({ chosen: chosen.map(tplRow), other: available.map(tplRow) });
   };
+  const tplBox = h('div', { class: 'stack tight' },
+    templates.length
+      ? tplList.el
+      : h('p', { class: 'muted' }, 'No templates yet. ', h('a', { href: '#/templates/new', text: 'Make one' }), ' or add a rule below.'),
+    ...missingNotes);
   drawTemplates();
 
   // Extra rules.
   const rulesBox = h('div', { class: 'stack' });
   let editors = [];
   const current = () => editors.map((e) => e.st);
+  // A sort moves the cards with their state; add and remove rebuild.
+  const sortRule = (from, to) => {
+    editors = moveRule(editors, from, to, { box: rulesBox, slots, prefix: 'extra', title: (i) => `Extra rule ${i + 1}` });
+    schedule();
+  };
   function drawRules(rules) {
     slots.drop('extra[');
-    editors = rules.map((r, i) => ruleEditor(r, `extra[${i}]`, `Extra rule ${i + 1}`, {
-      catalog, inv, slots, forceAccess: true, onChange: schedule,
-      onRemove: () => { const next = rulesFromState(); next.splice(i, 1); drawRules(next); schedule(); },
-    }));
+    editors = rules.map((r, i) => {
+      const ed = ruleEditor(r, `extra[${i}]`, `Extra rule ${i + 1}`, {
+        catalog, inv, slots, forceAccess: true, onChange: schedule,
+        onRemove: () => { const next = rulesFromState(); next.splice(editors.indexOf(ed), 1); drawRules(next); schedule(); },
+        sort: { box: rulesBox, index: () => editors.indexOf(ed), count: () => editors.length, onMove: sortRule },
+      });
+      return ed;
+    });
     fill(rulesBox, ...editors.map((e) => e.el));
   }
   const rulesFromState = () => buildLink({ ...f, extra: current() }).extra;
 
-  // Order of the group the guest page shows for the extra rules. It lists
-  // only entities that no ticked template grants.
-  const order = orderEditor(f, 'Entities that only the extra rules grant show here.');
+  // The group the guest page shows for the extra rules. It lists only
+  // entities that no template of the link grants.
+  const order = entityEditor({
+    form: f, inv, catalog,
+    rules: current,
+    group: () => '',
+    empty: 'Entities that only the extra rules grant show here.',
+    onRulesChange: (changed) => {
+      for (const i of changed) editors[i]?.syncExclude();
+      schedule();
+    },
+  });
 
   // Options.
   const oneTime = h('input', { type: 'checkbox', checked: f.one_time });
@@ -248,14 +255,17 @@ async function editor(view, id) {
       if (my !== seq) return;
       const byRule = new Map(res.rules.filter((r) => !r.template).map((r) => [r.rule, r.entities]));
       editors.forEach((e, i) => e.setResolved(byRule.get(i) ?? []));
-      order.set(ownRuleEntities(res.grants));
+      // Entities a template grants show in that template's group, so they
+      // are in neither list here.
+      const viaTemplate = res.grants.filter((g) => (g.sources || []).some((s) => s.template)).map((g) => g.entity_id);
+      order.set(res.grants, ownRuleEntities(res.grants), viaTemplate);
       const groups = grantSummary(res.grants);
       fill(grantsBox, 
         groups.length
           ? h('ul', { class: 'plain-list' }, groups.map((g) => h('li', {},
             h('strong', { text: g.name }), ' ', h('code', { class: 'muted small', text: g.entity_id }),
             h('div', { class: 'small', text: g.actions.join(', ') }))))
-          : h('p', { class: 'muted', text: 'Nothing yet. Tick a template or add a rule.' }),
+          : h('p', { class: 'muted', text: 'Nothing yet. Add a template or a rule.' }),
         res.warnings.length > 0 && h('ul', { class: 'warning small' }, res.warnings.map((w) => h('li', { text: w.template ? `${w.template}: ${w.message}` : w.message }))));
       slots.show(res.problems);
     } catch (e) {
@@ -317,8 +327,8 @@ async function editor(view, id) {
         drawRules([...rulesFromState(), { select: {}, actions: [] }]);
         schedule();
       } })),
-      h('fieldset', {}, h('legend', { text: 'Order of extra rule entities' }),
-        h('p', { class: 'muted small', text: 'Guests see them in this group, in this order. Until you move one, they go by name.' }),
+      h('fieldset', {}, h('legend', { text: 'Extra rule entities on the guest page' }),
+        h('p', { class: 'muted small', text: 'Guests see Shown in one group after the templates, in this order. Drag by the handle, or use Alt+Up and Alt+Down. Until you move one, they go by name. Removing an entity takes its access away: it goes on the exclude list of the extra rules that pick it.' }),
         order.el, slots.slot('entity_order')),
       h('fieldset', {}, h('legend', { text: 'Options' }),
         check('One-time', oneTime, 'Each action on each entity works once.'),

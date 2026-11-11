@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Admin: two lists with drag and drop (mouse, touch and keyboard) set
+  what a guest page shows and in which order. A link's templates move
+  between "In this link" and "Available"; the guest page shows their
+  groups in that order. The entities of a template, and of a link's
+  extra rules, sit in "Shown" (in guest page order, saved as
+  `entity_order`) and "Removed". Removing an entity adds its id to the
+  rules' `exclude`, so the guest loses access to it; "+" takes it out
+  again. Entities not placed now go by name, not by entity id. Rules
+  can be sorted by drag too.
+- A template may have no rules, and a link no templates and no rules.
+  Both are valid and grant nothing, so you can build them up step by
+  step. The admin shows a warning until they grant something.
 - Guest page: once a guest is in, the title is the link's name, not the
   global `guest.title`. A link can set its own `guest_title` and
   `guest_welcome` in the link editor. The password, device approval and
@@ -15,10 +27,6 @@
   in `/data`, valid for `ssl_self_signed_days`, and logs its SHA-256
   fingerprint. It never falls back to plain HTTP. Off by default; with
   it off nothing changes. The Settings page shows the certificate in use.
-- Admin: set the order of entities on the guest page. The template editor
-  and the link editor (for the extra rules' group) list the entities with
-  up and down buttons, saved as `entity_order`. Entities not placed now
-  go by name, not by entity id.
 - Guest port: a browser that opens the bare address, an unknown path or
   a link that does not exist gets a plain "This link doesn't work" page
   with status 404, not raw JSON. The page names nothing about the app.
@@ -26,8 +34,6 @@
   `guest.not_found_message`, or send browsers to your own site with
   `guest.not_found_redirect`. Scripts still get the JSON 404, and every
   unknown or malformed link gets the same answer.
-- Admin: ticked templates on a link can be moved up and down. The guest
-  page shows its groups in that order.
 - Guest: a fan's speed slider shows only while the fan is on, like a
   light's brightness. A fan with no on/off grant keeps it. The slider
   moves in the fan's own steps (`percentage_step`), for example 25% for

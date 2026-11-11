@@ -291,9 +291,30 @@ func TestResolveWarnings(t *testing.T) {
 	}
 }
 
+// An empty link or template is valid. It grants nothing, warns, and every
+// request on it is refused.
 func TestResolveEmpty(t *testing.T) {
-	g, w := Resolve(model.Link{}, nil, model.Inventory{})
-	if len(g) != 0 || len(w) != 0 {
-		t.Fatalf("Resolve(empty) = %v, %v", g, w)
+	empty := model.Template{ID: "empty", Name: "Empty"}
+	for _, tc := range []struct {
+		name string
+		link model.Link
+		tpls []model.Template
+		inv  model.Inventory
+		warn Warning
+	}{
+		{"empty link, empty house", model.Link{}, nil, model.Inventory{}, Warning{Rule: -1, Message: "This link grants nothing yet. Add a template or a rule."}},
+		{"empty link", model.Link{}, []model.Template{empty}, house(), Warning{Rule: -1, Message: "This link grants nothing yet. Add a template or a rule."}},
+		{"template with no rules", model.Link{TemplateIDs: []string{"empty"}}, []model.Template{empty}, house(), Warning{Template: "empty", Rule: -1, Message: "This template has no rules yet, so it grants nothing."}},
+		{"template with empty rules", model.Link{TemplateIDs: []string{"empty"}}, []model.Template{{ID: "empty", Name: "E", Rules: []model.Rule{}}}, house(), Warning{Template: "empty", Rule: -1, Message: "This template has no rules yet, so it grants nothing."}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g, w := Resolve(tc.link, tc.tpls, tc.inv)
+			if len(g) != 0 || !reflect.DeepEqual(w, []Warning{tc.warn}) {
+				t.Fatalf("Resolve = %v, %v", g, w)
+			}
+			if _, _, err := Check(g, Request{EntityID: "light.office", Action: "light.turn_on"}, nil, allowAll); err == nil {
+				t.Error("a request passed on an empty link")
+			}
+		})
 	}
 }

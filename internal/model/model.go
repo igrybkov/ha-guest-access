@@ -239,9 +239,8 @@ func (t Template) validate(p *problems, path string) {
 	if t.Access != nil {
 		t.Access.validate(p, join(path, "access"))
 	}
-	if len(t.Rules) == 0 {
-		p.add(join(path, "rules"), "is empty")
-	}
+	// A template with no rules is valid. It grants nothing, so the admin
+	// can save it and add rules later.
 	for i, r := range t.Rules {
 		r.validate(p, fmt.Sprintf("%s[%d]", join(path, "rules"), i))
 	}
