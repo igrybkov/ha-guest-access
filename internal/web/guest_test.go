@@ -492,7 +492,7 @@ func TestGuestPasswords(t *testing.T) {
 	}
 	for name, bad := range map[string]*http.Cookie{
 		"forged":       {Name: sessionCookie, Value: "AQIAAAAAAAAAAAAAAAAA"},
-		"tampered":     {Name: sessionCookie, Value: c.Value[:len(c.Value)-2] + "AA"},
+		"tampered":     {Name: sessionCookie, Value: c.Value[:20] + flip(c.Value[20]) + c.Value[21:]},
 		"near as auth": {Name: sessionCookie, Value: h.srv.deps.Signer.SignNear(l.ID, 1, t0.Add(time.Hour))},
 	} {
 		if rec := state(l, bad); rec.Code != 401 {
@@ -700,4 +700,12 @@ func TestRouteLabelHidesSlug(t *testing.T) {
 			t.Errorf("%s = %q, want %q", path, got, want)
 		}
 	}
+}
+
+// flip returns a base64url character other than c.
+func flip(c byte) string {
+	if c == 'A' {
+		return "B"
+	}
+	return "A"
 }
