@@ -37,7 +37,8 @@ import (
 //   - Expansion also skips disabled entities. HA lists them and then finds
 //     no state for them.
 //   - A label on an entity skips categorized entities too. HA keeps them on
-//     that one path. Brief decision 7 asks for the stricter rule.
+//     that one path. We take the stricter rule, so every expansion path
+//     skips the same entities.
 //   - "*" patterns are ours. An entity pattern with "*" counts as expansion
 //     and uses the same skip rules. Area, label and device patterns match
 //     ids; device patterns also match the display name.
