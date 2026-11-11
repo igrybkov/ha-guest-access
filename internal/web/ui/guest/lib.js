@@ -23,6 +23,14 @@ const LABELS = {
   'media_player.volume_mute': 'Mute',
   'script.run': 'Run',
   'script.cancel': 'Cancel',
+  'cover.open_cover': 'Open',
+  'cover.close_cover': 'Close',
+  'cover.stop_cover': 'Stop',
+  'cover.set_cover_position': 'Position',
+  'cover.open_cover_tilt': 'Open tilt',
+  'cover.close_cover_tilt': 'Close tilt',
+  'cover.stop_cover_tilt': 'Stop tilt',
+  'cover.set_cover_tilt_position': 'Tilt',
 };
 
 // actionLabel gives a short button text: "lock.unlock" gives "Unlock",
@@ -42,6 +50,7 @@ export function confirmLabel(id) {
 const STATES = {
   locked: 'Locked', unlocked: 'Unlocked', locking: 'Locking…', unlocking: 'Unlocking…',
   jammed: 'Jammed', open: 'Open', opening: 'Opening…',
+  closed: 'Closed', closing: 'Closing…', stopped: 'Stopped',
   disarmed: 'Disarmed', armed_home: 'Armed (home)', armed_away: 'Armed (away)',
   armed_night: 'Armed (night)', armed_vacation: 'Armed (vacation)',
   armed_custom_bypass: 'Armed', arming: 'Arming…', disarming: 'Disarming…',
@@ -94,15 +103,17 @@ const KNOWN = {
     'media_player.media_previous_track', 'media_player.volume_set', 'media_player.volume_mute'],
   switch: ['switch.turn_on', 'switch.turn_off'],
   script: ['script.run', 'script.cancel'],
+  cover: ['cover.open_cover', 'cover.close_cover', 'cover.stop_cover', 'cover.set_cover_position',
+    'cover.open_cover_tilt', 'cover.close_cover_tilt', 'cover.stop_cover_tilt', 'cover.set_cover_tilt_position'],
 };
 
 const KINDS = {
   lock: 'lock', alarm_control_panel: 'alarm', light: 'light', fan: 'fan',
-  media_player: 'media', switch: 'switch', script: 'script',
+  media_player: 'media', switch: 'switch', script: 'script', cover: 'cover',
 };
 
 // pickControl names the control for an entity: lock, alarm, light, fan,
-// media, switch, script, or buttons for anything else. A known domain
+// media, switch, script, cover, or buttons for anything else. A known domain
 // with no action this page knows how to draw also gets buttons.
 export function pickControl(domain, actions) {
   const kind = KINDS[domain];
@@ -169,6 +180,126 @@ export function scriptView(actions, state) {
     run,
     runLabel: running && !(run && run.used) ? 'Running…' : 'Run',
     cancel: running ? findAction(actions, 'script.cancel') : null,
+  };
+}
+
+// COVER holds HA's cover feature bits (CoverEntityFeature).
+export const COVER = Object.freeze({
+  OPEN: 1, CLOSE: 2, SET_POSITION: 4, STOP: 8,
+  OPEN_TILT: 16, CLOSE_TILT: 32, STOP_TILT: 64, SET_TILT_POSITION: 128,
+});
+
+// hasFeature reports whether attrs.supported_features has bit. A missing
+// or odd value has no features.
+export function hasFeature(attrs, bit) {
+  const f = attrs && attrs.supported_features;
+  return Number.isInteger(f) && f >= 0 && (f & bit) === bit;
+}
+
+// mayHaveFeature is hasFeature, except that a cover with no
+// supported_features number may have every feature. Buttons use it, so
+// they show unless HA says the cover can't do the action.
+function mayHaveFeature(attrs, bit) {
+  const f = attrs && attrs.supported_features;
+  return !Number.isInteger(f) || hasFeature(attrs, bit);
+}
+
+// CONFIRM_COVERS are the cover classes that let a person in: open and
+// position changes on them need a second tap. Blinds, shades, curtains
+// and awnings do not.
+const CONFIRM_COVERS = new Set(['garage', 'gate', 'door']);
+
+// coverConfirms reports whether a cover of deviceClass needs a confirm
+// to open or to move.
+export function coverConfirms(deviceClass) {
+  return typeof deviceClass === 'string' && CONFIRM_COVERS.has(deviceClass);
+}
+
+// coverActionConfirms reports whether action id on a cover of
+// deviceClass needs a confirm. Close, stop and tilt never do.
+export function coverActionConfirms(deviceClass, id) {
+  return coverConfirms(deviceClass) && (id === 'cover.open_cover' || id === 'cover.set_cover_position');
+}
+
+// COVER_CONFIRM_MS is how long a slider's confirm row waits for an
+// answer. It is longer than CONFIRM_MS, since the guest reads a question.
+export const COVER_CONFIRM_MS = 10000;
+
+// pct100 reads a 0 to 100 attribute as a whole number, or null.
+function pct100(x) {
+  return finite(x) ? Math.round(Math.min(100, Math.max(0, x))) : null;
+}
+
+// coverInfo reads what a cover card shows from a filtered state:
+// {state, position, tilt, deviceClass}. position and tilt are 0 to 100,
+// or null when the cover does not report them.
+export function coverInfo(st) {
+  const attrs = (st && st.attributes) || {};
+  return {
+    state: st ? st.state : undefined,
+    position: pct100(attrs.current_position),
+    tilt: pct100(attrs.current_tilt_position),
+    deviceClass: typeof attrs.device_class === 'string' ? attrs.device_class : '',
+  };
+}
+
+// coverStateText is the card's state line: "Open, 60%" or "Closed". The
+// percent shows when the cover reports a position, except a closed
+// cover at 0%.
+export function coverStateText(st) {
+  const info = coverInfo(st);
+  const label = stateLabel('cover', info.state);
+  if (!label || info.position === null || info.state === 'unavailable' || info.state === 'unknown') return label;
+  if (info.state === 'closed' && info.position === 0) return label;
+  return label + ', ' + info.position + '%';
+}
+
+const COVER_NOUNS = { garage: 'the garage', gate: 'the gate', door: 'the door' };
+
+// coverConfirmText is the question a confirm row asks before a cover
+// moves to pct: "Open the garage to 40%?".
+export function coverConfirmText(deviceClass, pct) {
+  const what = COVER_NOUNS[deviceClass] || 'it';
+  if (pct <= 0) return 'Close ' + what + '?';
+  if (pct >= 100) return 'Open ' + what + ' fully?';
+  return 'Open ' + what + ' to ' + Math.round(pct) + '%?';
+}
+
+const COVER_BUTTONS = [
+  ['cover.open_cover', COVER.OPEN], ['cover.stop_cover', COVER.STOP], ['cover.close_cover', COVER.CLOSE],
+];
+const TILT_BUTTONS = [
+  ['cover.open_cover_tilt', COVER.OPEN_TILT], ['cover.stop_cover_tilt', COVER.STOP_TILT],
+  ['cover.close_cover_tilt', COVER.CLOSE_TILT],
+];
+
+// coverView says what a cover card draws:
+//   buttons, tiltButtons: [{action, confirm}] in the order open, stop,
+//     close. Only granted actions, and only those the cover supports. A
+//     cover with no supported_features shows every granted button.
+//   position, tilt: {action, field, value, confirm} for a slider, or
+//     null. A slider needs a granted, unused action and the feature bit.
+// confirm is true when the tap or the move needs a confirm.
+export function coverView(actions, st) {
+  const info = coverInfo(st);
+  const attrs = (st && st.attributes) || {};
+  const buttons = (list) => list
+    .map(([id, bit]) => [findAction(actions, id), bit])
+    .filter(([a, bit]) => a && mayHaveFeature(attrs, bit))
+    .map(([a]) => ({ action: a, confirm: coverActionConfirms(info.deviceClass, a.id) }));
+  const sliderFor = (id, key, bit, current) => {
+    const a = findAction(actions, id);
+    if (!a || a.used || !hasFeature(attrs, bit)) return null;
+    const field = (a.fields || {})[key];
+    if (!field) return null;
+    const fallback = info.state === 'closed' ? 0 : 100;
+    return { action: a, field, value: current ?? fallback, confirm: coverActionConfirms(info.deviceClass, id) };
+  };
+  return {
+    buttons: buttons(COVER_BUTTONS),
+    tiltButtons: buttons(TILT_BUTTONS),
+    position: sliderFor('cover.set_cover_position', 'position', COVER.SET_POSITION, info.position),
+    tilt: sliderFor('cover.set_cover_tilt_position', 'tilt_position', COVER.SET_TILT_POSITION, info.tilt),
   };
 }
 

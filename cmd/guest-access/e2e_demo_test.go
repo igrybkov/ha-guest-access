@@ -95,4 +95,22 @@ func TestE2EDemoHouse(t *testing.T) {
 		t.Fatalf("arm: %d %s", r.code, r.body)
 	}
 	expect("alarm_control_panel.home", "armed_away", nil)
+
+	// Covers: the blind moves to a position, the garage door opens. The
+	// garage has no position, so a position call is refused.
+	if r := a.act(l, "cover.living_room_blind", "cover.set_cover_position", map[string]any{"position": 25}); r.code != http.StatusOK {
+		t.Fatalf("blind: %d %s", r.code, r.body)
+	}
+	expect("cover.living_room_blind", "open", func(at map[string]any) bool { return at["current_position"] == 25.0 })
+	if r := a.act(l, "cover.living_room_blind", "cover.close_cover_tilt", nil); r.code != http.StatusOK {
+		t.Fatalf("tilt: %d %s", r.code, r.body)
+	}
+	expect("cover.living_room_blind", "open", func(at map[string]any) bool { return at["current_tilt_position"] == 0.0 })
+	if r := a.act(l, "cover.garage_door", "cover.open_cover", nil); r.code != http.StatusOK {
+		t.Fatalf("garage: %d %s", r.code, r.body)
+	}
+	expect("cover.garage_door", "open", func(at map[string]any) bool { return at["device_class"] == "garage" })
+	if r := a.act(l, "cover.garage_door", "cover.set_cover_position", map[string]any{"position": 50}); r.code != http.StatusForbidden {
+		t.Fatalf("garage position: %d %s", r.code, r.body)
+	}
 }

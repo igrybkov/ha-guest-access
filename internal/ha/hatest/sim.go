@@ -13,7 +13,9 @@ import (
 
 // Sim makes a Fake act like HA for the services the app calls. A call
 // changes the target entity's state in the Fake and sends a
-// state_changed event, so pages that watch the state update live.
+// state_changed event, so pages that watch the state update live. A
+// cover moves at once: it goes to open or closed with no opening or
+// closing in between.
 //
 // Set Fake.Respond to Sim.Respond before the Fake is in use. Sim only
 // covers the services in the app's catalog. Other services change
@@ -204,6 +206,30 @@ func (s *Sim) apply(call ServiceCall, old ha.State) ha.State {
 		st.State = "armed_away"
 	case "alarm_control_panel.alarm_arm_night":
 		st.State = "armed_night"
+	case "cover.open_cover":
+		st.State = "open"
+		setIfPresent(a, "current_position", 100.0)
+	case "cover.close_cover":
+		st.State = "closed"
+		setIfPresent(a, "current_position", 0.0)
+	case "cover.stop_cover":
+		if old.State == "opening" || old.State == "closing" {
+			st.State = "open"
+		}
+	case "cover.set_cover_position":
+		p, _ := number(call.Data["position"])
+		a["current_position"] = p
+		st.State = "closed"
+		if p > 0 {
+			st.State = "open"
+		}
+	case "cover.open_cover_tilt":
+		setIfPresent(a, "current_tilt_position", 100.0)
+	case "cover.close_cover_tilt":
+		setIfPresent(a, "current_tilt_position", 0.0)
+	case "cover.set_cover_tilt_position":
+		p, _ := number(call.Data["tilt_position"])
+		a["current_tilt_position"] = p
 	case "switch.turn_on", "script.turn_on":
 		st.State = "on"
 	case "switch.turn_off", "script.turn_off":
@@ -234,6 +260,14 @@ func (s *Sim) scheduleScriptEnd(service, id string) {
 			s.set(old, next)
 		}
 	})
+}
+
+// setIfPresent sets key only when the entity already reports it. A cover
+// with no position (a plain garage door) gets none from open or close.
+func setIfPresent(a map[string]any, key string, v any) {
+	if _, ok := a[key]; ok {
+		a[key] = v
+	}
 }
 
 // number reads a JSON number. Service data that came over the wire has

@@ -7,6 +7,8 @@ import {
   formatUntil, confirmTap, confirmExpired, CONFIRM_MS, deviceNext, shouldPoll, geoErrorText,
   whereErrorText, sliderSender, sliderInterval, SLIDER_MS,
   approvalsOn, approvalsDelay, APPROVALS_MS,
+  COVER, hasFeature, coverConfirms, coverActionConfirms, coverInfo, coverStateText, coverConfirmText,
+  coverView, COVER_CONFIRM_MS, confirmLabel,
 } from './lib.js';
 
 test('linkBase', () => {
@@ -457,4 +459,140 @@ test('approvals poll at the normal pace, slower after a 429', () => {
   assert.equal(approvalsDelay(429, 30), 30000);
   assert.equal(approvalsDelay(429, 1), APPROVALS_MS);
   assert.equal(approvalsDelay(429, null), APPROVALS_MS);
+});
+
+// ---- Covers ----
+
+const coverActions = (ids, extra = {}) => ids.map((id) => ({
+  id, ui: id.includes('set_cover') ? 'slider' : 'button',
+  ...(id === 'cover.set_cover_position' ? { fields: { position: { kind: 'int', min: 0, max: 100 } } } : {}),
+  ...(id === 'cover.set_cover_tilt_position' ? { fields: { tilt_position: { kind: 'int', min: 0, max: 100 } } } : {}),
+  ...(extra[id] || {}),
+}));
+const ALL_COVER = ['cover.open_cover', 'cover.close_cover', 'cover.stop_cover', 'cover.set_cover_position',
+  'cover.open_cover_tilt', 'cover.close_cover_tilt', 'cover.stop_cover_tilt', 'cover.set_cover_tilt_position'];
+const coverState = (state, attrs) => ({ entity_id: 'cover.x', state, attributes: attrs });
+
+test('pickControl picks the cover card', () => {
+  assert.equal(pickControl('cover', coverActions(['cover.open_cover'])), 'cover');
+  assert.equal(pickControl('cover', coverActions(['cover.set_cover_tilt_position'])), 'cover');
+  assert.equal(pickControl('cover', [{ id: 'cover.toggle' }]), 'buttons');
+  assert.equal(pickControl('cover', []), 'buttons');
+});
+
+test('cover labels and states', () => {
+  assert.equal(actionLabel('cover.open_cover'), 'Open');
+  assert.equal(actionLabel('cover.stop_cover'), 'Stop');
+  assert.equal(actionLabel('cover.close_cover_tilt'), 'Close tilt');
+  assert.equal(confirmLabel('cover.open_cover'), 'Tap again to open');
+  for (const [st, want] of [['open', 'Open'], ['opening', 'Opening…'], ['closed', 'Closed'],
+    ['closing', 'Closing…'], ['stopped', 'Stopped']]) {
+    assert.equal(stateLabel('cover', st), want);
+  }
+});
+
+test('hasFeature reads the bits and refuses odd values', () => {
+  assert.equal(hasFeature({ supported_features: 255 }, COVER.SET_TILT_POSITION), true);
+  assert.equal(hasFeature({ supported_features: 11 }, COVER.SET_POSITION), false);
+  assert.equal(hasFeature({ supported_features: 11 }, COVER.STOP), true);
+  assert.equal(hasFeature({ supported_features: COVER.OPEN | COVER.CLOSE }, COVER.OPEN), true);
+  for (const f of [undefined, null, '255', 4.5, -1, NaN, [4]]) {
+    assert.equal(hasFeature({ supported_features: f }, COVER.SET_POSITION), false, String(f));
+  }
+  assert.equal(hasFeature(undefined, COVER.OPEN), false);
+});
+
+test('coverConfirms is garage, gate and door only', () => {
+  for (const dc of ['garage', 'gate', 'door']) assert.equal(coverConfirms(dc), true, dc);
+  for (const dc of ['blind', 'shade', 'curtain', 'awning', 'shutter', 'window', 'damper', '', undefined, 'Garage', 'garage ']) {
+    assert.equal(coverConfirms(dc), false, String(dc));
+  }
+  assert.equal(coverActionConfirms('garage', 'cover.open_cover'), true);
+  assert.equal(coverActionConfirms('gate', 'cover.set_cover_position'), true);
+  assert.equal(coverActionConfirms('door', 'cover.close_cover'), false);
+  assert.equal(coverActionConfirms('garage', 'cover.stop_cover'), false);
+  assert.equal(coverActionConfirms('garage', 'cover.open_cover_tilt'), false);
+  assert.equal(coverActionConfirms('blind', 'cover.open_cover'), false);
+  assert.equal(coverActionConfirms('shade', 'cover.set_cover_position'), false);
+});
+
+test('coverInfo and coverStateText', () => {
+  assert.deepEqual(coverInfo(coverState('open', { current_position: 60.4, current_tilt_position: 30, device_class: 'blind' })),
+    { state: 'open', position: 60, tilt: 30, deviceClass: 'blind' });
+  assert.deepEqual(coverInfo(undefined), { state: undefined, position: null, tilt: null, deviceClass: '' });
+  assert.equal(coverInfo(coverState('open', { current_position: 140 })).position, 100);
+  assert.equal(coverInfo(coverState('open', { current_position: '50' })).position, null);
+  assert.equal(coverStateText(coverState('open', { current_position: 60 })), 'Open, 60%');
+  assert.equal(coverStateText(coverState('opening', { current_position: 20 })), 'Opening…, 20%');
+  assert.equal(coverStateText(coverState('stopped', { current_position: 35 })), 'Stopped, 35%');
+  assert.equal(coverStateText(coverState('closed', { current_position: 0 })), 'Closed');
+  assert.equal(coverStateText(coverState('closed', {})), 'Closed');
+  assert.equal(coverStateText(coverState('open', { device_class: 'garage' })), 'Open');
+  assert.equal(coverStateText(coverState('unavailable', { current_position: 50 })), 'Not available');
+  assert.equal(coverStateText(undefined), '');
+});
+
+test('coverConfirmText asks before a garage, gate or door moves', () => {
+  assert.equal(coverConfirmText('garage', 40), 'Open the garage to 40%?');
+  assert.equal(coverConfirmText('gate', 100), 'Open the gate fully?');
+  assert.equal(coverConfirmText('door', 0), 'Close the door?');
+  assert.equal(coverConfirmText('nope', 10), 'Open it to 10%?');
+  for (const pct of [0, 1, 40, 99, 100]) {
+    assert.equal(/[\u2013\u2014]/.test(coverConfirmText('garage', pct)), false);
+  }
+  assert.ok(COVER_CONFIRM_MS > CONFIRM_MS);
+});
+
+test('coverView: a blind with every feature and action', () => {
+  const v = coverView(coverActions(ALL_COVER),
+    coverState('open', { device_class: 'blind', supported_features: 255, current_position: 60, current_tilt_position: 30 }));
+  assert.deepEqual(v.buttons.map((b) => b.action.id), ['cover.open_cover', 'cover.stop_cover', 'cover.close_cover']);
+  assert.deepEqual(v.tiltButtons.map((b) => b.action.id), ['cover.open_cover_tilt', 'cover.stop_cover_tilt', 'cover.close_cover_tilt']);
+  assert.equal(v.buttons.some((b) => b.confirm), false);
+  assert.equal(v.position.value, 60);
+  assert.equal(v.position.confirm, false);
+  assert.deepEqual(v.position.field, { kind: 'int', min: 0, max: 100 });
+  assert.equal(v.tilt.value, 30);
+  assert.equal(v.tilt.confirm, false);
+});
+
+test('coverView: a garage confirms open and position, not close or stop', () => {
+  const v = coverView(coverActions(ALL_COVER), coverState('closed', { device_class: 'garage', supported_features: 15 }));
+  assert.deepEqual(v.buttons.map((b) => [b.action.id, b.confirm]),
+    [['cover.open_cover', true], ['cover.stop_cover', false], ['cover.close_cover', false]]);
+  assert.equal(v.position.confirm, true);
+  assert.equal(v.position.value, 0, 'a closed cover with no position starts at 0');
+  assert.deepEqual(v.tiltButtons, [], 'no tilt bits');
+  assert.equal(v.tilt, null);
+});
+
+test('coverView shows only granted actions', () => {
+  const v = coverView(coverActions(['cover.close_cover', 'cover.set_cover_tilt_position']),
+    coverState('open', { supported_features: 255 }));
+  assert.deepEqual(v.buttons.map((b) => b.action.id), ['cover.close_cover']);
+  assert.equal(v.position, null, 'position not granted');
+  assert.ok(v.tilt);
+  assert.deepEqual(v.tiltButtons, []);
+});
+
+test('coverView: sliders need the feature bit, buttons need it only when known', () => {
+  const garage = coverView(coverActions(ALL_COVER), coverState('closed', { device_class: 'garage', supported_features: 11 }));
+  assert.equal(garage.position, null, 'no SET_POSITION bit');
+  assert.deepEqual(garage.buttons.map((b) => b.action.id), ['cover.open_cover', 'cover.stop_cover', 'cover.close_cover']);
+  const noStop = coverView(coverActions(ALL_COVER), coverState('open', { supported_features: COVER.OPEN | COVER.CLOSE | COVER.SET_POSITION }));
+  assert.deepEqual(noStop.buttons.map((b) => b.action.id), ['cover.open_cover', 'cover.close_cover']);
+  assert.ok(noStop.position);
+  const unknown = coverView(coverActions(ALL_COVER), coverState('open', {}));
+  assert.equal(unknown.buttons.length, 3);
+  assert.equal(unknown.tiltButtons.length, 3);
+  assert.equal(unknown.position, null, 'a slider needs the bit');
+  assert.equal(unknown.tilt, null);
+  assert.equal(coverView(coverActions(ALL_COVER), undefined).position, null);
+});
+
+test('coverView hides a used slider and keeps a used button as done', () => {
+  const v = coverView(coverActions(ALL_COVER, { 'cover.set_cover_position': { used: true }, 'cover.open_cover': { used: true } }),
+    coverState('open', { supported_features: 255, current_position: 10 }));
+  assert.equal(v.position, null);
+  assert.equal(v.buttons[0].action.used, true);
 });

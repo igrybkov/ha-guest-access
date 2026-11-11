@@ -11,8 +11,8 @@ import (
 	"github.com/igrybkov/ha-guest-access/internal/inventory"
 )
 
-// The seeded link grants the shared rooms, the guest room, the door and
-// the scripts. It leaves out the private, hidden, disabled and
+// The seeded link grants the shared rooms, the guest room, the door, the
+// garage door and the scripts. It leaves out the private, hidden, disabled and
 // diagnostic entities, as HA's target expansion does.
 func TestSeededLinkGrants(t *testing.T) {
 	for _, tpl := range Templates() {
@@ -33,7 +33,7 @@ func TestSeededLinkGrants(t *testing.T) {
 		got[k.EntityID] = true
 	}
 	want := []string{
-		"alarm_control_panel.home", "fan.guest_room", "light.guest_room", "light.kitchen", "light.living_room",
+		"alarm_control_panel.home", "cover.garage_door", "cover.living_room_blind", "fan.guest_room", "light.guest_room", "light.kitchen", "light.living_room",
 		"lock.front_door", "media_player.living_room", "script.im_leaving", "script.let_me_in",
 	}
 	var ids []string
@@ -43,6 +43,18 @@ func TestSeededLinkGrants(t *testing.T) {
 	slices.Sort(ids)
 	if !slices.Equal(ids, want) {
 		t.Errorf("granted %v\nwant    %v", ids, want)
+	}
+	// The blind gets every cover action. The garage door opens, closes
+	// and stops, and has no position slider.
+	count := map[string]int{}
+	for k := range grants {
+		count[k.EntityID]++
+	}
+	if count["cover.living_room_blind"] != 8 || count["cover.garage_door"] != 3 {
+		t.Errorf("cover actions: blind %d, garage %d", count["cover.living_room_blind"], count["cover.garage_door"])
+	}
+	if _, ok := grants[authz.GrantKey{EntityID: "cover.garage_door", Action: "cover.set_cover_position"}]; ok {
+		t.Error("garage door has a position action")
 	}
 }
 

@@ -7,6 +7,7 @@ import {
   actionLabel, confirmLabel, stateLabel, splitActions, pickControl, findAction,
   toggleFor, lockActions, alarmActions, scriptView, mediaInfo, sliderBounds, clamp,
   brightnessPct, supportsColorTemp, confirmTap, CONFIRM_MS, sliderSender,
+  coverView, coverStateText, coverConfirmText, COVER_CONFIRM_MS,
 } from './lib.js';
 
 // The one armed confirm tap on the page: {key, until, reset}.
@@ -27,7 +28,7 @@ export function makeCard(entity, state, ctx) {
   const headId = 'card-' + entity.id.replace(/[^A-Za-z0-9_-]/g, '_');
   const name = el('h3', { className: 'name', id: headId }, entity.name);
   const kind = pickControl(entity.domain, splitActions(entity.actions).now);
-  const live = kind === 'lock' || kind === 'alarm' || kind === 'script';
+  const live = kind === 'lock' || kind === 'alarm' || kind === 'script' || kind === 'cover';
   const stateText = el('span', { className: 'state', attrs: live ? { 'aria-live': 'polite' } : {} });
   const body = el('div', { className: 'body' });
   const node = el('section', { className: 'card', attrs: { 'aria-labelledby': headId } },
@@ -68,7 +69,7 @@ export function makeCard(entity, state, ctx) {
     const focusKey = node.contains(document.activeElement) ? document.activeElement.dataset.key : '';
     const st = current || null;
     const s = st ? st.state : undefined;
-    stateText.textContent = stateLabel(entity.domain, s);
+    stateText.textContent = kind === 'cover' ? coverStateText(st) : stateLabel(entity.domain, s);
     const { now, later } = splitActions(entity.actions);
     const parts = now.length > 0 ? DRAW[kind](card, now, st) : [];
     const off = s === 'unavailable';
@@ -105,7 +106,7 @@ function locationRow(entity, only, ctx) {
 }
 
 // actionButton makes a button for one action. A used one-time action
-// shows as done. ui "confirm" asks for a second tap.
+// shows as done. ui "confirm" or opts.confirm asks for a second tap.
 function actionButton(card, a, opts = {}) {
   const label = opts.label || actionLabel(a.id);
   if (a.used) {
@@ -114,7 +115,7 @@ function actionButton(card, a, opts = {}) {
   const b = el('button', { type: 'button', className: opts.className || '' }, label);
   b.dataset.key = a.id;
   const data = opts.data || {};
-  if (a.ui === 'confirm') {
+  if (a.ui === 'confirm' || opts.confirm) {
     b.addEventListener('click', () => {
       const now = Date.now();
       const r = confirmTap(armed && armed.card === card ? armed : null, a.id, now, CONFIRM_MS);
@@ -205,6 +206,91 @@ function slider(card, key, labelText, b, value, format, onSend) {
   input.addEventListener('blur', release);
   return el('div', { className: 'slider' },
     el('label', { htmlFor: id }, labelText, ' ', out), input);
+}
+
+// confirmSlider is a slider that sends nothing while the guest drags.
+// On release it asks ask(v) in a confirm row, and sends v only on Yes.
+// Cancel, a timeout or another confirm tap puts the slider back. The
+// row is the page's one armed confirm, so the card does not redraw
+// under it.
+function confirmSlider(card, key, labelText, b, value, format, ask, onSend) {
+  const id = 'r-' + card.entity.id.replace(/[^A-Za-z0-9_-]/g, '_') + '-' + key;
+  let start = value;
+  const out = el('span', { className: 'value' }, format(value));
+  const input = el('input', {
+    type: 'range', id, min: String(b.min), max: String(b.max), step: String(b.step), value: String(value),
+  });
+  input.dataset.key = key;
+  input.setAttribute('aria-valuetext', format(value));
+  const question = el('p', { className: 'question', attrs: { 'aria-live': 'polite' } });
+  const yes = el('button', { type: 'button', className: 'armed' }, 'Yes');
+  const no = el('button', { type: 'button', className: 'secondary' }, 'Cancel');
+  const prompt = el('div', { className: 'confirm-row', hidden: true }, question, row(yes, no));
+  const show = (v) => {
+    out.textContent = format(v);
+    input.setAttribute('aria-valuetext', format(v));
+  };
+
+  let held = false;
+  const hold = () => {
+    if (!held) {
+      held = true;
+      card.hold();
+    }
+  };
+  const letGo = () => {
+    if (held) {
+      held = false;
+      card.release();
+    }
+  };
+  input.addEventListener('pointerdown', hold);
+  input.addEventListener('touchstart', hold, { passive: true });
+  input.addEventListener('input', () => show(Number(input.value)));
+  input.addEventListener('change', () => {
+    const v = Number(input.value);
+    disarm();
+    // Disarming may redraw the card and replace this slider. Asking from
+    // a slider that is gone would leave a row nobody sees.
+    if (!input.isConnected) {
+      letGo();
+      return;
+    }
+    input.value = String(v);
+    show(v);
+    if (v === start) {
+      letGo();
+      return;
+    }
+    question.textContent = ask(v);
+    prompt.hidden = false;
+    armed = {
+      key: 'slider:' + key, until: Date.now() + COVER_CONFIRM_MS, card,
+      timer: setTimeout(disarm, COVER_CONFIRM_MS),
+      reset() {
+        prompt.hidden = true;
+        input.value = String(start);
+        show(start);
+        card.release();
+      },
+    };
+    card.hold();
+    letGo();
+  });
+  input.addEventListener('pointerup', () => setTimeout(letGo, 0));
+  input.addEventListener('pointercancel', letGo);
+  input.addEventListener('blur', letGo);
+  yes.addEventListener('click', () => {
+    if (!armed || armed.card !== card || armed.key !== 'slider:' + key) return;
+    const v = Number(input.value);
+    // Keep the new value through the reset, until the state catches up.
+    start = v;
+    disarm();
+    onSend(v);
+  });
+  no.addEventListener('click', disarm);
+  return el('div', { className: 'slider' },
+    el('label', { htmlFor: id }, labelText, ' ', out), input, prompt);
 }
 
 const pct = (v) => Math.round(v) + '%';
@@ -308,6 +394,35 @@ const DRAW = {
     }
     if (v.cancel) buttons.push(actionButton(card, v.cancel, { className: 'secondary' }));
     return [row(...buttons)];
+  },
+
+  cover(card, actions, st) {
+    const v = coverView(actions, st);
+    const parts = [];
+    const button = (x) => actionButton(card, x.action, { confirm: x.confirm });
+    if (v.buttons.length > 0) parts.push(row(...v.buttons.map(button)));
+    if (v.position) {
+      const p = v.position;
+      const b = sliderBounds(p.field, {});
+      const send = (x) => card.send(p.action.id, { position: x });
+      if (b && p.confirm) {
+        const dc = (st && st.attributes && st.attributes.device_class) || '';
+        parts.push(confirmSlider(card, 'position', 'Position', b, clamp(p.value, b), pct,
+          (x) => coverConfirmText(dc, x), send));
+      } else if (b) {
+        parts.push(slider(card, 'position', 'Position', b, clamp(p.value, b), pct, send));
+      }
+    }
+    if (v.tiltButtons.length > 0) parts.push(row(...v.tiltButtons.map(button)));
+    if (v.tilt) {
+      const t = v.tilt;
+      const b = sliderBounds(t.field, {});
+      if (b) {
+        parts.push(slider(card, 'tilt', 'Tilt', b, clamp(t.value, b), pct,
+          (x) => card.send(t.action.id, { tilt_position: x })));
+      }
+    }
+    return parts;
   },
 
   buttons(card, actions) {

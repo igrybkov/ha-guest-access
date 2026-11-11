@@ -44,6 +44,14 @@ func TestPlanActions(t *testing.T) {
 		"switch.turn_off":                     "switch.turn_off",
 		"script.run":                          "script.turn_on",
 		"script.cancel":                       "script.turn_off",
+		"cover.open_cover":                    "cover.open_cover",
+		"cover.close_cover":                   "cover.close_cover",
+		"cover.stop_cover":                    "cover.stop_cover",
+		"cover.set_cover_position":            "cover.set_cover_position",
+		"cover.open_cover_tilt":               "cover.open_cover_tilt",
+		"cover.close_cover_tilt":              "cover.close_cover_tilt",
+		"cover.stop_cover_tilt":               "cover.stop_cover_tilt",
+		"cover.set_cover_tilt_position":       "cover.set_cover_tilt_position",
 	}
 	if n := len(All()); n != len(want) {
 		t.Errorf("catalog has %d actions, want %d", n, len(want))
@@ -70,6 +78,8 @@ func TestDataFields(t *testing.T) {
 		{"fan.set_percentage", "percentage", Field{Kind: KindInt, Min: 0, Max: 100}},
 		{"media_player.volume_set", "volume_level", Field{Kind: KindFloat, Min: 0, Max: 1}},
 		{"media_player.volume_mute", "is_volume_muted", Field{Kind: KindBool}},
+		{"cover.set_cover_position", "position", Field{Kind: KindInt, Min: 0, Max: 100}},
+		{"cover.set_cover_tilt_position", "tilt_position", Field{Kind: KindInt, Min: 0, Max: 100}},
 	}
 	for _, tt := range tests {
 		a, _ := Lookup(tt.action)
@@ -83,7 +93,9 @@ func TestDataFields(t *testing.T) {
 			t.Errorf("%s.%s = %+v, want %+v", tt.action, tt.key, got, tt.want)
 		}
 	}
-	for _, id := range []string{"script.run", "script.cancel", "lock.unlock", "lock.open", "alarm_control_panel.alarm_disarm"} {
+	for _, id := range []string{"script.run", "script.cancel", "lock.unlock", "lock.open", "alarm_control_panel.alarm_disarm",
+		"cover.open_cover", "cover.close_cover", "cover.stop_cover",
+		"cover.open_cover_tilt", "cover.close_cover_tilt", "cover.stop_cover_tilt"} {
 		if a, _ := Lookup(id); len(a.Data) != 0 {
 			t.Errorf("%s takes guest data %v", id, a.Data)
 		}
@@ -142,7 +154,7 @@ func TestLookupReturnsCopies(t *testing.T) {
 }
 
 func TestDomainsAndAttributes(t *testing.T) {
-	want := []string{"alarm_control_panel", "fan", "light", "lock", "media_player", "script", "switch"}
+	want := []string{"alarm_control_panel", "cover", "fan", "light", "lock", "media_player", "script", "switch"}
 	if d := Domains(); !slices.Equal(d, want) {
 		t.Fatalf("Domains = %v, want %v", d, want)
 	}
@@ -222,6 +234,24 @@ func TestFilterState(t *testing.T) {
 		t.Fatalf("lock = %+v", lock)
 	}
 
+	// A cover keeps its position, tilt and class. Speed, is_closed and
+	// anything else HA or an integration adds are dropped.
+	cover := FilterState(model.State{EntityID: "cover.garage", State: "opening", Attributes: map[string]any{
+		"friendly_name": "Garage", "supported_features": 15.0, "device_class": "garage",
+		"current_position": 40.0, "current_tilt_position": 10.0,
+		"is_closed": false, "speed": "fast", "supported_speeds": []any{"fast"}, "assumed_state": true,
+		"entity_picture": "/api/camera_proxy/x?token=secret", "user_id": "u1", "changed_by": "Illia",
+	}})
+	wantCover := []string{"current_position", "current_tilt_position", "device_class", "friendly_name", "supported_features"}
+	var gotCover []string
+	for k := range cover.Attributes {
+		gotCover = append(gotCover, k)
+	}
+	slices.Sort(gotCover)
+	if cover.State != "opening" || !slices.Equal(gotCover, wantCover) {
+		t.Fatalf("cover = %+v", cover)
+	}
+
 	unknown := FilterState(model.State{EntityID: "person.illia", State: "home", Attributes: map[string]any{
 		"friendly_name": "Illia", "latitude": 1.0,
 	}})
@@ -232,7 +262,10 @@ func TestFilterState(t *testing.T) {
 
 // Exactly the slider actions are continuous.
 func TestContinuousActions(t *testing.T) {
-	want := map[string]bool{"light.turn_on": true, "fan.set_percentage": true, "media_player.volume_set": true}
+	want := map[string]bool{
+		"light.turn_on": true, "fan.set_percentage": true, "media_player.volume_set": true,
+		"cover.set_cover_position": true, "cover.set_cover_tilt_position": true,
+	}
 	for _, a := range All() {
 		if a.Continuous != want[a.ID] {
 			t.Errorf("%s: continuous %v", a.ID, a.Continuous)

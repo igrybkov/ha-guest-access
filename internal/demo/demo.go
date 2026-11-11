@@ -30,7 +30,9 @@ var Home = ha.Config{Latitude: 41.8781, Longitude: -87.6298, LocationName: "Demo
 //   - lights: living room (with color temp), kitchen, guest room lamp,
 //     bedroom; a hidden accent light and a disabled garage light;
 //   - a ceiling fan, a speaker, a front door lock, an alarm panel that
-//     needs no code, and two scripts: "Let me in" and "I'm leaving".
+//     needs no code, and two scripts: "Let me in" and "I'm leaving";
+//   - covers: a living room blind with position and tilt, and a garage
+//     door that only opens, closes and stops.
 func House() *hatest.Fake {
 	return &hatest.Fake{
 		AreaList: []ha.Area{
@@ -65,6 +67,8 @@ func House() *hatest.Fake {
 			{EntityID: "alarm_control_panel.home", DeviceID: "dev_alarm", Name: "Home alarm"},
 			{EntityID: "script.let_me_in", Name: "Let me in"},
 			{EntityID: "script.im_leaving", Name: "I'm leaving"},
+			{EntityID: "cover.living_room_blind", AreaID: "living_room", Name: "Living room blind"},
+			{EntityID: "cover.garage_door", AreaID: "entry", Name: "Garage door"},
 		},
 		StateList: []ha.State{
 			{EntityID: "light.living_room", State: "on", Attributes: map[string]any{
@@ -89,6 +93,16 @@ func House() *hatest.Fake {
 				"friendly_name": "Home alarm", "code_format": nil, "code_arm_required": false}},
 			{EntityID: "script.let_me_in", State: "off", Attributes: map[string]any{"friendly_name": "Let me in"}},
 			{EntityID: "script.im_leaving", State: "off", Attributes: map[string]any{"friendly_name": "I'm leaving"}},
+			// 255 is open, close, stop and set position, for the blind and
+			// for its tilt.
+			{EntityID: "cover.living_room_blind", State: "open", Attributes: map[string]any{
+				"friendly_name": "Living room blind", "device_class": "blind", "supported_features": 255.0,
+				"current_position": 60.0, "current_tilt_position": 30.0,
+			}},
+			// 11 is open, close and stop.
+			{EntityID: "cover.garage_door", State: "closed", Attributes: map[string]any{
+				"friendly_name": "Garage door", "device_class": "garage", "supported_features": 11.0,
+			}},
 		},
 		Core: Home,
 	}
@@ -96,7 +110,8 @@ func House() *hatest.Fake {
 
 // Templates are the two seeded templates. "Guest stay" picks the shared
 // rooms by label and the guest room by area, and leaves out anything
-// labeled private. "Front door" has the lock, the alarm and the scripts.
+// labeled private. "Front door" has the lock, the alarm, the garage door
+// and the scripts.
 func Templates() []model.Template {
 	return []model.Template{
 		{ID: "guest_stay", Name: "Guest stay", Icon: "mdi:sofa", Rules: []model.Rule{
@@ -108,6 +123,8 @@ func Templates() []model.Template {
 					"fan.turn_on", "fan.turn_off", "fan.set_percentage",
 					"media_player.media_play_pause", "media_player.media_next_track",
 					"media_player.media_previous_track", "media_player.volume_set", "media_player.volume_mute",
+					"cover.open_cover", "cover.close_cover", "cover.stop_cover", "cover.set_cover_position",
+					"cover.open_cover_tilt", "cover.close_cover_tilt", "cover.stop_cover_tilt", "cover.set_cover_tilt_position",
 				},
 			},
 		}},
@@ -115,6 +132,8 @@ func Templates() []model.Template {
 			{Select: model.Selector{Entities: []string{"lock.front_door"}}, Actions: []string{"lock.lock", "lock.unlock"}},
 			{Select: model.Selector{Entities: []string{"alarm_control_panel.home"}},
 				Actions: []string{"alarm_control_panel.alarm_disarm", "alarm_control_panel.alarm_arm_away"}},
+			{Select: model.Selector{Entities: []string{"cover.garage_door"}},
+				Actions: []string{"cover.open_cover", "cover.close_cover", "cover.stop_cover"}},
 			{Select: model.Selector{Entities: []string{"script.let_me_in", "script.im_leaving"}},
 				Actions:   []string{"script.run", "script.cancel"},
 				Variables: map[string]any{"source": "demo"}},

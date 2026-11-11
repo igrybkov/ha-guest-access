@@ -11,7 +11,8 @@ import (
 	"github.com/igrybkov/ha-guest-access/internal/ha"
 )
 
-// simHouse is a Fake with one entity of each kind the Sim knows.
+// simHouse is a Fake with one entity of each kind the Sim knows, plus a
+// garage and a gate with no position.
 func simHouse() *Fake {
 	return &Fake{StateList: []ha.State{
 		{EntityID: "light.lamp", State: "off", Attributes: map[string]any{"friendly_name": "Lamp"}},
@@ -21,6 +22,9 @@ func simHouse() *Fake {
 		{EntityID: "alarm_control_panel.home", State: "disarmed"},
 		{EntityID: "switch.kettle", State: "off"},
 		{EntityID: "script.let_me_in", State: "off"},
+		{EntityID: "cover.blind", State: "open", Attributes: map[string]any{"current_position": 60.0, "current_tilt_position": 30.0}},
+		{EntityID: "cover.garage", State: "closed", Attributes: map[string]any{"device_class": "garage"}},
+		{EntityID: "cover.gate", State: "opening"},
 	}}
 }
 
@@ -72,6 +76,22 @@ func TestSimAppliesServices(t *testing.T) {
 		{"script stays on without a run time", []ServiceCall{call("script", "turn_on", "script.let_me_in", nil)}, "script.let_me_in", "on", nil},
 		{"script cancel", []ServiceCall{call("script", "turn_on", "script.let_me_in", nil), call("script", "turn_off", "script.let_me_in", nil)},
 			"script.let_me_in", "off", nil},
+		{"cover open", []ServiceCall{call("cover", "open_cover", "cover.blind", nil)}, "cover.blind", "open", map[string]any{"current_position": 100.0}},
+		{"cover close", []ServiceCall{call("cover", "close_cover", "cover.blind", nil)}, "cover.blind", "closed", map[string]any{"current_position": 0.0}},
+		{"cover position", []ServiceCall{call("cover", "set_cover_position", "cover.blind", map[string]any{"position": 40})},
+			"cover.blind", "open", map[string]any{"current_position": 40.0}},
+		{"cover position over the wire", []ServiceCall{call("cover", "set_cover_position", "cover.blind", map[string]any{"position": 25.0})},
+			"cover.blind", "open", map[string]any{"current_position": 25.0}},
+		{"cover position 0 is closed", []ServiceCall{call("cover", "set_cover_position", "cover.blind", map[string]any{"position": 0})},
+			"cover.blind", "closed", map[string]any{"current_position": 0.0}},
+		{"cover tilt open", []ServiceCall{call("cover", "open_cover_tilt", "cover.blind", nil)}, "cover.blind", "open", map[string]any{"current_tilt_position": 100.0}},
+		{"cover tilt close", []ServiceCall{call("cover", "close_cover_tilt", "cover.blind", nil)}, "cover.blind", "open", map[string]any{"current_tilt_position": 0.0}},
+		{"cover tilt position", []ServiceCall{call("cover", "set_cover_tilt_position", "cover.blind", map[string]any{"tilt_position": 75})},
+			"cover.blind", "open", map[string]any{"current_tilt_position": 75.0}},
+		{"cover stop tilt keeps it", []ServiceCall{call("cover", "stop_cover_tilt", "cover.blind", nil)}, "cover.blind", "open", map[string]any{"current_tilt_position": 30.0}},
+		{"garage opens, no position added", []ServiceCall{call("cover", "open_cover", "cover.garage", nil)}, "cover.garage", "open", map[string]any{"current_position": nil}},
+		{"stop while moving", []ServiceCall{call("cover", "stop_cover", "cover.gate", nil)}, "cover.gate", "open", nil},
+		{"stop at rest", []ServiceCall{call("cover", "stop_cover", "cover.garage", nil)}, "cover.garage", "closed", nil},
 		{"unknown service changes nothing", []ServiceCall{call("lock", "explode", "lock.front", nil)}, "lock.front", "locked", nil},
 	}
 	for _, tt := range tests {

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Covers: open, close, stop and position, plus the same for tilt. The
+  guest card shows the state and the position, with sliders for position
+  and tilt. A garage, gate or door asks for a second tap to open, and a
+  confirm before its position slider moves it.
+- The demo house has a living room blind and a garage door.
+
 ## 0.2.0
 
 The first usable version.

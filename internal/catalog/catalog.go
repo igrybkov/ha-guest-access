@@ -102,6 +102,22 @@ var actions = index([]Action{
 	{ID: "switch.turn_on", Domain: "switch", Service: "turn_on", UI: "toggle"},
 	{ID: "switch.turn_off", Domain: "switch", Service: "turn_off", UI: "toggle"},
 
+	// Covers. Whether a tap needs a second tap depends on the entity's
+	// device_class (garage, gate, door), so the guest page decides that.
+	// The server checks the same way for every cover.
+	{ID: "cover.open_cover", Domain: "cover", Service: "open_cover", UI: "button"},
+	{ID: "cover.close_cover", Domain: "cover", Service: "close_cover", UI: "button"},
+	{ID: "cover.stop_cover", Domain: "cover", Service: "stop_cover", UI: "button"},
+	{ID: "cover.set_cover_position", Domain: "cover", Service: "set_cover_position", UI: "slider", Continuous: true, Data: map[string]Field{
+		"position": {Kind: KindInt, Min: 0, Max: 100},
+	}},
+	{ID: "cover.open_cover_tilt", Domain: "cover", Service: "open_cover_tilt", UI: "button"},
+	{ID: "cover.close_cover_tilt", Domain: "cover", Service: "close_cover_tilt", UI: "button"},
+	{ID: "cover.stop_cover_tilt", Domain: "cover", Service: "stop_cover_tilt", UI: "button"},
+	{ID: "cover.set_cover_tilt_position", Domain: "cover", Service: "set_cover_tilt_position", UI: "slider", Continuous: true, Data: map[string]Field{
+		"tilt_position": {Kind: KindInt, Min: 0, Max: 100},
+	}},
+
 	// Scripts take no guest data. script.run sends the rule's fixed
 	// variables plus guest_link, the link's name.
 	{ID: "script.run", Domain: "script", Service: "turn_on", UI: "button"},
@@ -125,6 +141,7 @@ var attributes = map[string][]string{
 	"media_player": append(slices.Clone(common), "volume_level", "is_volume_muted", "media_title", "media_artist"),
 	"switch":       common,
 	"script":       common,
+	"cover":        append(slices.Clone(common), "device_class", "current_position", "current_tilt_position"),
 }
 
 func index(list []Action) map[string]Action {

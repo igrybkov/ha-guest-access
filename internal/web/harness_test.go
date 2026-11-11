@@ -33,7 +33,8 @@ var home = model.Home{Lat: 41.8781, Lon: -87.6298}
 var t0 = time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 
 // fakeHA is a house with a guest room, an entry, a bedroom the guest may
-// not touch, an office switch for local-only tests, and music.
+// not touch, an office switch for local-only tests, music, a shade in the
+// guest room and a garage door. No default template grants a cover.
 func fakeHA() *hatest.Fake {
 	return &hatest.Fake{
 		AreaList: []ha.Area{{AreaID: "guest_room", Name: "Guest room"}, {AreaID: "bedroom", Name: "Bedroom"}, {AreaID: "entry", Name: "Entry"}},
@@ -49,6 +50,8 @@ func fakeHA() *hatest.Fake {
 			{EntityID: "script.let_me_in", Name: "Let me in"},
 			{EntityID: "switch.office", Name: "Office"},
 			{EntityID: "media_player.living_room", Name: "Living room"},
+			{EntityID: "cover.guest_room_shade", AreaID: "guest_room", Name: "Guest room shade"},
+			{EntityID: "cover.garage_door", Name: "Garage door"},
 		},
 		StateList: []ha.State{
 			{EntityID: "light.guest_room", State: "off", Attributes: map[string]any{
@@ -61,6 +64,14 @@ func fakeHA() *hatest.Fake {
 			{EntityID: "script.let_me_in", State: "off"},
 			{EntityID: "switch.office", State: "off"},
 			{EntityID: "media_player.living_room", State: "idle"},
+			{EntityID: "cover.guest_room_shade", State: "open", Attributes: map[string]any{
+				"friendly_name": "Guest room shade", "device_class": "shade", "supported_features": 15.0, "current_position": 70.0,
+			}},
+			{EntityID: "cover.garage_door", State: "closed", Attributes: map[string]any{
+				"friendly_name": "Garage door", "device_class": "garage", "supported_features": 15.0, "current_position": 0.0,
+				"is_closed": true, "speed": "slow", "assumed_state": true, "user_id": "secret-user",
+				"entity_picture": "/api/camera_proxy?token=secret", "opened_by": "secret-user",
+			}},
 		},
 		Core: ha.Config{Latitude: home.Lat, Longitude: home.Lon, TimeZone: "America/Chicago"},
 	}

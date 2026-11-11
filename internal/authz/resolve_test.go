@@ -239,7 +239,7 @@ func TestResolveWarnings(t *testing.T) {
 		{ID: "t", Name: "T", Rules: []model.Rule{
 			{Select: model.Selector{Entities: []string{"light.ghost"}}, Actions: []string{"light.turn_on"}},
 			{Select: model.Selector{Areas: []string{"guest_room"}}, Actions: []string{"lock.set_code", "light.turn_on"}},
-			{Select: model.Selector{Areas: []string{"guest_room"}}, Actions: []string{"cover.open_cover"}},
+			{Select: model.Selector{Areas: []string{"guest_room"}}, Actions: []string{"vacuum.start"}},
 			{Select: model.Selector{Entities: []string{"script.let_me_in"}}, Actions: []string{"script.run"},
 				Variables: map[string]any{"nested": map[string]any{"Code": "1234"}}},
 		}},
@@ -260,7 +260,7 @@ func TestResolveWarnings(t *testing.T) {
 		{"missing", -1, "not found"},
 		{"t", 0, "selects no entities"},
 		{"t", 1, `"lock.set_code" is not in the catalog`},
-		{"t", 2, `"cover.open_cover" is not in the catalog`},
+		{"t", 2, `"vacuum.start" is not in the catalog`},
 		{"t", 2, "none fit"},
 		{"t", 3, "code"},
 		{"t", 3, "grants nothing"},

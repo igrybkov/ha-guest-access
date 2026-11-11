@@ -83,6 +83,34 @@ rules:
 
 To let the guest lock the room's door, add `lock.lock` to the rule's actions. Leave out `lock.unlock` and the guest can lock it but not open it.
 
+### Supported domains and actions
+
+A rule can grant only these actions. Anything else is refused.
+
+| Domain | Actions |
+|---|---|
+| Locks | `lock.lock`, `lock.unlock`, `lock.open` |
+| Alarm panels | `alarm_control_panel.alarm_disarm`, `.alarm_arm_home`, `.alarm_arm_away`, `.alarm_arm_night` |
+| Lights | `light.turn_on` (brightness, color temperature), `light.turn_off`, `light.toggle` |
+| Fans | `fan.turn_on`, `fan.turn_off`, `fan.set_percentage` |
+| Media players | `media_player.media_play_pause`, `.media_next_track`, `.media_previous_track`, `.volume_set`, `.volume_mute` |
+| Switches | `switch.turn_on`, `switch.turn_off` |
+| Scripts | `script.run`, `script.cancel` |
+| Covers | `cover.open_cover`, `cover.close_cover`, `cover.stop_cover`, `cover.set_cover_position`, `cover.open_cover_tilt`, `cover.close_cover_tilt`, `cover.stop_cover_tilt`, `cover.set_cover_tilt_position` |
+
+### Covers
+
+Covers are blinds, shades, curtains, awnings, garage doors, gates and the like. The guest card shows the state (open, opening, closed, closing, stopped) and the position in percent.
+
+- Open, Stop and Close show for each granted action. The tilt buttons work the same way.
+- The position slider shows when `cover.set_cover_position` is granted and the cover reports that it can set a position. The tilt slider works the same way with `cover.set_cover_tilt_position`.
+- A guest sends only `position` or `tilt_position`, a whole number from 0 to 100. The app refuses anything else.
+- The position and tilt sliders are continuous actions. They use the continuous rate limit (see **Rate limits**).
+
+A cover with the device class `garage`, `gate` or `door` lets people in. On such a cover, **Open** needs two taps, as a lock does. The position slider sends nothing while the guest drags. When the guest lets go, the page asks, for example "Open the garage to 40%?", and moves the cover only after **Yes**. Close, stop and tilt need one tap. Blinds, shades, curtains and awnings need one tap for everything.
+
+The second tap is a guard against a slip of the finger. It is not an access check. Grant `cover.open_cover` on a garage only to guests you would hand a garage remote. To let a guest close the garage but not open it, grant `cover.close_cover` alone.
+
 ### Hidden, disabled and categorized entities
 
 Areas, devices, labels and `*` wildcards skip three kinds of entity:
@@ -508,7 +536,7 @@ Notes:
 - **IPv6 clients count by prefix.** A home or a phone gets a whole /64 of IPv6 addresses and can use a new one for each request. So every "client address" limit, and the password lockout, counts all addresses of one `rate_limits.ipv6_prefix` (/64) as one client. The log and the activity records still name the full address.
 - **Slow requests are cut off.** A client has `http.read_timeout_s` seconds (30) to send one request, and its headers may be at most `http.max_header_kib` KiB (64). Live updates stay open longer: the timeout only covers reading the request.
 - **Page files have their own limit.** The page's script and style files are the same for everyone and hold no secret. They do not count against the limit before sign-in, so many guests behind one home or mobile network address can load the page often.
-- **Continuous and discrete are separate.** Light brightness and color, fan speed and media volume send many values while a guest drags a slider. They use the continuous limiter, so dragging does not use up the limit for buttons. Note that `light.turn_on` counts as continuous, so a plain "on" tap uses it too.
+- **Continuous and discrete are separate.** Light brightness and color, fan speed, media volume, and cover position and tilt send many values while a guest drags a slider. They use the continuous limiter, so dragging does not use up the limit for buttons. Note that `light.turn_on` counts as continuous, so a plain "on" tap uses it too.
 - Behind a proxy you do not trust, all guests share the proxy's address and one limiter. If many guests hit 429 together, check `trusted_proxies`.
 - Limiters drop idle keys, so memory stays bounded.
 
