@@ -1,4 +1,4 @@
-/* Guest page. Mobile first, one column. --accent and --on-accent are set
+/* Guest page. Mobile first, one column; wide screens get a grid of cards at the end of this file. --accent and --on-accent are set
    from JS with style.setProperty; --on-accent is black or white, picked
    for contrast. */
 :root {
@@ -252,3 +252,35 @@ input[type="range"]::-moz-range-thumb {
   .toast, .toggle .thumb { transition: none; }
 }
 .loc:first-child { margin-top: 0.5rem; padding-top: 0; border-top: 0; }
+
+/* Wide screens. Phones keep the single column above. The container grows
+   and the cards of a group flow into a grid. DOM order is reading order,
+   so focus order needs no help. */
+@media (min-width: 640px) {
+  main {
+    max-width: 80rem;
+    padding-left: max(2rem, env(safe-area-inset-left));
+    padding-right: max(2rem, env(safe-area-inset-right));
+  }
+
+  /* Single-form views stay narrow and centered, header included. */
+  main:not(:has(#view-main:not([hidden]))) > header,
+  .view:not(#view-main) {
+    max-width: 26rem;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .group,
+  #approvals-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(18.75rem, 1fr));
+    gap: 0.75rem 1rem;
+    align-items: start;
+  }
+  .group > h2 { grid-column: 1 / -1; }
+  .group > .card,
+  #approvals-list > .card { margin: 0; }
+
+  .toast { width: min(76rem, calc(100% - 4rem)); }
+}
