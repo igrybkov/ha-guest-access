@@ -421,3 +421,89 @@ export function whereErrorText(status, body, retrySec) {
   if (status === 400) return 'Your location is not precise enough. Try again outside, or turn on Precise Location for this browser.';
   return errorText(status, body, retrySec);
 }
+
+// SLIDER_MS is the default gap between slider sends, used when /state
+// has no guest.slider_interval_ms.
+export const SLIDER_MS = 300;
+
+// sliderInterval reads guest.slider_interval_ms from /state, or gives
+// SLIDER_MS when it is missing or not a positive number.
+export function sliderInterval(guest) {
+  const ms = guest && guest.slider_interval_ms;
+  return finite(ms) && ms > 0 ? ms : SLIDER_MS;
+}
+
+// sliderSender sends slider values while the guest drags. It keeps at
+// most one request in flight and never sends more often than intervalMs.
+// While it waits, only the newest value is kept. A value equal to the
+// last one sent is skipped.
+//
+// opts: send(v) returns a promise; now() gives ms; setTimer(fn, ms) and
+// clearTimer(t) default to the real timers. Tests pass a fake clock.
+//
+// It returns {input(v), release(v)}: input on every drag step, release
+// on change. release sends the final value as soon as the spacing allows.
+export function sliderSender(opts) {
+  const {
+    send, intervalMs = SLIDER_MS, now = () => Date.now(),
+    setTimer = (fn, ms) => setTimeout(fn, ms), clearTimer = (t) => clearTimeout(t),
+  } = opts;
+  let lastSent;
+  let lastAt = -Infinity;
+  let inFlight = false;
+  let hasPending = false;
+  let pending;
+  let timer = null;
+
+  function pump() {
+    if (inFlight || !hasPending) return;
+    if (pending === lastSent) {
+      hasPending = false;
+      return;
+    }
+    const wait = lastAt + intervalMs - now();
+    if (wait > 0) {
+      if (timer === null) {
+        timer = setTimer(() => {
+          timer = null;
+          pump();
+        }, wait);
+      }
+      return;
+    }
+    const v = pending;
+    hasPending = false;
+    inFlight = true;
+    lastSent = v;
+    lastAt = now();
+    let p;
+    try {
+      p = send(v);
+    } catch {
+      p = null;
+    }
+    Promise.resolve(p)
+      .catch(() => {})
+      .finally(() => {
+        inFlight = false;
+        pump();
+      });
+  }
+
+  function push(v) {
+    pending = v;
+    hasPending = true;
+    pump();
+  }
+
+  return {
+    input: push,
+    release: push,
+    // stop drops a waiting value and its timer.
+    stop() {
+      hasPending = false;
+      if (timer !== null) clearTimer(timer);
+      timer = null;
+    },
+  };
+}

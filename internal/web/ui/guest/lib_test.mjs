@@ -5,7 +5,7 @@ import {
   alarmActions, scriptView, mediaInfo, sliderBounds, clamp, brightnessPct, supportsColorTemp,
   parseColor, textOn, parseRetryAfter, formatWait, tryAgainText, errorText, mergeState,
   formatUntil, confirmTap, confirmExpired, CONFIRM_MS, deviceNext, shouldPoll, geoErrorText,
-  whereErrorText,
+  whereErrorText, sliderSender, sliderInterval, SLIDER_MS,
 } from './lib.js';
 
 test('linkBase', () => {
@@ -316,4 +316,121 @@ test('guest text has no em dashes', async () => {
     const src = await readFile(new URL('./' + f, import.meta.url), 'utf8');
     assert.equal(src.includes('—'), false, f);
   }
+});
+
+// fakeClock drives sliderSender in tests. Sends resolve only when the
+// test calls done().
+function rig(intervalMs) {
+  let t = 0;
+  const timers = [];
+  const sent = [];
+  const waits = [];
+  const s = sliderSender({
+    intervalMs,
+    now: () => t,
+    setTimer: (fn, ms) => { const x = { fn, at: t + ms }; timers.push(x); return x; },
+    clearTimer: (x) => { const i = timers.indexOf(x); if (i >= 0) timers.splice(i, 1); },
+    send: (v) => { sent.push([v, t]); return new Promise((r) => waits.push(r)); },
+  });
+  const flush = () => new Promise((r) => setImmediate(r));
+  return {
+    s, sent,
+    inFlight: () => waits.length,
+    async done() { waits.shift()(true); await flush(); },
+    async tick(ms) {
+      t += ms;
+      for (;;) {
+        const due = timers.filter((x) => x.at <= t).sort((a, b) => a.at - b.at)[0];
+        if (!due) break;
+        timers.splice(timers.indexOf(due), 1);
+        due.fn();
+        await flush();
+      }
+    },
+  };
+}
+
+test('sliderInterval reads the option or falls back', () => {
+  assert.equal(SLIDER_MS, 300);
+  assert.equal(sliderInterval({ slider_interval_ms: 150 }), 150);
+  assert.equal(sliderInterval({}), 300);
+  assert.equal(sliderInterval(undefined), 300);
+  assert.equal(sliderInterval({ slider_interval_ms: 0 }), 300);
+  assert.equal(sliderInterval({ slider_interval_ms: '100' }), 300);
+});
+
+test('sliderSender uses the default interval when none is given', async () => {
+  const sent = [];
+  let t = 0;
+  const timers = [];
+  const s = sliderSender({ now: () => t, setTimer: (fn, ms) => timers.push(ms), send: (v) => { sent.push(v); } });
+  s.input(1);
+  await new Promise((r) => setImmediate(r));
+  t = 10;
+  s.input(2);
+  assert.deepEqual(sent, [1]);
+  assert.deepEqual(timers, [290]);
+});
+
+test('sliderSender spaces sends by the interval', async () => {
+  const r = rig(300);
+  r.s.input(10);
+  assert.deepEqual(r.sent, [[10, 0]]);
+  await r.done();
+  await r.tick(100);
+  r.s.input(20);
+  assert.equal(r.sent.length, 1, 'too soon');
+  await r.tick(199);
+  assert.equal(r.sent.length, 1);
+  await r.tick(1);
+  assert.deepEqual(r.sent[1], [20, 300]);
+});
+
+test('sliderSender keeps one request in flight and the newest value wins', async () => {
+  const r = rig(100);
+  r.s.input(1);
+  await r.tick(500);
+  r.s.input(2);
+  r.s.input(3);
+  r.s.input(4);
+  assert.equal(r.inFlight(), 1);
+  assert.deepEqual(r.sent.map((x) => x[0]), [1]);
+  await r.done();
+  assert.deepEqual(r.sent.map((x) => x[0]), [1, 4]);
+  assert.equal(r.inFlight(), 1);
+});
+
+test('sliderSender sends the final value on release and skips duplicates', async () => {
+  const r = rig(300);
+  r.s.input(5);
+  await r.done();
+  r.s.input(6);
+  r.s.release(7);
+  await r.tick(300);
+  assert.deepEqual(r.sent.map((x) => x[0]), [5, 7]);
+  await r.done();
+  // Release on the value already sent sends nothing.
+  await r.tick(1000);
+  r.s.release(7);
+  await r.tick(1000);
+  assert.equal(r.sent.length, 2);
+  // A drag back to the sent value while waiting sends nothing either.
+  r.s.input(8);
+  assert.equal(r.sent.length, 3);
+  await r.done();
+  r.s.input(9);
+  r.s.input(8);
+  await r.tick(300);
+  assert.deepEqual(r.sent.map((x) => x[0]), [5, 7, 8]);
+});
+
+test('sliderSender recovers after a failed send', async () => {
+  const sent = [];
+  const s = sliderSender({ intervalMs: 0, send: (v) => { sent.push(v); if (v === 1) throw new Error('x'); return Promise.reject(new Error('y')); } });
+  s.input(1);
+  await new Promise((r) => setImmediate(r));
+  s.input(2);
+  await new Promise((r) => setImmediate(r));
+  s.input(3);
+  assert.deepEqual(sent, [1, 2, 3]);
 });

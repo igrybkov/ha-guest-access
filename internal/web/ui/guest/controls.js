@@ -6,7 +6,7 @@ import { el, icon } from './dom.js';
 import {
   actionLabel, confirmLabel, stateLabel, splitActions, pickControl, findAction,
   toggleFor, lockActions, alarmActions, scriptView, mediaInfo, sliderBounds, clamp,
-  brightnessPct, supportsColorTemp, confirmTap, CONFIRM_MS,
+  brightnessPct, supportsColorTemp, confirmTap, CONFIRM_MS, sliderSender,
 } from './lib.js';
 
 // The one armed confirm tap on the page: {key, until, reset}.
@@ -21,7 +21,8 @@ function disarm() {
 }
 
 // ctx is {act(entityId, actionId, data) -> Promise<boolean>,
-// shareLocation(entityId)}. makeCard returns {node, update(state)}.
+// shareLocation(entityId), sliderMs}. sliderMs is the least gap between
+// slider sends. makeCard returns {node, update(state)}.
 export function makeCard(entity, state, ctx) {
   const headId = 'card-' + entity.id.replace(/[^A-Za-z0-9_-]/g, '_');
   const name = el('h3', { className: 'name', id: headId }, entity.name);
@@ -161,9 +162,11 @@ function toggle(card, domain, actions, st) {
   return b;
 }
 
-// slider makes a labelled range input that sends on release only.
-// toData turns the input value into the action data.
-function slider(card, key, labelText, b, value, format, onRelease) {
+// slider makes a labelled range input. It sends while the guest drags,
+// throttled by sliderSender, and always sends the final value on
+// release. onSend sends one value.
+function slider(card, key, labelText, b, value, format, onSend) {
+  const sender = sliderSender({ send: onSend, intervalMs: card.ctx.sliderMs });
   const id = 'r-' + card.entity.id.replace(/[^A-Za-z0-9_-]/g, '_') + '-' + key;
   const out = el('span', { className: 'value' }, format(value));
   const input = el('input', {
@@ -187,12 +190,13 @@ function slider(card, key, labelText, b, value, format, onRelease) {
   input.addEventListener('pointerdown', hold);
   input.addEventListener('touchstart', hold, { passive: true });
   input.addEventListener('input', () => {
-    out.textContent = format(Number(input.value));
-    input.setAttribute('aria-valuetext', format(Number(input.value)));
+    const v = Number(input.value);
+    out.textContent = format(v);
+    input.setAttribute('aria-valuetext', format(v));
+    sender.input(v);
   });
   input.addEventListener('change', () => {
-    const v = Number(input.value);
-    onRelease(v);
+    sender.release(Number(input.value));
     release();
   });
   // A drag that ends without a change (same value) must still let go.

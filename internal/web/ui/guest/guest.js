@@ -9,7 +9,7 @@
 // the Origin header, which the server checks.
 import {
   linkBase, cards, mergeState, errorText, tryAgainText, formatUntil, parseColor, textOn,
-  parseRetryAfter, deviceNext, shouldPoll, POLL_MS, geoErrorText, whereErrorText,
+  parseRetryAfter, sliderInterval, deviceNext, shouldPoll, POLL_MS, geoErrorText, whereErrorText,
 } from './lib.js';
 import { el, icon } from './dom.js';
 import { makeCard } from './controls.js';
@@ -260,7 +260,7 @@ function drawCards() {
   for (const g of groups) {
     const section = el('section', { className: 'group' }, el('h2', {}, g.name));
     for (const e of g.entities) {
-      const c = makeCard(e, (view.states || {})[e.id], { act, shareLocation });
+      const c = makeCard(e, (view.states || {})[e.id], { act, shareLocation, sliderMs: sliderInterval(view.guest) });
       cardsById.set(e.id, c);
       section.append(c.node);
     }
