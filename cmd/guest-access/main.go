@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
+	"github.com/igrybkov/ha-guest-access/internal/approval"
 	"github.com/igrybkov/ha-guest-access/internal/config"
 	"github.com/igrybkov/ha-guest-access/internal/ha"
 	"github.com/igrybkov/ha-guest-access/internal/inventory"
@@ -137,13 +138,35 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		return fmt.Errorf("inventory: %w", err)
 	}
 
+	// Device approval. Decisions from HA come in as events; the
+	// subscription survives reconnects.
+	signer := access.NewSigner(key)
+	devices := approval.New(approval.Options{
+		Links:         linkStore,
+		FireEvent:     client.FireEvent,
+		Signer:        signer,
+		Now:           opts.Now,
+		Logger:        log,
+		PendingTTL:    o.Approval.PendingTTL,
+		MaxPending:    o.Approval.MaxPending,
+		MaxDevices:    o.Approval.MaxDevices,
+		EventsPerHour: o.Approval.EventsPerHour,
+		TouchThrottle: o.Approval.TouchThrottle,
+		MaxBodyBytes:  o.GuestBodyBytes,
+	})
+	if err := devices.Run(ctx, client.SubscribeEvents); err != nil { // returns once subscribed
+		closeAll()
+		return fmt.Errorf("device decisions: %w", err)
+	}
+
 	srv := web.New(web.Deps{
 		Options:         o,
 		Templates:       templates,
 		Links:           linkStore,
 		Inventory:       inv,
 		HA:              client,
-		Signer:          access.NewSigner(key),
+		Signer:          signer,
+		Devices:         devices,
 		NewMA:           opts.NewMA,
 		DevAdminAnyPeer: cfg.DevAdminAnyPeer,
 		Now:             opts.Now,

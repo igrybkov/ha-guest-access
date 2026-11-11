@@ -16,11 +16,18 @@ type sseEvent struct{ name, data string }
 
 // openStream opens /events of l on a real listener and returns the
 // events as they arrive. The channel closes when the stream ends.
-func openStream(t *testing.T, h *harness, l model.Link) (<-chan sseEvent, *http.Response) {
+func openStream(t *testing.T, h *harness, l model.Link, cookies ...*http.Cookie) (<-chan sseEvent, *http.Response) {
 	t.Helper()
 	srv := httptest.NewServer(h.guest)
 	t.Cleanup(srv.Close)
-	resp, err := srv.Client().Get(srv.URL + "/g/" + l.Slug + "/events")
+	hr, err := http.NewRequest(http.MethodGet, srv.URL+"/g/"+l.Slug+"/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cookies {
+		hr.AddCookie(c)
+	}
+	resp, err := srv.Client().Do(hr)
 	if err != nil {
 		t.Fatal(err)
 	}

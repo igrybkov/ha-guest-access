@@ -281,9 +281,11 @@ func (a *app) state(l model.Link, cookies ...*http.Cookie) reply {
 	return a.do(call{method: "GET", url: a.guest + "/g/" + l.Slug + "/state", cookies: cookies})
 }
 
-func named(cs []*http.Cookie, name string) *http.Cookie {
+// named returns the cookie of name base for any link: the real name is
+// base + "_" + a link id.
+func named(cs []*http.Cookie, base string) *http.Cookie {
 	for _, c := range cs {
-		if c.Name == name {
+		if id, ok := strings.CutPrefix(c.Name, base+"_"); ok && !strings.Contains(id, "_") {
 			return c
 		}
 	}
@@ -359,8 +361,8 @@ func TestE2EGuestFlow(t *testing.T) {
 
 	// Forged and missing cookies.
 	for name, ck := range map[string]*http.Cookie{
-		"forged":   {Name: "ga_session", Value: "AQIAAAAAZ2ZnZ2ZnZ2ZnZ2Zn"},
-		"tampered": {Name: "ga_session", Value: flipChar(session.Value, 20)},
+		"forged":   {Name: "ga_session_" + l.ID, Value: "AQIAAAAAZ2ZnZ2ZnZ2ZnZ2Zn"},
+		"tampered": {Name: "ga_session_" + l.ID, Value: flipChar(session.Value, 20)},
 	} {
 		if r := a.act(l, "light.guest_room", "light.turn_on", nil, ck); r.code != 401 {
 			t.Errorf("%s cookie: %d", name, r.code)
@@ -372,7 +374,7 @@ func TestE2EGuestFlow(t *testing.T) {
 	// A session of link A does not open link B with the same password.
 	b := a.newLink(map[string]any{"templates": []string{"guest_room"}})
 	a.adminJSON("POST", "/api/links/"+b.ID+"/passwords", map[string]any{"label": "Anna", "password": "+1 555 0100"})
-	if r := a.state(b, &http.Cookie{Name: "ga_session", Value: session.Value}); r.code != 401 {
+	if r := a.state(b, &http.Cookie{Name: "ga_session_" + b.ID, Value: session.Value}); r.code != 401 {
 		t.Errorf("cookie of A on B: %d", r.code)
 	}
 	if n := len(a.fake.ServiceCalls()); n != 1 {
@@ -533,7 +535,7 @@ func TestE2ENearHome(t *testing.T) {
 	if c := unlock(); c != 403 {
 		t.Errorf("no cookie: %d", c)
 	}
-	if c := unlock(&http.Cookie{Name: "ga_near", Value: "AQMAAAAAaUoAAAAAAAAAAQ"}); c != 403 {
+	if c := unlock(&http.Cookie{Name: "ga_near_" + l.ID, Value: "AQMAAAAAaUoAAAAAAAAAAQ"}); c != 403 {
 		t.Errorf("forged cookie: %d", c)
 	}
 	far := where(home.lat+0.01, home.lon, 5) // about 1.1 km

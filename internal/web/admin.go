@@ -6,6 +6,7 @@ import (
 	"net/netip"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
+	"github.com/igrybkov/ha-guest-access/internal/approval"
 	"github.com/igrybkov/ha-guest-access/internal/links"
 	"github.com/igrybkov/ha-guest-access/internal/model"
 	"github.com/igrybkov/ha-guest-access/internal/store"
@@ -46,6 +47,10 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.HandleFunc("POST /api/links/{id}/rotate", s.rotateLink)
 	mux.HandleFunc("POST /api/links/{id}/passwords", s.addPassword)
 	mux.HandleFunc("DELETE /api/links/{id}/passwords/{pid}", s.removePassword)
+	mux.HandleFunc("DELETE /api/links/{id}/devices/{did}", s.removeDevice)
+	mux.HandleFunc("POST /api/links/{id}/devices/reset", s.resetDevices)
+	mux.HandleFunc("GET /api/devices/pending", s.listPending)
+	mux.HandleFunc("POST /api/devices/pending/{id}", s.decidePending)
 	mux.HandleFunc("GET /api/links/{id}/url", s.linkURL)
 	mux.HandleFunc("GET /api/links/{id}/qr.svg", s.linkQRSVG)
 	mux.HandleFunc("GET /api/links/{id}/qr.png", s.linkQRPNG)
@@ -141,9 +146,9 @@ func (s *Server) writeAdminErr(w http.ResponseWriter, r *http.Request, err error
 	case errors.As(err, &verr):
 		writeJSON(w, http.StatusBadRequest, adminBody{Error: "invalid", Problems: verr.Problems})
 		return
-	case errors.Is(err, links.ErrNotFound), errors.Is(err, errNoTemplate):
+	case errors.Is(err, links.ErrNotFound), errors.Is(err, errNoTemplate), errors.Is(err, approval.ErrUnknownRequest):
 		status = http.StatusNotFound
-	case errors.Is(err, links.ErrSlugTaken), errors.Is(err, errTemplateDup), errors.Is(err, errNoBaseURL):
+	case errors.Is(err, links.ErrSlugTaken), errors.Is(err, links.ErrTooManyDevices), errors.Is(err, errTemplateDup), errors.Is(err, errNoBaseURL):
 		status = http.StatusConflict
 	case errors.Is(err, access.ErrBadSlug), errors.Is(err, access.ErrEmptyPassword), errors.Is(err, access.ErrPasswordTooLong):
 		status = http.StatusBadRequest

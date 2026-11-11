@@ -84,7 +84,7 @@ type accessCheck struct {
 
 func (s *Server) accessFor(g *guestReq) accessCheck {
 	a := accessCheck{localOn: g.st.LocalAccess.Enabled, local: g.client.Local(g.nets)}
-	if c, err := g.r.Cookie(nearCookie); err == nil {
+	if c, err := g.r.Cookie(access.LinkCookie(nearCookie, g.link.ID)); err == nil {
 		a.near, a.hasNear = s.deps.Signer.VerifyNear(g.link.ID, c.Value, g.now)
 	}
 	return a

@@ -117,3 +117,12 @@ func TestValidCustomSlugLen(t *testing.T) {
 		}
 	}
 }
+
+func TestLinkCookie(t *testing.T) {
+	if got := LinkCookie("ga_device", "3f9a1c0d7e2b4a65"); got != "ga_device_3f9a1c0d7e2b4a65" {
+		t.Errorf("LinkCookie = %q", got)
+	}
+	if LinkCookie("ga_device", "a") == LinkCookie("ga_device_request", "a") {
+		t.Error("device and request cookie names collide")
+	}
+}

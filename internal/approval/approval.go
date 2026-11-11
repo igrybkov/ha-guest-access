@@ -42,7 +42,9 @@ const (
 	EventDeviceDecision = "guest_access_device_decision"
 )
 
-// Cookie names. Both are scoped to the link's path, /g/<slug>.
+// Cookie name bases. The real name adds the link id (see
+// DeviceCookieName), and the path is access.GuestCookiePath, so both
+// survive a slug rotation.
 const (
 	// DeviceCookie holds the signed device token of an approved device.
 	DeviceCookie = "ga_device"
@@ -53,6 +55,12 @@ const (
 	RequestCookie = "ga_device_request"
 )
 
+// DeviceCookieName is the device cookie's name for link linkID.
+func DeviceCookieName(linkID string) string { return access.LinkCookie(DeviceCookie, linkID) }
+
+// RequestCookieName is the request cookie's name for link linkID.
+func RequestCookieName(linkID string) string { return access.LinkCookie(RequestCookie, linkID) }
+
 // Defaults for Options. The app options (the "approval" group) override
 // them; these only fill in zero fields.
 const (
@@ -62,6 +70,7 @@ const (
 	DefaultEventsPerHour = 5
 	DefaultTouchThrottle = time.Minute
 	DefaultMaxBodyBytes  = 1 << 10
+	DefaultEventTimeout  = 5 * time.Second
 )
 
 // CodeAlphabet is the alphabet of request codes. It has no 0, O, 1, I or
@@ -70,9 +79,6 @@ const CodeAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 // CodeLen is the length of a request code.
 const CodeLen = 4
-
-// fireTimeout caps one FireEvent call.
-const fireTimeout = 5 * time.Second
 
 var (
 	// ErrUnknownRequest means no pending request has that id: it never
@@ -121,6 +127,8 @@ type Options struct {
 	// MaxBodyBytes caps the JSON body of a self-service decision. Pass
 	// the app's request body limit.
 	MaxBodyBytes int64
+	// EventTimeout caps one FireEvent call.
+	EventTimeout time.Duration
 }
 
 // Request is a pending device request, as the admin API shows it.
@@ -203,6 +211,9 @@ func New(o Options) *Manager {
 	if o.MaxBodyBytes <= 0 {
 		o.MaxBodyBytes = DefaultMaxBodyBytes
 	}
+	if o.EventTimeout <= 0 {
+		o.EventTimeout = DefaultEventTimeout
+	}
 	log := o.Logger
 	if log == nil {
 		log = slog.Default()
@@ -257,6 +268,22 @@ func (m *Manager) Admit(w http.ResponseWriter, r *http.Request, link model.Link,
 	}
 	writeJSON(w, http.StatusForbidden, map[string]string{"status": "approval_required"})
 	return "", false
+}
+
+// StillValid reports whether deviceID may still use link, without writing
+// anything. Open event streams call it with the device that Admit
+// returned. With approval off it is true. With approval on, the device
+// must still be on the link, so a revoke or reset ends the stream, and so
+// does turning approval on while a stream with no device is open.
+func (m *Manager) StillValid(link model.Link, deviceID string) bool {
+	if !link.Approval.On() {
+		return true
+	}
+	if deviceID == "" {
+		return false
+	}
+	_, ok := link.Device(deviceID)
+	return ok
 }
 
 // RequestAccess handles the guest's POST asking for access. It answers:
@@ -332,7 +359,7 @@ func (m *Manager) RequestAccess(w http.ResponseWriter, r *http.Request, link mod
 	}
 	m.log.Info("device request", "link", link.ID, "request", req.ID, "code", req.Code, "label", label, "ua", device, "ip", req.IP)
 	http.SetCookie(w, &http.Cookie{
-		Name: RequestCookie, Value: req.secret, Path: cookiePath(link),
+		Name: RequestCookieName(link.ID), Value: req.secret, Path: access.GuestCookiePath,
 		MaxAge: int(m.opts.PendingTTL / time.Second), Expires: req.ExpiresAt,
 		HttpOnly: true, Secure: c.HTTPS, SameSite: http.SameSiteStrictMode,
 	})
@@ -379,7 +406,7 @@ func (m *Manager) newRequest(linkID, label, device string, c access.Client, now 
 // fire sends the request event to HA. A failure is logged: the request
 // still waits, and the admin UI can decide it.
 func (m *Manager) fire(link model.Link, req Request) {
-	ctx, cancel := context.WithTimeout(context.Background(), fireTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), m.opts.EventTimeout)
 	defer cancel()
 	err := m.opts.FireEvent(ctx, EventDeviceRequest, map[string]any{
 		"link_id":    link.ID,
@@ -419,7 +446,7 @@ func (m *Manager) Status(w http.ResponseWriter, r *http.Request, link model.Link
 		resp = map[string]string{"status": "pending", "code": req.Code}
 	case req.state == stateDenied:
 		m.drop(req)
-		clearCookie(w, RequestCookie, link, c)
+		clearCookie(w, RequestCookieName(link.ID), c)
 		resp = map[string]string{"status": "denied"}
 	case req.state == stateApproved:
 		if _, ok := m.handoff(w, link, c, req); ok {
@@ -613,7 +640,7 @@ func (m *Manager) decide(requestID string, approve bool, by, onlyLink string) er
 // It requires m.mu.
 func (m *Manager) handoff(w http.ResponseWriter, link model.Link, c access.Client, req *request) (string, bool) {
 	m.drop(req)
-	clearCookie(w, RequestCookie, link, c)
+	clearCookie(w, RequestCookieName(link.ID), c)
 	if _, ok := link.Device(req.deviceID); !ok {
 		return "", false
 	}
@@ -625,7 +652,7 @@ func (m *Manager) handoff(w http.ResponseWriter, link model.Link, c access.Clien
 // device still on link. It notes the device as seen, and renews the
 // cookie when the link's end moved since it was signed.
 func (m *Manager) deviceFromCookie(w http.ResponseWriter, r *http.Request, link model.Link, c access.Client, now time.Time) (string, bool) {
-	for _, ck := range r.CookiesNamed(DeviceCookie) {
+	for _, ck := range r.CookiesNamed(DeviceCookieName(link.ID)) {
 		id, exp, ok := m.opts.Signer.VerifyDevice(link.ID, ck.Value, now)
 		if !ok {
 			continue
@@ -647,7 +674,7 @@ func (m *Manager) deviceFromCookie(w http.ResponseWriter, r *http.Request, link 
 // requestFromCookie returns this browser's request for linkID, if any. It
 // requires m.mu.
 func (m *Manager) requestFromCookie(r *http.Request, linkID string) *request {
-	for _, ck := range r.CookiesNamed(RequestCookie) {
+	for _, ck := range r.CookiesNamed(RequestCookieName(linkID)) {
 		if req := m.bySecret[ck.Value]; req != nil && req.LinkID == linkID {
 			return req
 		}
@@ -722,21 +749,18 @@ func (m *Manager) drop(req *request) {
 
 func (m *Manager) setDeviceCookie(w http.ResponseWriter, link model.Link, c access.Client, deviceID string) {
 	http.SetCookie(w, &http.Cookie{
-		Name: DeviceCookie, Value: m.opts.Signer.SignDevice(link.ID, deviceID, link.ValidUntil),
-		Path: cookiePath(link), Expires: link.ValidUntil,
+		Name: DeviceCookieName(link.ID), Value: m.opts.Signer.SignDevice(link.ID, deviceID, link.ValidUntil),
+		Path: access.GuestCookiePath, Expires: link.ValidUntil,
 		HttpOnly: true, Secure: c.HTTPS, SameSite: http.SameSiteStrictMode,
 	})
 }
 
-func clearCookie(w http.ResponseWriter, name string, link model.Link, c access.Client) {
+func clearCookie(w http.ResponseWriter, name string, c access.Client) {
 	http.SetCookie(w, &http.Cookie{
-		Name: name, Path: cookiePath(link), MaxAge: -1,
+		Name: name, Path: access.GuestCookiePath, MaxAge: -1,
 		HttpOnly: true, Secure: c.HTTPS, SameSite: http.SameSiteStrictMode,
 	})
 }
-
-// cookiePath scopes cookies to one link's pages.
-func cookiePath(link model.Link) string { return "/g/" + link.Slug }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")

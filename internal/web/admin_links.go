@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
+	"github.com/igrybkov/ha-guest-access/internal/approval"
 	"github.com/igrybkov/ha-guest-access/internal/authz"
 	"github.com/igrybkov/ha-guest-access/internal/model"
 )
@@ -22,12 +23,18 @@ type linkView struct {
 	// rule that selects nothing, network: local while local access is
 	// off.
 	Warnings []warningView `json:"warnings"`
+	// Passwords and Devices shadow the link's fields so they are always
+	// lists, never left out. Approval comes from model.Link.
+	Passwords []model.LinkPassword `json:"passwords"`
+	Devices   []model.LinkDevice   `json:"devices"`
+	// Pending are the link's device requests that wait for a decision.
+	Pending []approval.Request `json:"pending"`
 }
 
 func (s *Server) linkView(l model.Link, inv *model.Inventory, ts []model.Template) linkView {
-	v := linkView{Link: l, Status: l.Status(s.now()), Path: guestPath(l.Slug), URL: s.guestURL(l.Slug), Warnings: []warningView{}}
-	if v.Passwords == nil {
-		v.Passwords = []model.LinkPassword{}
+	v := linkView{
+		Link: l, Status: l.Status(s.now()), Path: guestPath(l.Slug), URL: s.guestURL(l.Slug), Warnings: []warningView{},
+		Passwords: nonNil(l.Passwords), Devices: nonNil(l.Devices), Pending: s.devices.Pending(l.ID),
 	}
 	if inv != nil {
 		_, warns := authz.Resolve(l, ts, *inv)

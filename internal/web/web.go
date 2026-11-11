@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
+	"github.com/igrybkov/ha-guest-access/internal/approval"
 	"github.com/igrybkov/ha-guest-access/internal/config"
 	"github.com/igrybkov/ha-guest-access/internal/ha"
 	"github.com/igrybkov/ha-guest-access/internal/links"
@@ -41,21 +42,34 @@ type Inventory interface {
 	Watch(ctx context.Context, ids map[string]bool, fn func(model.State)) error
 }
 
-// DeviceGate decides whether this request's device may use the link. On
-// ok=false it has already written the response. It runs after the
-// password session and before any grant check.
+// DeviceGate decides whether this request's device may use the link.
 type DeviceGate interface {
+	// Admit runs after the password session and before any grant check.
+	// On ok=false it has already written the response.
 	Admit(w http.ResponseWriter, r *http.Request, link model.Link, c access.Client, label string) (deviceID string, ok bool)
+	// StillValid is Admit for an open event stream: it writes nothing.
+	// deviceID is what Admit returned when the stream opened.
+	StillValid(link model.Link, deviceID string) bool
 }
 
-// AllowAllDevices is the DeviceGate of links without device approval: it
-// admits every device.
-type AllowAllDevices struct{}
-
-// Admit admits the request.
-func (AllowAllDevices) Admit(http.ResponseWriter, *http.Request, model.Link, access.Client, string) (string, bool) {
-	return "", true
+// Devices is device approval as the server uses it. *approval.Manager
+// satisfies it.
+type Devices interface {
+	DeviceGate
+	// Guest routes under /g/{slug}/device/. They run after the password
+	// session but not the gate.
+	RequestAccess(w http.ResponseWriter, r *http.Request, link model.Link, c access.Client, label string)
+	Status(w http.ResponseWriter, r *http.Request, link model.Link, c access.Client, label string)
+	PendingForDevice(w http.ResponseWriter, r *http.Request, link model.Link, c access.Client, label string)
+	DecideByDevice(w http.ResponseWriter, r *http.Request, link model.Link, c access.Client, label string)
+	// Admin calls.
+	Pending(linkID string) []approval.Request
+	Decide(requestID string, approve bool) error
+	RemoveDevice(linkID, deviceID string) error
+	ResetDevices(linkID string) error
 }
+
+var _ Devices = (*approval.Manager)(nil)
 
 // Policy holds the save checks that need more than one file: no
 // network: local while local access is off, actions not in the catalog,
@@ -80,8 +94,10 @@ type Deps struct {
 	HA        HA
 	Signer    *access.Signer
 
-	Policy  Policy     // nil = a basic policy (see basicPolicy)
-	Devices DeviceGate // nil = AllowAllDevices
+	Policy Policy // nil = a basic policy (see basicPolicy)
+	// Devices runs device approval. nil = an approval.Manager built from
+	// these deps; it then gets no decision events from HA.
+	Devices Devices
 
 	// NewMA builds the Music Assistant client. nil = ma.NewWithTimeout.
 	// It may return a nil Client: MA is off.
@@ -117,7 +133,7 @@ type Server struct {
 	deps    Deps
 	log     *slog.Logger
 	policy  Policy
-	devices DeviceGate
+	devices Devices
 	newMA   func(url, token string, timeout time.Duration) (ma.Client, error)
 
 	lim     *limitSet
@@ -146,9 +162,6 @@ func New(d Deps) *Server {
 	}
 	if s.policy == nil {
 		s.policy = basicPolicy{}
-	}
-	if s.devices == nil {
-		s.devices = AllowAllDevices{}
 	}
 	if s.newMA == nil {
 		s.newMA = ma.NewWithTimeout
@@ -180,6 +193,15 @@ func New(d Deps) *Server {
 	s.lim = newLimitSet(*o)
 	if s.deps.StreamCheck <= 0 {
 		s.deps.StreamCheck = defaultStreamCheck
+	}
+	if s.devices == nil {
+		a := s.deps.Options.Approval
+		s.devices = approval.New(approval.Options{
+			Links: d.Links, FireEvent: d.HA.FireEvent, Signer: d.Signer, Now: s.deps.Now, Logger: s.log,
+			PendingTTL: a.PendingTTL, MaxPending: a.MaxPending, MaxDevices: a.MaxDevices,
+			EventsPerHour: a.EventsPerHour, TouchThrottle: a.TouchThrottle,
+			MaxBodyBytes: s.deps.Options.GuestBodyBytes,
+		})
 	}
 	return s
 }

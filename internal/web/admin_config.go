@@ -315,9 +315,9 @@ func problemsOf(err error) []model.Problem {
 	return []model.Problem{{Message: err.Error()}}
 }
 
-func nonNil(s []string) []string {
+func nonNil[T any](s []T) []T {
 	if s == nil {
-		return []string{}
+		return []T{}
 	}
 	return s
 }

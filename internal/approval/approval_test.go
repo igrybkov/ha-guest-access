@@ -75,8 +75,8 @@ func TestManualFlow(t *testing.T) {
 	if len(code) != CodeLen || strings.Trim(code, CodeAlphabet) != "" {
 		t.Fatalf("code %q", code)
 	}
-	rc := b.cookie(RequestCookie)
-	if rc == nil || !rc.HttpOnly || !rc.Secure || rc.SameSite != http.SameSiteStrictMode || rc.Path != "/g/"+l.Slug || rc.MaxAge != 600 {
+	rc := b.cookie(RequestCookieName(l.ID))
+	if rc == nil || !rc.HttpOnly || !rc.Secure || rc.SameSite != http.SameSiteStrictMode || rc.Path != access.GuestCookiePath || rc.MaxAge != 600 {
 		t.Fatalf("request cookie %+v", rc)
 	}
 
@@ -114,12 +114,12 @@ func TestManualFlow(t *testing.T) {
 	}
 
 	want(t, "status after approval", e.call(e.m.Status, l.ID, b, ""), 200, "approved")
-	dc := b.cookie(DeviceCookie)
-	if dc == nil || !dc.HttpOnly || !dc.Secure || dc.SameSite != http.SameSiteStrictMode || dc.Path != "/g/"+l.Slug ||
+	dc := b.cookie(DeviceCookieName(l.ID))
+	if dc == nil || !dc.HttpOnly || !dc.Secure || dc.SameSite != http.SameSiteStrictMode || dc.Path != access.GuestCookiePath ||
 		!dc.Expires.Equal(l.ValidUntil) {
 		t.Fatalf("device cookie %+v", dc)
 	}
-	if b.cookie(RequestCookie) != nil {
+	if b.cookie(RequestCookieName(l.ID)) != nil {
 		t.Error("request cookie kept after pickup")
 	}
 	id, ok, _ := e.admit(l.ID, b)
@@ -143,7 +143,7 @@ func TestCookiesNotSecureOverHTTP(t *testing.T) {
 	l := e.newLink(claim)
 	b := newBrowser(iPhoneUA)
 	want(t, "claim", e.call(e.m.RequestAccess, l.ID, b, "{}"), 200, "approved")
-	if dc := b.cookie(DeviceCookie); dc == nil || dc.Secure || !dc.HttpOnly {
+	if dc := b.cookie(DeviceCookieName(l.ID)); dc == nil || dc.Secure || !dc.HttpOnly {
 		t.Fatalf("device cookie %+v", dc)
 	}
 }
@@ -159,7 +159,7 @@ func TestAdmitPicksUpApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	id, ok, _ := e.admit(l.ID, b)
-	if !ok || id == "" || b.cookie(DeviceCookie) == nil {
+	if !ok || id == "" || b.cookie(DeviceCookieName(l.ID)) == nil {
 		t.Fatalf("Admit after approval = %q, %v", id, ok)
 	}
 }
@@ -468,7 +468,7 @@ func TestDenyThenAskAgain(t *testing.T) {
 	_, _, res := e.admit(l.ID, b)
 	want(t, "admit after deny", res, 403, "approval_required")
 	want(t, "status after deny", e.call(e.m.Status, l.ID, b, ""), 200, "denied")
-	if b.cookie(RequestCookie) != nil {
+	if b.cookie(RequestCookieName(l.ID)) != nil {
 		t.Error("request cookie kept after deny")
 	}
 	want(t, "status again", e.call(e.m.Status, l.ID, b, ""), 200, "approval_required")
@@ -565,7 +565,7 @@ func TestRevokedBeforePickup(t *testing.T) {
 		t.Fatal(err)
 	}
 	want(t, "status", e.call(e.m.Status, l.ID, b, ""), 200, "approval_required")
-	if b.cookie(DeviceCookie) != nil {
+	if b.cookie(DeviceCookieName(l.ID)) != nil {
 		t.Error("cookie for a revoked device")
 	}
 }
@@ -600,14 +600,14 @@ func TestForgedCookies(t *testing.T) {
 		"other key":         access.NewSigner(bytes.Repeat([]byte{8}, access.MinKeyLen)).SignDevice(l.ID, id, exp),
 	} {
 		b := newBrowser(iPhoneUA)
-		b.set(DeviceCookie, tok)
+		b.set(DeviceCookieName(l.ID), tok)
 		if _, ok, res := e.admit(l.ID, b); ok || res.code != 403 {
 			t.Errorf("%s: admitted (%+v)", name, res)
 		}
 	}
 	// The real token works, so the cases above fail for their reason.
 	b := newBrowser(iPhoneUA)
-	b.set(DeviceCookie, e.signer.SignDevice(l.ID, id, exp))
+	b.set(DeviceCookieName(l.ID), e.signer.SignDevice(l.ID, id, exp))
 	if _, ok, _ := e.admit(l.ID, b); !ok {
 		t.Fatal("a good token fails")
 	}
@@ -617,7 +617,7 @@ func TestForgedCookies(t *testing.T) {
 func TestDeviceTokenIsNotSession(t *testing.T) {
 	e := newEnv(t, Options{})
 	l, b, id := e.claimed(claim)
-	tok := b.cookie(DeviceCookie).Value
+	tok := b.cookie(DeviceCookieName(l.ID)).Value
 	if _, ok := e.signer.VerifySession(l.ID, tok, t0); ok {
 		t.Error("device token passes as a session")
 	}
@@ -646,7 +646,7 @@ func TestCookieRenewedWhenLinkExtended(t *testing.T) {
 	if _, ok, _ := e.admit(l.ID, b); !ok {
 		t.Fatal("not admitted after extension")
 	}
-	dc := b.cookie(DeviceCookie)
+	dc := b.cookie(DeviceCookieName(l.ID))
 	if !dc.Expires.Equal(edit.ValidUntil) {
 		t.Fatalf("cookie expires %v, want %v", dc.Expires, edit.ValidUntil)
 	}
@@ -819,4 +819,34 @@ func FuzzHandleDecisionEvent(f *testing.F) {
 			t.Fatalf("payload %q approved a device", raw)
 		}
 	})
+}
+
+// StillValid follows the stored link: a revoke, a reset, or approval
+// turned on ends what it said before.
+func TestStillValid(t *testing.T) {
+	e := newEnv(t, Options{})
+	l, _, id := e.claimed(claim)
+	off := l
+	off.Approval = model.Approval{}
+	for _, c := range []struct {
+		name   string
+		link   model.Link
+		device string
+		want   bool
+	}{
+		{"approval off, no device", off, "", true},
+		{"approved device", e.link(l.ID), id, true},
+		{"no device while on", e.link(l.ID), "", false},
+		{"unknown device", e.link(l.ID), "0000000000000000", false},
+	} {
+		if got := e.m.StillValid(c.link, c.device); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+	if err := e.m.RemoveDevice(l.ID, id); err != nil {
+		t.Fatal(err)
+	}
+	if e.m.StillValid(e.link(l.ID), id) {
+		t.Error("revoked device still valid")
+	}
 }

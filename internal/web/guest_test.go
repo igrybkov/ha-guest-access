@@ -378,12 +378,12 @@ func TestGuestNearHome(t *testing.T) {
 	if c := unlock(); c != 403 {
 		t.Errorf("no cookie: %d", c)
 	}
-	if c := unlock(&http.Cookie{Name: nearCookie, Value: "AQMAAAAAAAAAAAAAAAA"}); c != 403 {
+	if c := unlock(&http.Cookie{Name: access.LinkCookie(nearCookie, l.ID), Value: "AQMAAAAAAAAAAAAAAAA"}); c != 403 {
 		t.Errorf("forged cookie: %d", c)
 	}
 	// A real token for another link does not work here.
 	signer := access.NewSigner([]byte(strings.Repeat("\x07", 32)))
-	if c := unlock(&http.Cookie{Name: nearCookie, Value: signer.SignNear(other.ID, 1, t0.Add(time.Minute))}); c != 403 {
+	if c := unlock(&http.Cookie{Name: access.LinkCookie(nearCookie, l.ID), Value: signer.SignNear(other.ID, 1, t0.Add(time.Minute))}); c != 403 {
 		t.Errorf("other link's cookie: %d", c)
 	}
 	// 0.01 degrees of latitude is about 1.1 km.
@@ -412,7 +412,7 @@ func TestGuestNearHome(t *testing.T) {
 	}
 	near := where(l, home.Lat+0.001, home.Lon, 20) // about 111 m + 20
 	c := cookie(near, nearCookie)
-	if c == nil || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || c.Path != "/g/"+l.Slug || c.MaxAge != 900 || c.Secure {
+	if c == nil || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || c.Path != access.GuestCookiePath || c.MaxAge != 900 || c.Secure {
 		t.Fatalf("near cookie = %+v", c)
 	}
 	if code := unlock(c); code != 200 {
@@ -478,7 +478,7 @@ func TestGuestPasswords(t *testing.T) {
 	}
 	rec := login(l, "+1 555 0100", func(r *req) { r.peer = "203.0.113.11:1" })
 	c := cookie(rec, sessionCookie)
-	if rec.Code != 200 || c == nil || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || c.Path != "/g/"+l.Slug {
+	if rec.Code != 200 || c == nil || !c.HttpOnly || c.SameSite != http.SameSiteStrictMode || c.Path != access.GuestCookiePath {
 		t.Fatalf("login: %d %+v", rec.Code, c)
 	}
 	if rec := state(l, c); rec.Code != 200 {
@@ -491,16 +491,16 @@ func TestGuestPasswords(t *testing.T) {
 		t.Errorf("event label: %+v", ev)
 	}
 	for name, bad := range map[string]*http.Cookie{
-		"forged":       {Name: sessionCookie, Value: "AQIAAAAAAAAAAAAAAAAA"},
-		"tampered":     {Name: sessionCookie, Value: c.Value[:20] + flip(c.Value[20]) + c.Value[21:]},
-		"near as auth": {Name: sessionCookie, Value: h.srv.deps.Signer.SignNear(l.ID, 1, t0.Add(time.Hour))},
+		"forged":       {Name: access.LinkCookie(sessionCookie, l.ID), Value: "AQIAAAAAAAAAAAAAAAAA"},
+		"tampered":     {Name: access.LinkCookie(sessionCookie, l.ID), Value: c.Value[:20] + flip(c.Value[20]) + c.Value[21:]},
+		"near as auth": {Name: access.LinkCookie(sessionCookie, l.ID), Value: h.srv.deps.Signer.SignNear(l.ID, 1, t0.Add(time.Hour))},
 	} {
 		if rec := state(l, bad); rec.Code != 401 {
 			t.Errorf("%s: %d", name, rec.Code)
 		}
 	}
 	// A session of link A does not open link B, with the same password.
-	if rec := state(l2, &http.Cookie{Name: sessionCookie, Value: c.Value}); rec.Code != 401 {
+	if rec := state(l2, &http.Cookie{Name: access.LinkCookie(sessionCookie, l2.ID), Value: c.Value}); rec.Code != 401 {
 		t.Errorf("cookie of A on B: %d", rec.Code)
 	}
 	// Deleting the password ends its session at once.

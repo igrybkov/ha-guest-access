@@ -151,8 +151,8 @@ const (
 // password session must still name a password of the link.
 //
 // The device gate is not run again here: it writes a response, which a
-// stream can't take. The device approval work should add a check that
-// the device still exists.
+// stream can't take. StillValid checks that the device the stream opened
+// with is still on the link instead.
 func (s *Server) recheck(ctx context.Context, g *guestReq, fp string) streamVerdict {
 	l, err := s.deps.Links.Get(g.link.ID)
 	g.now = s.now()
@@ -160,7 +160,7 @@ func (s *Server) recheck(ctx context.Context, g *guestReq, fp string) streamVerd
 		return streamEnd
 	}
 	g.link = l
-	if !s.session(g) {
+	if !s.session(g) || !s.devices.StillValid(l, g.device) {
 		return streamEnd
 	}
 	p, err := s.plan(ctx, g)

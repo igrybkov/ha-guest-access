@@ -13,8 +13,10 @@ import (
 	"github.com/igrybkov/ha-guest-access/internal/model"
 )
 
-// Cookie names. Both are scoped to Path=/g/<slug>, so two links open in
-// one browser never overwrite each other's cookies.
+// Cookie name bases. The real name adds the link id
+// (access.LinkCookie) and the path is access.GuestCookiePath. So two links
+// open in one browser never overwrite each other's cookies, and a session
+// survives a slug rotation.
 const (
 	sessionCookie = "ga_session"
 	nearCookie    = "ga_near"
@@ -31,6 +33,10 @@ const (
 	// kindOpen routes need a known slug only: the page shell and the
 	// password form. They always use the pre-auth limiter.
 	kindOpen routeKind = iota
+	// kindDevice routes need an active link and the password session (if
+	// the link has passwords), but not the device gate: they are how a
+	// device gets through it. Device approval answers them.
+	kindDevice
 	// kindGuest routes need the whole chain: an active link, the password
 	// session (if the link has passwords) and the device gate.
 	kindGuest
@@ -49,6 +55,7 @@ type guestRoute struct {
 // them so logs never show a path a guest made up.
 var guestRouteNames = map[string]bool{
 	"password": true, "state": true, "events": true, "act": true, "where": true, "party": true,
+	"device/request": true, "device/status": true, "device/pending": true, "device/decide": true,
 }
 
 // routes returns the guest routes by name. "" is the page itself.
@@ -62,12 +69,21 @@ func guestRoutes() map[string]guestRoute {
 		"where":    {method: http.MethodPost, kind: kindGuest, post: true, handle: (*Server).guestWhere},
 		"party":    {method: http.MethodGet, kind: kindGuest, handle: (*Server).guestParty},
 
-		// DEVICE APPROVAL: mount the device routes here, under
-		// /g/{slug}/device/...: "device/request" (POST), "device/status"
-		// (GET), "device/pending" (GET) and "device/decide" (POST). They
-		// need the password session but not the device gate, so add a
-		// kind between kindOpen and kindGuest, and add the names to
-		// guestRouteNames.
+		"device/request": {method: http.MethodPost, kind: kindDevice, post: true, handle: deviceRoute(Devices.RequestAccess)},
+		"device/status":  {method: http.MethodGet, kind: kindDevice, handle: deviceRoute(Devices.Status)},
+		"device/pending": {method: http.MethodGet, kind: kindDevice, handle: deviceRoute(Devices.PendingForDevice)},
+		"device/decide":  {method: http.MethodPost, kind: kindDevice, post: true, handle: deviceRoute(Devices.DecideByDevice)},
+	}
+}
+
+// deviceRoute adapts a device approval handler to a guest route. The
+// body of a POST is capped at the guest body limit.
+func deviceRoute(h func(Devices, http.ResponseWriter, *http.Request, model.Link, access.Client, string)) func(*Server, *guestReq) {
+	return func(s *Server, g *guestReq) {
+		if g.r.Method == http.MethodPost {
+			g.r.Body = http.MaxBytesReader(g.w, g.r.Body, s.deps.Options.GuestBodyBytes)
+		}
+		h(s.devices, g.w, g.r, g.link, g.client, g.label)
 	}
 }
 
@@ -121,7 +137,7 @@ type guestKey struct{}
 //  3. POST shape: JSON content type and a same-origin Origin header.
 //  4. link.Active(now).
 //  5. The password session, if the link has passwords.
-//  6. DeviceGate.Admit.
+//  6. DeviceGate.Admit, on kindGuest routes only.
 //  7. The route's own work.
 //
 // The page shell (kindOpen) stops after step 2 and is served even for an
@@ -217,7 +233,7 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 	g.link = link
 	active := link.Active(g.now)
 	authed := active && s.session(g)
-	if route.kind == kindGuest && authed {
+	if route.kind != kindOpen && authed {
 		if ok, retry := g.lim.authed.Allow(link.ID+"|"+g.ipKey(), g.now); !ok {
 			tooMany(w, retry)
 			return
@@ -238,11 +254,11 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 		writeError(w, http.StatusGone, msgGone)
 		return
 	}
+	if route.kind != kindOpen && !authed {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": msgPassword, "need": "password"})
+		return
+	}
 	if route.kind == kindGuest {
-		if !authed {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": msgPassword, "need": "password"})
-			return
-		}
 		dev, ok := s.devices.Admit(w, r, link, g.client, g.label)
 		if !ok {
 			return
@@ -275,7 +291,7 @@ func (s *Server) session(g *guestReq) bool {
 	if len(g.link.Passwords) == 0 {
 		return true
 	}
-	c, err := g.r.Cookie(sessionCookie)
+	c, err := g.r.Cookie(access.LinkCookie(sessionCookie, g.link.ID))
 	if err != nil {
 		return false
 	}
@@ -319,14 +335,15 @@ func sameOrigin(r *http.Request) bool {
 	return strings.EqualFold(u.Host, r.Host)
 }
 
-// setCookie sets a guest cookie scoped to the link's path. It is
+// setCookie sets guest cookie base for the request's link. Its name
+// carries the link id and its path is access.GuestCookiePath. It is
 // HttpOnly, SameSite=Strict, and Secure when the request came over
 // HTTPS.
-func setCookie(g *guestReq, name, value string, exp time.Time) {
+func setCookie(g *guestReq, base, value string, exp time.Time) {
 	http.SetCookie(g.w, &http.Cookie{
-		Name:     name,
+		Name:     access.LinkCookie(base, g.link.ID),
 		Value:    value,
-		Path:     "/g/" + g.slug,
+		Path:     access.GuestCookiePath,
 		Expires:  exp,
 		MaxAge:   max(1, int(exp.Sub(g.now).Seconds())),
 		HttpOnly: true,

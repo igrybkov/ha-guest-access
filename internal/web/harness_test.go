@@ -232,10 +232,11 @@ func (h *harness) act(l model.Link, entity, action string, data map[string]any, 
 		body: map[string]any{"entity_id": entity, "action": action, "data": data}, cookies: cookies})
 }
 
-// cookie returns the cookie named name set by rec.
-func cookie(rec *httptest.ResponseRecorder, name string) *http.Cookie {
+// cookie returns the cookie of name base set by rec, for any link: the
+// name is base + "_" + a link id (access.LinkCookie).
+func cookie(rec *httptest.ResponseRecorder, base string) *http.Cookie {
 	for _, c := range rec.Result().Cookies() {
-		if c.Name == name {
+		if id, ok := strings.CutPrefix(c.Name, base+"_"); ok && !strings.Contains(id, "_") {
 			return c
 		}
 	}
