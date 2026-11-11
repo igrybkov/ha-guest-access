@@ -397,7 +397,7 @@ export function ruleEditor(rule, startBase, title, ctx) {
   if (Object.values(st.exclude).some((l) => l.length)) el.querySelector('details.exclude').setAttribute('open', '');
   if (ctx.sort) {
     toolbar.prepend(sortHandle({
-      card: el, box: ctx.sort.box,
+      card: el, box: ctx.sort.box, first: `Move ${title}`,
       label: () => `Move ${heading.textContent}, place ${ctx.sort.index() + 1} of ${ctx.sort.count()}`,
       index: ctx.sort.index, count: ctx.sort.count, onMove: ctx.sort.onMove,
     }));

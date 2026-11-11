@@ -181,7 +181,7 @@ details > summary { cursor: pointer; padding: 4px 0; }
 }
 .dl-handle:hover { color: var(--fg); }
 .dl-btn { flex: none; min-width: 40px; min-height: 40px; font-size: 1.2em; line-height: 1; color: var(--primary); }
-.dl-chosen .dl-btn { color: var(--danger); }
+.dl-btn[data-role="remove"] { color: var(--danger); }
 .dl-empty { padding: 10px 8px; text-align: center; }
 .dl-body:has(.dl-placeholder) .dl-empty { display: none; }
 .dl-placeholder { border: 2px dashed var(--primary); border-radius: 6px; background: color-mix(in srgb, var(--primary) 10%, transparent); }

@@ -296,10 +296,12 @@ export function dragRow(handle, row, opts) {
 // as a rule. box holds the cards; the card needs data-drag-row. index()
 // gives the card's place now. onMove(from, to) runs on a drop or on
 // Alt+ArrowUp or Alt+ArrowDown on the handle; to counts the cards
-// without the moved one. count() gives the number of cards.
-export function sortHandle({ card, box, label, index, count, onMove }) {
+// without the moved one. count() gives the number of cards. label()
+// names the handle; it runs on focus, since the card may not be in the
+// list yet while it is built. first is the label until then.
+export function sortHandle({ card, box, first, label, index, count, onMove }) {
   const handle = h('button', {
-    type: 'button', class: 'dl-handle', 'data-role': 'handle', 'aria-label': label(),
+    type: 'button', class: 'dl-handle', 'data-role': 'handle', 'aria-label': first,
     title: 'Drag to move. Alt+Up and Alt+Down move it too.',
   });
   handle.addEventListener('focus', () => handle.setAttribute('aria-label', label()));

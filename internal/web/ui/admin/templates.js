@@ -25,13 +25,16 @@ export async function render(view, rest) {
         h('div', { class: 'grow' },
           h('a', { class: 'title', href: `#/templates/edit/${encodeURIComponent(t.id)}`, text: t.name }),
           h('div', { class: 'muted small' },
-            `${t.id} · ${t.rules.length === 1 ? '1 rule' : `${t.rules.length} rules`}`,
+            `${t.id} · ${ruleCount((t.rules || []).length)}`,
             t.access?.network === 'local' && h('span', { class: 'badge', text: 'Home network' }),
             t.access?.near_home_m > 0 && h('span', { class: 'badge', text: `Near home ${t.access.near_home_m} m` }),
             t.party && h('span', { class: 'badge', text: 'Party' })))))))
       : h('p', { class: 'muted', text: 'No templates yet. A template is a set of rules that pick entities and allowed actions.' }));
   return null;
 }
+
+// ruleCount words a number of rules. A template may have none.
+const ruleCount = (n) => (n === 0 ? 'no rules yet' : n === 1 ? '1 rule' : `${n} rules`);
 
 async function editor(view, tpl, all) {
   const isNew = !tpl;
@@ -179,7 +182,7 @@ async function editor(view, tpl, all) {
         location.hash = '#/templates';
       });
     } })));
-  drawRules(src.rules);
+  drawRules(src.rules || []);
   fill(view, form);
   if (isNew && all.length === 0) name.focus();
   schedule();
