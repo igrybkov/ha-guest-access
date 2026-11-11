@@ -6,7 +6,7 @@ import {
   preset, toLocalInput, fromLocalInput, buildTemplate, buildLink, buildRule, ruleState, linkForm, cleanAccess,
   parseVarValue, slugifyID, normalizeTemplatePath, parentPath, fieldFor, groupProblems,
   approvalMode, splitTemplates, linkBadges, rotateWarning, grantSummary,
-  auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths,
+  auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections,
 } from './lib.js';
 
 // ---- Patterns ----
@@ -322,6 +322,11 @@ test('grantSummary groups by entity', () => {
 test('paths are relative and encode ids', () => {
   assert.equal(paths.link('a/b'), 'api/links/a%2Fb');
   assert.equal(paths.decide('r 1'), 'api/devices/pending/r%201');
+  assert.equal(paths.pending(), 'api/devices/pending');
+  assert.equal(paths.pending('a&b'), 'api/devices/pending?link=a%26b');
+  assert.equal(paths.linkDevice('l', 'd/1'), 'api/links/l/devices/d%2F1');
+  assert.equal(paths.resetDevices('l'), 'api/links/l/devices/reset');
+  assert.equal(paths.audit('limit=5'), 'api/audit?limit=5');
   for (const v of Object.values(paths)) {
     const p = typeof v === 'function' ? v('x', 'y') : v;
     assert.ok(!p.startsWith('/'), p);
@@ -349,7 +354,10 @@ test('audit who: guest label and device, else the HA user', () => {
   assert.equal(auditWho({ password_label: 'Anna', device_label: 'iPhone' }), 'Anna (iPhone)');
   assert.equal(auditWho({ password_label: 'Anna' }), 'Anna');
   assert.equal(auditWho({ device: 'Safari on iOS' }), 'Safari on iOS');
-  assert.equal(auditWho({ user: 'illia' }), 'illia');
+  assert.equal(auditWho({ user: { id: 'u1', name: 'illia', display_name: 'Illia G' } }), 'Illia G');
+  assert.equal(auditWho({ user: { id: 'u1', name: 'illia' } }), 'illia');
+  assert.equal(auditWho({ user: { id: 'u1' } }), 'u1');
+  assert.equal(auditWho({ password_label: 'Anna', user: { name: 'illia' } }), 'Anna');
   assert.equal(auditWho({}), '');
 });
 
@@ -361,4 +369,64 @@ test('audit what and result', () => {
   assert.equal(auditResult({ result: 'denied', reason: 'outside window' }), 'denied: outside window');
   assert.equal(auditResult({ reason: 'x' }), 'x');
   assert.equal(auditResult({}), '');
+});
+
+// ---- Settings ----
+
+// settingsSample has every key GET api/settings sends, each with a
+// distinct value, so the test can tell that each one is shown.
+const settingsSample = {
+  public_base_url: 'https://guest.example.com', home_radius_default_m: 101, trusted_proxies: ['192.0.2.1'],
+  local_access: { enabled: true, networks: ['192.0.2.0/24'] },
+  music_assistant: { url: 'http://ma.example' }, ma_token: { set: true },
+  guest: { title: 'Hi', welcome: 'Welcome', accent_color: '#123456', slider_interval_ms: 102 },
+  rate_limits: {
+    guest_per_min: 201, guest_burst: 202, actions_per_min: 203, actions_burst: 204,
+    continuous_per_min: 205, continuous_burst: 206, max_streams_per_link: 207,
+    misses_per_hour_per_ip: 208, misses_per_hour_global: 209,
+    password_fails_per_ip: 210, password_fails_per_link: 211, password_lockout_min: 212, admin_per_min: 213,
+  },
+  tunables: {
+    ma_timeout_ms: 301, location_ttl_min: 302, max_accuracy_m: 303,
+    password_window_per_ip_min: 304, password_window_per_link_min: 305,
+    custom_slug_min_len: 306, custom_slug_max_len: 307, guest_body_kib: 308, admin_body_kib: 309,
+    diagnostics_requests: 310, inventory_max_age_s: 311,
+    approval: { pending_ttl_min: 312, max_pending: 313, max_devices: 314, events_per_hour: 315, touch_throttle_min: 316 },
+    ha_call_timeout_s: 317, ha_event_timeout_s: 318, stream_recheck_s: 319, stream_heartbeat_s: 320,
+    stream_retry_after_s: 321, audit_enabled: true, audit_max_file_kib: 322,
+  },
+};
+
+test('settings sections show every number the server sends', () => {
+  const shown = new Set(settingsSections(settingsSample).flatMap((s) => s.rows.map(([, v]) => String(v))));
+  const want = [];
+  const walk = (o) => {
+    for (const v of Object.values(o)) {
+      if (typeof v === 'number') want.push(v);
+      else if (v && typeof v === 'object' && !Array.isArray(v)) walk(v);
+    }
+  };
+  walk(settingsSample);
+  for (const n of want) {
+    if (n === 306 || n === 307) continue; // shown together as a range
+    assert.ok(shown.has(String(n)), `value ${n} is not shown`);
+  }
+  assert.ok(shown.has('306 to 307'));
+});
+
+test('settings sections: on/off, lists and missing values', () => {
+  const rows = new Map(settingsSections(settingsSample).flatMap((s) => s.rows));
+  assert.equal(rows.get('Log file'), 'On');
+  assert.equal(rows.get('Local only'), 'On');
+  assert.equal(rows.get('Trusted proxies'), '192.0.2.1');
+  assert.equal(rows.get('Token'), 'Set');
+  const empty = new Map(settingsSections({}).flatMap((s) => s.rows));
+  assert.equal(empty.get('Trusted proxies'), 'None');
+  assert.equal(empty.get('Log file'), 'Off');
+  assert.equal(empty.get('Custom slug length'), null);
+});
+
+test('link badges count waiting devices', () => {
+  assert.deepEqual(linkBadges({ pending: [{}] }), ['1 device waiting']);
+  assert.deepEqual(linkBadges({ pending: [{}, {}] }), ['2 devices waiting']);
 });

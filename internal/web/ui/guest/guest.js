@@ -10,6 +10,7 @@
 import {
   linkBase, cards, mergeState, errorText, tryAgainText, formatUntil, parseColor, textOn,
   parseRetryAfter, sliderInterval, deviceNext, shouldPoll, POLL_MS, geoErrorText, whereErrorText,
+  approvalsOn, approvalsDelay,
 } from './lib.js';
 import { el, icon } from './dom.js';
 import { makeCard } from './controls.js';
@@ -395,40 +396,39 @@ function stopStream() {
 }
 
 // ---- self-service approvals ----
-// An approved device of a self-service link may let new devices in. The
-// page asks device/pending once; a refusal means this link or device
-// can't approve, and the page stops asking.
+// /state says can_approve when this device may let new devices in. Only
+// then does the page poll device/pending.
 
-const APPROVALS_MS = 5000;
-let canApprove = null; // null: not asked yet
 let approvalsTimer = null;
+let approvalsSeq = 0; // a newer start or stop makes older polls drop out
 
 function startApprovals() {
   stopApprovals();
-  if (canApprove === false || document.hidden) return;
-  checkApprovals();
+  if (!approvalsOn(view, document.hidden)) {
+    drawApprovals([]);
+    return;
+  }
+  checkApprovals(approvalsSeq);
 }
 
 function stopApprovals() {
+  approvalsSeq++;
   clearTimeout(approvalsTimer);
   approvalsTimer = null;
 }
 
-async function checkApprovals() {
+async function checkApprovals(seq) {
   const r = await call('GET', '/device/pending');
-  if (current !== 'main') return;
+  if (seq !== approvalsSeq || current !== 'main') return;
   if (r.status === 200 && Array.isArray(r.body.requests)) {
-    canApprove = true;
     drawApprovals(r.body.requests);
-  } else if (r.status === 403 || r.status === 404 || r.status === 405 || r.status === 429) {
-    canApprove = false;
+  } else if (r.status === 401 || r.status === 403 || r.status === 410) {
+    // Access changed. /state knows what holds now.
     drawApprovals([]);
+    load();
     return;
   }
-  if (canApprove && !document.hidden) {
-    clearTimeout(approvalsTimer);
-    approvalsTimer = setTimeout(checkApprovals, APPROVALS_MS);
-  }
+  approvalsTimer = setTimeout(() => checkApprovals(seq), approvalsDelay(r.status, r.retry));
 }
 
 function drawApprovals(list) {
@@ -445,7 +445,7 @@ function drawApprovals(list) {
       else if (r.status === 404) toast('That request has run out.');
       else if (r.status === 409) toast('This link has all the devices it can have. Ask your host.');
       else toast(errorText(r.status, r.body, r.retry));
-      checkApprovals();
+      startApprovals();
     };
     approve.addEventListener('click', () => decide(true));
     deny.addEventListener('click', () => decide(false));

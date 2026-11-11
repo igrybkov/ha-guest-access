@@ -55,10 +55,6 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.HandleFunc("GET /api/links/{id}/url", s.linkURL)
 	mux.HandleFunc("GET /api/links/{id}/qr.svg", s.linkQRSVG)
 	mux.HandleFunc("GET /api/links/{id}/qr.png", s.linkQRPNG)
-	// DEVICE APPROVAL: mount the admin device routes here, for example
-	// "GET /api/links/{id}/devices", "DELETE /api/links/{id}/devices/{did}",
-	// "POST /api/links/{id}/devices/reset" and
-	// "POST /api/links/{id}/devices/requests/{rid}/decide".
 
 	mux.HandleFunc("GET /api/catalog", s.getCatalog)
 	mux.HandleFunc("GET /api/entities", s.listEntities)

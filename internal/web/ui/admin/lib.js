@@ -27,7 +27,7 @@ export const paths = {
   qrSVG: (id) => `api/links/${enc(id)}/qr.svg`,
   linkDevice: (id, did) => `api/links/${enc(id)}/devices/${enc(did)}`,
   resetDevices: (id) => `api/links/${enc(id)}/devices/reset`,
-  pending: 'api/devices/pending',
+  pending: (link) => (link ? `api/devices/pending?link=${enc(link)}` : 'api/devices/pending'),
   decide: (rid) => `api/devices/pending/${enc(rid)}`,
   audit: (q) => `api/audit${q ? `?${q}` : ''}`,
 };
@@ -382,6 +382,8 @@ export function linkBadges(l) {
   const mode = approvalMode(l.approval);
   if (mode !== 'off') out.push({ manual: 'Manual approval', claim: 'Claim mode', both: 'Approval' }[mode]);
   if (l.one_time) out.push('One-time');
+  const p = (l.pending || []).length;
+  if (p) out.push(p === 1 ? '1 device waiting' : `${p} devices waiting`);
   return out;
 }
 
@@ -423,6 +425,9 @@ export function auditQuery({ link = '', group = '', limit = 50 } = {}) {
   return q.toString();
 }
 
+// auditOffText explains an empty log when the audit file is off.
+export const auditOffText = 'The activity log file is off, so nothing is kept here. Turn on audit.enabled in Settings → Apps → Guest Access → Configuration. The app log still has every event.';
+
 export const isDenied = (r) => /\.denied$/.test(r.event || '') || r.result === 'denied';
 
 // auditKeep applies the filters the server can't.
@@ -431,11 +436,12 @@ export function auditKeep(group, r) {
 }
 
 // auditWho names who acted: the guest (password label, device), else the
-// HA user.
+// HA user. The user is an object {id, name, display_name}.
 export function auditWho(r) {
   const dev = r.device_label || r.device || '';
   if (r.password_label && dev) return `${r.password_label} (${dev})`;
-  return r.password_label || dev || r.user || '';
+  const u = r.user && typeof r.user === 'object' ? r.user.display_name || r.user.name || r.user.id || '' : '';
+  return r.password_label || dev || u;
 }
 
 // auditWhat names what was done: the action on an entity, else the route.
@@ -448,4 +454,85 @@ export function auditWhat(r) {
 export function auditResult(r) {
   if (r.result && r.reason) return `${r.result}: ${r.reason}`;
   return r.result || r.reason || '';
+}
+
+// ---- Settings ----
+
+// settingsSections lays out GET api/settings as [{id, title, rows}],
+// where rows are [label, value]. A null or "" value shows as "Not set".
+export function settingsSections(s) {
+  const r = s.rate_limits || {};
+  const t = s.tunables || {};
+  const a = t.approval || {};
+  const g = s.guest || {};
+  const list = (xs) => (xs && xs.length ? xs.join(', ') : 'None');
+  const onOff = (b) => (b ? 'On' : 'Off');
+  return [
+    { id: 'general', title: 'General', rows: [
+      ['Public base URL', s.public_base_url],
+      ['Home radius default (m)', s.home_radius_default_m],
+      ['Trusted proxies', list(s.trusted_proxies)],
+    ] },
+    { id: 'local', title: 'Local access', rows: [
+      ['Local only', onOff(s.local_access?.enabled)],
+      ['Local networks', list(s.local_access?.networks)],
+    ] },
+    { id: 'ma', title: 'Music Assistant', rows: [
+      ['URL', s.music_assistant?.url],
+      ['Token', s.ma_token?.set ? 'Set' : 'Not set'],
+      ['Timeout (ms)', t.ma_timeout_ms],
+    ] },
+    { id: 'guest', title: 'Guest page', rows: [
+      ['Title', g.title],
+      ['Welcome', g.welcome],
+      ['Accent color', g.accent_color],
+      ['Slider send interval (ms)', g.slider_interval_ms],
+    ] },
+    { id: 'limits', title: 'Rate limits', rows: [
+      ['Guest requests per minute', r.guest_per_min],
+      ['Guest burst', r.guest_burst],
+      ['Actions per minute', r.actions_per_min],
+      ['Actions burst', r.actions_burst],
+      ['Slider actions per minute, per entity', r.continuous_per_min],
+      ['Slider actions burst', r.continuous_burst],
+      ['Open streams per link', r.max_streams_per_link],
+      ['Slug misses per hour per IP', r.misses_per_hour_per_ip],
+      ['Slug misses per hour, all IPs', r.misses_per_hour_global],
+      ['Password fails per IP', r.password_fails_per_ip],
+      ['Password fails per link', r.password_fails_per_link],
+      ['Password lockout (min)', r.password_lockout_min],
+      ['Admin requests per minute', r.admin_per_min],
+    ] },
+    { id: 'ha', title: 'Home Assistant', rows: [
+      ['Service call timeout (s)', t.ha_call_timeout_s],
+      ['Event timeout (s)', t.ha_event_timeout_s],
+      ['Inventory max age (s)', t.inventory_max_age_s],
+    ] },
+    { id: 'stream', title: 'Live updates', rows: [
+      ['Access recheck (s)', t.stream_recheck_s],
+      ['Heartbeat (s)', t.stream_heartbeat_s],
+      ['Reconnect wait (s)', t.stream_retry_after_s],
+    ] },
+    { id: 'approval', title: 'Device approval', rows: [
+      ['Device request expires (min)', a.pending_ttl_min],
+      ['Pending requests per link', a.max_pending],
+      ['Devices per link', a.max_devices],
+      ['Device events per hour', a.events_per_hour],
+      ['Device last seen update (min)', a.touch_throttle_min],
+    ] },
+    { id: 'audit', title: 'Activity log', rows: [
+      ['Log file', onOff(t.audit_enabled)],
+      ['Max file size (KiB)', t.audit_max_file_kib],
+    ] },
+    { id: 'tunables', title: 'Other', rows: [
+      ['Location valid for (min)', t.location_ttl_min],
+      ['Max location accuracy (m)', t.max_accuracy_m],
+      ['Password window per IP (min)', t.password_window_per_ip_min],
+      ['Password window per link (min)', t.password_window_per_link_min],
+      ['Custom slug length', t.custom_slug_min_len != null ? `${t.custom_slug_min_len} to ${t.custom_slug_max_len}` : null],
+      ['Guest body limit (KiB)', t.guest_body_kib],
+      ['Admin body limit (KiB)', t.admin_body_kib],
+      ['Diagnostics kept', t.diagnostics_requests],
+    ] },
+  ];
 }

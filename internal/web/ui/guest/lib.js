@@ -405,6 +405,22 @@ export function shouldPoll(phase) {
   return phase === 'pending';
 }
 
+// APPROVALS_MS is how often an approver device asks for new requests.
+export const APPROVALS_MS = 5000;
+
+// approvalsOn reports whether the page shows the approver panel and
+// polls device/pending: /state said can_approve and the page is visible.
+export function approvalsOn(view, hidden) {
+  return !hidden && !!view && view.can_approve === true;
+}
+
+// approvalsDelay is the wait before the next device/pending poll. A 429
+// waits for its Retry-After; other answers keep the normal pace.
+export function approvalsDelay(status, retrySec) {
+  if (status === 429 && finite(retrySec) && retrySec > 0) return Math.max(APPROVALS_MS, retrySec * 1000);
+  return APPROVALS_MS;
+}
+
 // geoErrorText explains a failed location request. code is the
 // GeolocationPositionError code; 0 means the browser can't do it here.
 export function geoErrorText(code) {

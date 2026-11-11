@@ -6,6 +6,7 @@ import {
   parseColor, textOn, parseRetryAfter, formatWait, tryAgainText, errorText, mergeState,
   formatUntil, confirmTap, confirmExpired, CONFIRM_MS, deviceNext, shouldPoll, geoErrorText,
   whereErrorText, sliderSender, sliderInterval, SLIDER_MS,
+  approvalsOn, approvalsDelay, APPROVALS_MS,
 } from './lib.js';
 
 test('linkBase', () => {
@@ -433,4 +434,21 @@ test('sliderSender recovers after a failed send', async () => {
   await new Promise((r) => setImmediate(r));
   s.input(3);
   assert.deepEqual(sent, [1, 2, 3]);
+});
+
+test('approvals show only when /state says can_approve and the page is visible', () => {
+  assert.equal(approvalsOn({ can_approve: true }, false), true);
+  assert.equal(approvalsOn({ can_approve: true }, true), false);
+  assert.equal(approvalsOn({ can_approve: false }, false), false);
+  assert.equal(approvalsOn({}, false), false);
+  assert.equal(approvalsOn({ can_approve: 'yes' }, false), false);
+  assert.equal(approvalsOn(null, false), false);
+});
+
+test('approvals poll at the normal pace, slower after a 429', () => {
+  assert.equal(approvalsDelay(200, null), APPROVALS_MS);
+  assert.equal(approvalsDelay(0, null), APPROVALS_MS);
+  assert.equal(approvalsDelay(429, 30), 30000);
+  assert.equal(approvalsDelay(429, 1), APPROVALS_MS);
+  assert.equal(approvalsDelay(429, null), APPROVALS_MS);
 });

@@ -5,7 +5,7 @@ import {
 } from './dom.js';
 import {
   paths, PRESETS, preset, toLocalInput, fromLocalInput, fmtTime, fmtWindow, buildLink, linkForm,
-  approvalMode, splitTemplates, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult,
+  approvalMode, splitTemplates, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
 } from './lib.js';
 import { Slots, ruleEditor, loadInventory } from './rules.js';
 
@@ -347,12 +347,16 @@ function passwordsSection(l, reload) {
 function devicesSection(l, reload) {
   const devices = l.devices || [];
   const mode = approvalMode(l.approval);
-  if (mode === 'off' && !devices.length) return null;
-  const pendingBox = h('div', {}, h('p', { class: 'muted small', text: 'Loading requests…' }));
-  loadPending(l, pendingBox, reload);
+  if (mode === 'off' && !devices.length && !(l.pending || []).length) return null;
+  const pendingBox = h('div', {});
+  drawPending(l.pending || [], pendingBox, reload);
+  const refresh = h('button', { type: 'button', text: 'Refresh', onclick: (ev) => run(ev.currentTarget, async () => {
+    const res = await get(paths.pending(l.id));
+    drawPending(res.requests || [], pendingBox, reload);
+  }) });
   return h('section', { class: 'card' }, h('h2', { text: 'Devices' }),
     mode === 'off' && h('p', { class: 'muted small', text: 'Device approval is off, so these devices no longer matter.' }),
-    h('h3', { text: 'Waiting for approval' }), pendingBox,
+    h('div', { class: 'toolbar' }, h('h3', { class: 'grow', text: 'Waiting for approval' }), refresh), pendingBox,
     h('h3', { text: 'Approved' }),
     devices.length
       ? table(['Device', 'Approved', 'By', 'Last seen', ''], devices.map((d) => h('tr', {},
@@ -376,28 +380,21 @@ function devicesSection(l, reload) {
     } })));
 }
 
-async function loadPending(l, box, reload) {
-  let all;
-  try {
-    all = await get(paths.pending);
-  } catch (e) {
-    fill(box, h('p', { class: 'muted small', text: e instanceof APIError && e.status === 404 ? 'Requests are not available in this version.' : `Could not load requests: ${e.message}` }));
-    return;
-  }
-  const mine = (Array.isArray(all) ? all : all?.requests || []).filter((r) => r.link_id === l.id);
-  if (!mine.length) {
+// drawPending lists the link's pending device requests with approve and
+// deny buttons.
+function drawPending(reqs, box, reload) {
+  if (!reqs.length) {
     fill(box, h('p', { class: 'muted', text: 'No requests.' }));
     return;
   }
-  const decide = (r, approve) => async (ev) => {
-    const rid = r.request_id ?? r.id;
+  const decide = (r, approve) => (ev) => {
     run(ev.currentTarget, async () => {
-      await post(paths.decide(rid), { approve });
+      await post(paths.decide(r.request_id), { approve });
       toast(approve ? 'Approved' : 'Denied');
       reload();
     });
   };
-  fill(box, table(['Code', 'Guest', 'Device', 'Asked', ''], mine.map((r) => h('tr', {},
+  fill(box, table(['Code', 'Guest', 'Device', 'Asked', ''], reqs.map((r) => h('tr', {},
     h('td', {}, h('code', { class: 'code', text: r.code })),
     h('td', { text: r.label || '' }),
     h('td', { class: 'small', text: r.device || '' }),
@@ -410,7 +407,11 @@ async function loadPending(l, box, reload) {
 function activitySection(l) {
   const box = h('div', {}, h('p', { class: 'muted small', text: 'Loading…' }));
   get(paths.audit(auditQuery({ link: l.id, limit: 10 }))).then((res) => {
-    const recs = Array.isArray(res) ? res : res?.records || [];
+    if (!res.file) {
+      fill(box, h('p', { class: 'muted small', text: auditOffText }));
+      return;
+    }
+    const recs = res.records || [];
     fill(box, recs.length
       ? h('ul', { class: 'plain-list small' }, recs.map((r) => h('li', {},
         h('span', { class: 'muted', text: fmtTime(r.time) }), ' ',
@@ -418,7 +419,7 @@ function activitySection(l) {
         h('span', { text: [auditWho(r), auditWhat(r), auditResult(r)].filter(Boolean).join(' · ') }))))
       : h('p', { class: 'muted', text: 'No activity yet.' }));
   }).catch((e) => {
-    fill(box, h('p', { class: 'muted small', text: e instanceof APIError && e.status === 404 ? 'The activity log is not available in this version.' : `Could not load activity: ${e.message}` }));
+    fill(box, h('p', { class: 'muted small', text: `Could not load activity: ${e.message}` }));
   });
   return h('section', { class: 'card' },
     h('div', { class: 'toolbar' }, h('h2', { class: 'grow', text: 'Recent activity' }),

@@ -1,7 +1,7 @@
 // Activity screen: the audit log, newest first. Most fields come from
 // guests, so everything goes in as text only.
 import { h, fill, get, table, select } from './dom.js';
-import { paths, fmtTime, AUDIT_GROUPS, auditQuery, auditKeep, auditWho, auditWhat, auditResult, isDenied } from './lib.js';
+import { paths, fmtTime, AUDIT_GROUPS, auditQuery, auditKeep, auditWho, auditWhat, auditResult, isDenied, auditOffText } from './lib.js';
 
 const PAGE = 50;
 
@@ -22,12 +22,17 @@ export async function render(view, rest, params) {
       res = await get(paths.audit(auditQuery(state)));
     } catch (e) {
       if (my !== seq) return;
-      fill(body, h('p', { class: e.status === 404 ? 'muted' : 'error', text: e.status === 404 ? 'The activity log is not available in this version.' : `Could not load: ${e.message}` }));
+      fill(body, h('p', { class: 'error', text: `Could not load: ${e.message}` }));
       more.hidden = true;
       return;
     }
     if (my !== seq) return;
-    const all = Array.isArray(res) ? res : res?.records || [];
+    if (!res.file) {
+      fill(body, h('p', { class: 'note', text: auditOffText }));
+      more.hidden = true;
+      return;
+    }
+    const all = res.records || [];
     const recs = all.filter((r) => auditKeep(state.group, r));
     fill(body, recs.length
       ? table(['Time', 'Event', 'Link', 'Who', 'What', 'Result', 'Client IP'], recs.map((r) => h('tr', { class: isDenied(r) ? 'denied' : '' },
