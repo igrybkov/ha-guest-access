@@ -42,6 +42,9 @@ func In[T any](set *Set, name string, def func() T) *File[T] {
 // Path returns the file path.
 func (f *File[T]) Path() string { return filepath.Join(f.set.dir, f.name) }
 
+// Rev returns the revision of the file's set. See Set.Rev.
+func (f *File[T]) Rev() uint64 { return f.set.Rev() }
+
 // Load returns the current value, re-reading the set if a file changed.
 //
 // A missing file gives the default value and is not created: reads never
@@ -103,7 +106,14 @@ func (f *File[T]) save(v T) error {
 // WriteFileAtomic writes data to a temp file in the same dir, fsyncs and
 // renames. The file gets mode 0644: these files are shared with HA and its
 // git repo.
-func WriteFileAtomic(path string, data []byte) (err error) {
+func WriteFileAtomic(path string, data []byte) error {
+	return writeFileAtomic(path, data, 0o644)
+}
+
+// writeFileAtomic is WriteFileAtomic with a file mode. The temp file is
+// created 0600 by os.CreateTemp, so the data is never readable by others
+// before the chmod.
+func writeFileAtomic(path string, data []byte, mode os.FileMode) (err error) {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -118,7 +128,7 @@ func WriteFileAtomic(path string, data []byte) (err error) {
 	if _, err = tmp.Write(data); err != nil {
 		return err
 	}
-	if err = tmp.Chmod(0o644); err != nil {
+	if err = tmp.Chmod(mode); err != nil {
 		return err
 	}
 	if err = tmp.Sync(); err != nil {

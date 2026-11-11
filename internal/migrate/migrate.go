@@ -59,7 +59,11 @@ func OpenConfig(dir string, log *slog.Logger) *store.Set {
 	return store.OpenSet(dir, store.SetOptions{Current: ConfigCurrent, Files: ConfigFiles, Steps: ConfigSteps, Logger: log})
 }
 
-// OpenData returns the data set in dir.
+// DataFileMode is the mode of the data set's files. Links hold slugs and
+// password hashes, and secrets hold the MA token: only the app reads them.
+const DataFileMode = 0o600
+
+// OpenData returns the data set in dir. Its files are written 0600.
 func OpenData(dir string, log *slog.Logger) *store.Set {
-	return store.OpenSet(dir, store.SetOptions{Current: DataCurrent, Files: DataFiles, Steps: DataSteps, Logger: log})
+	return store.OpenSet(dir, store.SetOptions{Current: DataCurrent, Files: DataFiles, Steps: DataSteps, FileMode: DataFileMode, Logger: log})
 }

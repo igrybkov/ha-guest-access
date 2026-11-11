@@ -42,6 +42,7 @@ type Set struct {
 	current int
 	names   []string // every file name the set has ever used, obsolete ones too
 	steps   []Step
+	mode    os.FileMode
 	log     *slog.Logger
 
 	mu     sync.Mutex
@@ -50,6 +51,7 @@ type Set struct {
 	tree   *Tree                  // migrated content, last good
 	onDisk map[string]int         // version of each file on disk, at the last read
 	err    error                  // why the files on disk are not usable as they are
+	rev    uint64                 // bumped when tree changes
 }
 
 // SetOptions configure a Set.
@@ -59,8 +61,12 @@ type SetOptions struct {
 	// Files are the file names of every version, current and obsolete.
 	Files []string
 	// Steps has Current-1 entries; see Step.
-	Steps  []Step
-	Logger *slog.Logger
+	Steps []Step
+	// FileMode is the mode of the files the set writes. 0 means 0644,
+	// for files shared with HA and its git repo. Use 0600 for files only
+	// this app may read.
+	FileMode os.FileMode
+	Logger   *slog.Logger
 }
 
 // OpenSet returns a Set for dir. It reads nothing until the first Load.
@@ -75,11 +81,25 @@ func OpenSet(dir string, o SetOptions) *Set {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Set{dir: dir, current: o.Current, names: slices.Clone(o.Files), steps: o.Steps, log: log}
+	if o.FileMode == 0 {
+		o.FileMode = 0o644
+	}
+	return &Set{dir: dir, current: o.Current, names: slices.Clone(o.Files), steps: o.Steps, mode: o.FileMode, log: log}
 }
 
 // Dir returns the directory of the set.
 func (s *Set) Dir() string { return s.dir }
+
+// Rev re-reads the set if a file changed, like Load, and returns a number
+// that changes whenever the content does: on a reload from disk and on
+// every write. Callers use it to keep a derived index (such as a map by
+// slug) without decoding the files on every call.
+func (s *Set) Rev() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.load()
+	return s.rev
+}
 
 // load re-reads and migrates the files if any changed. It requires s.mu.
 func (s *Set) load() {
@@ -136,6 +156,7 @@ func (s *Set) load() {
 		return
 	}
 	s.tree, s.onDisk, s.err = raw, onDisk, nil
+	s.rev++
 }
 
 // migrate runs the steps from the oldest file version up. It requires s.mu.
@@ -194,6 +215,7 @@ func (s *Set) put(name string, node *yaml.Node) error {
 	}
 	setVersion(node, s.current)
 	s.tree.docs[name], s.tree.versions[name] = node, s.current
+	s.rev++
 	write := []string{name}
 	if s.needsFlush() {
 		write = s.tree.Names()
@@ -206,7 +228,7 @@ func (s *Set) put(name string, node *yaml.Node) error {
 		if err != nil {
 			return fmt.Errorf("encode %s: %w", n, err)
 		}
-		if err := WriteFileAtomic(filepath.Join(s.dir, n), data); err != nil {
+		if err := writeFileAtomic(filepath.Join(s.dir, n), data, s.mode); err != nil {
 			return err
 		}
 		s.onDisk[n] = s.current
