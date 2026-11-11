@@ -21,7 +21,7 @@ import (
 type Config struct {
 	LogLevel    string // debug | info | warn | error
 	DataDir     string // links, secrets, HMAC key, options.json; default /data
-	ConfigDir   string // templates.yaml and settings.yaml; default /homeassistant/guest_access
+	ConfigDir   string // templates.yaml; default /homeassistant/guest_access
 	Listen      string // admin port; default :8099
 	GuestListen string // guest port; default :8888
 	HAURL       string // websocket URL
