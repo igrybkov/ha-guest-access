@@ -1,13 +1,14 @@
 // Command guest-access is a Home Assistant app that serves links guests use
 // to control a few things at home.
 //
-// This is the skeleton. It answers health checks on the admin port and logs
-// how requests reach the guest port, so the network rules can be set from
-// real data.
+// This is the skeleton. It answers health checks on the admin port. At log
+// level debug it logs how requests reach the guest port, so the network
+// rules can be set from real data.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -36,8 +39,8 @@ const (
 )
 
 // forwardHeaders are the headers a proxy may set to name the real client.
-// The guest port logs them; the network rules will trust them only from
-// known proxies.
+// The guest port logs them at debug; the network rules will trust them only
+// from known proxies.
 var forwardHeaders = []string{"Forwarded", "X-Forwarded-For", "X-Real-Ip", "Cf-Connecting-Ip", "Cf-Ipcountry"}
 
 func main() {
@@ -56,7 +59,12 @@ func main() {
 		return
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	level, err := logLevel(env("DATA_DIR", "/data"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "options:", err)
+		os.Exit(1)
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
@@ -72,6 +80,39 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// logLevel reads LOG_LEVEL, then log_level in <dataDir>/options.json, which
+// Supervisor writes from the app options. A missing file means info.
+func logLevel(dataDir string) (slog.Level, error) {
+	name := os.Getenv("LOG_LEVEL")
+	if name == "" {
+		raw, err := os.ReadFile(filepath.Join(dataDir, "options.json"))
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+		case err != nil:
+			return 0, err
+		default:
+			var opts struct {
+				LogLevel string `json:"log_level"`
+			}
+			if err := json.Unmarshal(raw, &opts); err != nil {
+				return 0, fmt.Errorf("options.json: %w", err)
+			}
+			name = opts.LogLevel
+		}
+	}
+	switch strings.ToLower(name) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "", "info":
+		return slog.LevelInfo, nil
+	case "warn":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	}
+	return 0, fmt.Errorf("log level %q is not one of debug, info, warn, error", name)
 }
 
 // run serves the admin and guest ports until ctx is done or a server fails.
@@ -132,7 +173,7 @@ func adminHandler() http.Handler {
 }
 
 // guestHandler serves the guest port. It has no admin routes. For now it
-// logs where each request came from and answers 503.
+// logs at debug where each request came from and answers 503.
 func guestHandler(log *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attrs := []any{"peer", r.RemoteAddr, "host", r.Host}
@@ -141,7 +182,7 @@ func guestHandler(log *slog.Logger) http.Handler {
 				attrs = append(attrs, h, v)
 			}
 		}
-		log.Info("guest request", attrs...)
+		log.Debug("guest request", attrs...)
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		http.Error(w, "Not ready yet.", http.StatusServiceUnavailable)

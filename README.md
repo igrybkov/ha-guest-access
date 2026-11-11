@@ -28,7 +28,8 @@ make docker       # multi-arch image, needs buildx
 ```
 
 `go run ./cmd/guest-access` serves the admin port on `:8099` and the guest
-port on `:8888`. `LISTEN` and `GUEST_LISTEN` change them.
+port on `:8888`. `LISTEN` and `GUEST_LISTEN` change them, and `LOG_LEVEL`
+sets the log level.
 
 ## Release
 

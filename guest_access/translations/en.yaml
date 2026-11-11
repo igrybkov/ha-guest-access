@@ -1,2 +1,8 @@
+configuration:
+  log_level:
+    name: Log level
+    description: >-
+      How much the app writes to its log. At debug, the guest port logs the
+      address and proxy headers of each request.
 network:
   8888/tcp: Guest links. Point your reverse proxy here.
