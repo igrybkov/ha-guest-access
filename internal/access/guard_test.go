@@ -186,7 +186,80 @@ func TestGuardBoundedMemory(t *testing.T) {
 	}
 	later := now.Add(3 * time.Hour)
 	g.Allow("x", ipN(1), later)
-	if n := g.size(); n != 0 {
-		t.Errorf("guard holds %d keys after everything expired", n)
+	// Only the two keys of that last Allow (link, link + IP) are left.
+	if n := g.size(); n != 2 {
+		t.Errorf("guard holds %d keys after everything expired, want 2", n)
+	}
+}
+
+// Parallel guesses can't outrun the guard. Every request passes Allow
+// before any Fail lands, as when argon2 runs between them. Allow holds a
+// slot, so at most the limit get through.
+func TestGuardParallelGuesses(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		ips   int
+		limit int
+	}{
+		{"one IP", 1, GuardPerIPFails},
+		{"many IPs", 100, GuardPerLinkFails},
+	} {
+		g := NewPasswordGuard(GuardOptions{})
+		var allowed atomic.Int64
+		var ready, wg sync.WaitGroup
+		start := make(chan struct{})
+		for i := range 200 {
+			ready.Add(1)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ip := ipN(i % tc.ips)
+				ok, _ := g.Allow("l1", ip, t0)
+				if ok {
+					allowed.Add(1)
+				}
+				ready.Done()
+				<-start // every Allow is in before any Fail
+				if ok {
+					g.Fail("l1", ip, t0.Add(time.Second))
+				}
+			}()
+		}
+		ready.Wait()
+		close(start)
+		wg.Wait()
+		if n := allowed.Load(); n > int64(tc.limit) {
+			t.Errorf("%s: %d guesses allowed in parallel, limit %d", tc.name, n, tc.limit)
+		}
+	}
+}
+
+// A right password never calls Fail. Its slot frees after slotTTL.
+func TestGuardSlotsExpire(t *testing.T) {
+	g := NewPasswordGuard(GuardOptions{})
+	ip := ipN(1)
+	for i := range GuardPerIPFails {
+		if ok, _ := g.Allow("l1", ip, t0); !ok {
+			t.Fatalf("Allow %d refused", i)
+		}
+	}
+	ok, retry := g.Allow("l1", ip, t0)
+	if ok || retry != slotTTL {
+		t.Fatalf("all slots held: ok=%v retry=%v, want %v", ok, retry, slotTTL)
+	}
+	if ok, _ := g.Allow("l1", ip, t0.Add(slotTTL)); !ok {
+		t.Error("slots did not expire")
+	}
+	// Fail frees a slot: the next Allow has room again, minus the fail.
+	g = NewPasswordGuard(GuardOptions{})
+	for range GuardPerIPFails - 1 {
+		g.Allow("l1", ip, t0)
+	}
+	g.Fail("l1", ip, t0)
+	if ok, _ := g.Allow("l1", ip, t0); !ok {
+		t.Error("Fail did not free its slot")
+	}
+	if ok, _ := g.Allow("l1", ip, t0); ok {
+		t.Error("room past the limit")
 	}
 }

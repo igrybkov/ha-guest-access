@@ -33,8 +33,13 @@ type GuardOptions struct {
 //     link for everyone for Block.
 //
 // The fail that reaches a limit starts the block. Fail counts reset when a
-// block starts. Safe for concurrent use. Memory stays bounded: each key
-// keeps at most its limit of fail times, and a lazy sweep drops keys with
+// block starts. Safe for concurrent use.
+//
+// Allow holds a slot in both scopes until Fail turns it into a fail, or
+// slotTTL passes (a right password never calls Fail). Allow refuses while
+// fails plus slots reach a limit. So parallel guesses, which all pass
+// Allow before argon2 lets any Fail land, still get at most the limit. Memory stays bounded: each key
+// keeps at most its limit of fail times and open slots, and a lazy sweep drops keys with
 // no recent fails and no block.
 type PasswordGuard struct {
 	opts GuardOptions
@@ -51,9 +56,15 @@ type guardIPKey struct {
 	ip   netip.Addr
 }
 
-// failLog is the recent fails of one key and its block, if any.
+// slotTTL is how long an Allow holds its slot. It covers one argon2 check
+// with room to spare, and frees the slot of a right password or a request
+// that died.
+const slotTTL = 10 * time.Second
+
+// failLog is the recent fails of one key, its open slots and its block.
 type failLog struct {
 	fails        []time.Time // oldest first, all within the window
+	slots        []time.Time // when each open slot was taken, oldest first
 	blockedUntil time.Time
 }
 
@@ -83,19 +94,41 @@ func NewPasswordGuard(o GuardOptions) *PasswordGuard {
 }
 
 // Allow reports whether ip may try a password on linkID at now. When not,
-// retryAfter says how long the block still lasts.
+// retryAfter says how long the block, or the wait for a free slot, lasts.
+//
+// A true answer holds a slot (see PasswordGuard), so call Allow only right
+// before a real password check, never just to render the form.
 func (g *PasswordGuard) Allow(linkID string, ip netip.Addr, now time.Time) (ok bool, retryAfter time.Duration) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.maybeSweep(now)
-	var wait time.Duration
-	if l := g.perLink[linkID]; l != nil && now.Before(l.blockedUntil) {
-		wait = l.blockedUntil.Sub(now)
+	link, byIP := g.logs(linkID, ip)
+	wait := max(
+		link.wait(now, g.opts.PerLinkWin, g.opts.PerLinkFails),
+		byIP.wait(now, g.opts.PerIPWindow, g.opts.PerIPFails),
+	)
+	if wait > 0 {
+		return false, wait
 	}
-	if l := g.perIP[guardIPKey{linkID, normalize(ip)}]; l != nil && now.Before(l.blockedUntil) {
-		wait = max(wait, l.blockedUntil.Sub(now))
+	link.slots = append(link.slots, now)
+	byIP.slots = append(byIP.slots, now)
+	return true, 0
+}
+
+// logs returns the fail logs of linkID and of linkID + ip, made if new.
+// The caller holds g.mu.
+func (g *PasswordGuard) logs(linkID string, ip netip.Addr) (link, byIP *failLog) {
+	key := guardIPKey{linkID, normalize(ip)}
+	link, byIP = g.perLink[linkID], g.perIP[key]
+	if link == nil {
+		link = &failLog{}
+		g.perLink[linkID] = link
 	}
-	return wait == 0, wait
+	if byIP == nil {
+		byIP = &failLog{}
+		g.perIP[key] = byIP
+	}
+	return link, byIP
 }
 
 // Fail records a wrong password. lockedNow is true when this fail starts a
@@ -106,16 +139,9 @@ func (g *PasswordGuard) Fail(linkID string, ip netip.Addr, now time.Time) (locke
 	defer g.mu.Unlock()
 	g.maybeSweep(now)
 
-	key := guardIPKey{linkID, normalize(ip)}
-	link, byIP := g.perLink[linkID], g.perIP[key]
-	if link == nil {
-		link = &failLog{}
-		g.perLink[linkID] = link
-	}
-	if byIP == nil {
-		byIP = &failLog{}
-		g.perIP[key] = byIP
-	}
+	link, byIP := g.logs(linkID, ip)
+	link.release()
+	byIP.release()
 	if now.Before(link.blockedUntil) || now.Before(byIP.blockedUntil) {
 		return false
 	}
@@ -128,6 +154,36 @@ func (g *PasswordGuard) Fail(linkID string, ip netip.Addr, now time.Time) (locke
 	return lockedNow
 }
 
+// wait returns how long until f has room for one more try at now: the
+// rest of a block, or until the oldest fail or slot runs out. Zero means
+// there is room now.
+func (f *failLog) wait(now time.Time, window time.Duration, limit int) time.Duration {
+	if now.Before(f.blockedUntil) {
+		return f.blockedUntil.Sub(now)
+	}
+	f.prune(now, window)
+	if len(f.fails)+len(f.slots) < limit {
+		return 0
+	}
+	var free time.Time
+	if len(f.fails) > 0 {
+		free = f.fails[0].Add(window)
+	}
+	if len(f.slots) > 0 {
+		if s := f.slots[0].Add(slotTTL); free.IsZero() || s.Before(free) {
+			free = s
+		}
+	}
+	return max(free.Sub(now), time.Nanosecond)
+}
+
+// release frees the oldest open slot, if any.
+func (f *failLog) release() {
+	if len(f.slots) > 0 {
+		f.slots = f.slots[1:]
+	}
+}
+
 // add records a fail at now and reports whether it reached limit, which
 // starts a block.
 func (f *failLog) add(now time.Time, window time.Duration, limit int, block time.Duration) bool {
@@ -137,23 +193,30 @@ func (f *failLog) add(now time.Time, window time.Duration, limit int, block time
 		return false
 	}
 	f.fails = nil
+	f.slots = nil
 	f.blockedUntil = now.Add(block)
 	return true
 }
 
-// prune drops fails older than window.
+// prune drops fails older than window and slots older than slotTTL.
 func (f *failLog) prune(now time.Time, window time.Duration) {
 	i := 0
 	for i < len(f.fails) && now.Sub(f.fails[i]) >= window {
 		i++
 	}
 	f.fails = f.fails[i:]
+	i = 0
+	for i < len(f.slots) && now.Sub(f.slots[i]) >= slotTTL {
+		i++
+	}
+	f.slots = f.slots[i:]
 }
 
-// idle reports whether f holds nothing: no block and no fail in window.
+// idle reports whether f holds nothing: no block, no slot and no fail in
+// window.
 func (f *failLog) idle(now time.Time, window time.Duration) bool {
 	f.prune(now, window)
-	return len(f.fails) == 0 && !now.Before(f.blockedUntil)
+	return len(f.fails) == 0 && len(f.slots) == 0 && !now.Before(f.blockedUntil)
 }
 
 // maybeSweep drops idle keys once per the shorter window, or when the maps
