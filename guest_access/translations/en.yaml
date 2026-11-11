@@ -8,13 +8,20 @@ configuration:
     name: Public address
     description: >-
       The address guests use to reach the guest port, such as
-      https://guest.example.com. The app builds link URLs and QR codes from it.
+      https://guest.example.com. Link URLs and QR codes start with it.
   local_access:
     name: Local network access
-    description: >-
-      "enabled" lets rules require the home network. Off by default: a guest
-      on your Wi-Fi may still look outside. "networks" are the ranges that
-      count as home.
+    description: Lets rules require the home network.
+    fields:
+      enabled:
+        name: Turn on "local only"
+        description: >-
+          Off by default. A guest on your Wi-Fi may still look like an outside
+          guest (private relay, custom DNS, VPN). They lose those controls;
+          nobody gains any.
+      networks:
+        name: Home networks
+        description: The address ranges that count as home, such as 192.168.0.0/16.
   trusted_proxies:
     name: Trusted proxies
     description: >-
@@ -23,44 +30,127 @@ configuration:
       reach the app directly.
   home_radius_default_m:
     name: Default home radius
-    description: The "near home" radius in meters that new rules start with.
+    description: The "near home" radius, in meters, that new rules start with.
   music_assistant:
     name: Music Assistant
-    description: >-
-      Optional. The Music Assistant address and a long-lived token for the
-      party link. "timeout_ms" is how long to wait for it.
+    description: Optional. Used for the party link.
+    fields:
+      url:
+        name: Address
+        description: Such as http://d5369777-music-assistant:8095.
+      token:
+        name: Token
+        description: A long-lived Music Assistant token.
+      timeout_ms:
+        name: Timeout
+        description: How long to wait for Music Assistant, in milliseconds.
   guest:
     name: Guest page
-    description: >-
-      The title, welcome text and accent color (such as #1e88e5) of the
-      guest page. Plain text only.
+    description: Plain text only.
+    fields:
+      title:
+        name: Title
+      welcome:
+        name: Welcome text
+      accent_color:
+        name: Accent color
+        description: "Such as #1e88e5."
   location:
     name: Location check
-    description: >-
-      "ttl_min" is how many minutes a shared location counts. "max_accuracy_m"
-      is the worst accuracy, in meters, the app accepts.
+    fields:
+      ttl_min:
+        name: Location lasts
+        description: Minutes a shared location counts before the page asks again.
+      max_accuracy_m:
+        name: Worst accuracy
+        description: The worst location accuracy the app accepts, in meters.
   rate_limits:
     name: Rate limits
-    description: >-
-      Limits per guest, link and app. "enabled": not recommended to turn off.
-      With it off, nothing limits guesses at links or passwords.
+    description: Limits per guest, link and app. Over a limit, requests wait.
+    fields:
+      enabled:
+        name: Rate limits on
+        description: >-
+          Not recommended to turn off. With limits off, nothing slows down
+          guesses at links or passwords.
+      guest_per_min:
+        name: Guest requests per minute
+        description: Before a guest opens a link, per address.
+      guest_burst:
+        name: Guest burst
+        description: Requests in a quick row before the per-minute limit applies.
+      actions_per_min:
+        name: Actions per minute
+        description: Per link and address, once the guest is in.
+      actions_burst:
+        name: Action burst
+      max_streams_per_link:
+        name: Live updates per link
+        description: Open pages with live updates, per link.
+      misses_per_hour_per_ip:
+        name: Wrong links per hour, per address
+      misses_per_hour_global:
+        name: Wrong links per hour, all addresses
+        description: Valid links keep working over this limit.
+      password_fails_per_ip:
+        name: Wrong passwords per address
+      password_window_per_ip_min:
+        name: Window for wrong passwords per address
+        description: In minutes.
+      password_fails_per_link:
+        name: Wrong passwords per link
+      password_window_per_link_min:
+        name: Window for wrong passwords per link
+        description: In minutes.
+      password_lockout_min:
+        name: Password lockout
+        description: Minutes the password form stays locked after too many wrong passwords.
+      admin_per_min:
+        name: Admin requests per minute
   links:
     name: Links
-    description: The shortest and longest custom slug you can type.
+    fields:
+      custom_slug_min_len:
+        name: Shortest custom link name
+        description: At least 12 characters.
+      custom_slug_max_len:
+        name: Longest custom link name
   http:
     name: Request size
-    description: The largest request body, in KiB, for guests and for the admin page.
+    fields:
+      guest_body_kib:
+        name: Largest guest request
+        description: In KiB.
+      admin_body_kib:
+        name: Largest admin request
+        description: In KiB.
   diagnostics:
     name: Diagnostics
-    description: How many recent guest requests the admin page shows.
+    fields:
+      requests:
+        name: Requests kept
+        description: How many recent guest requests the admin page shows.
   inventory:
-    name: Device list cache
-    description: Seconds to keep the list of entities, devices and areas between updates.
+    name: Entity list
+    fields:
+      max_age_s:
+        name: Refresh after
+        description: Seconds to keep the list of entities, devices and areas between updates.
   approval:
     name: Device approval
-    description: >-
-      Minutes a new device waits for approval, pending and approved devices
-      per link, approval notices per link per hour, and minutes between
-      "last seen" updates.
+    fields:
+      pending_ttl_min:
+        name: Request waits
+        description: Minutes a new device waits for approval.
+      max_pending:
+        name: Waiting devices per link
+      max_devices:
+        name: Approved devices per link
+      events_per_hour:
+        name: Approval notices per hour
+        description: Per link.
+      touch_throttle_min:
+        name: Last seen updates
+        description: Least minutes between "last seen" updates of a device.
 network:
   8888/tcp: Guest links. Point your reverse proxy here.

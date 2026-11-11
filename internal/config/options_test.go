@@ -149,3 +149,42 @@ func TestDefaultOptions(t *testing.T) {
 		t.Errorf("defaults = %+v", o)
 	}
 }
+
+// Every option has a translation with a name, nested ones under
+// "fields", as Supervisor's SCHEMA_TRANSLATION_CONFIGURATION wants.
+func TestTranslationsCoverEveryOption(t *testing.T) {
+	_, schema := appConfig(t)
+	raw, err := os.ReadFile("../../guest_access/translations/en.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tr struct {
+		Configuration map[string]any `yaml:"configuration"`
+	}
+	if err := yaml.Unmarshal(raw, &tr); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range keyPaths("", schema) {
+		var node any = tr.Configuration
+		for i, k := range strings.Split(p, ".") {
+			m, _ := node.(map[string]any)
+			if i > 0 {
+				m, _ = m["fields"].(map[string]any)
+			}
+			node = m[k]
+		}
+		m, _ := node.(map[string]any)
+		if name, _ := m["name"].(string); name == "" {
+			t.Errorf("%s has no translation name", p)
+		}
+	}
+	for k, v := range tr.Configuration {
+		if m, _ := v.(map[string]any); m["name"] == nil {
+			t.Errorf("group %s has no name", k)
+		}
+	}
+	enabled := lookup(tr.Configuration, "rate_limits.fields.enabled.description")
+	if s, _ := enabled.(string); !strings.Contains(s, "Not recommended to turn off") {
+		t.Errorf("rate_limits.enabled description = %q", s)
+	}
+}
