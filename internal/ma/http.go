@@ -42,6 +42,15 @@ var _ Client = (*HTTPClient)(nil)
 // is optional, and a nil Client means never call it. baseURL must be http
 // or https.
 func New(baseURL, token string) (Client, error) {
+	return NewWithTimeout(baseURL, token, Timeout)
+}
+
+// NewWithTimeout is New with its own bound on every call. A timeout of 0
+// or less means Timeout.
+func NewWithTimeout(baseURL, token string, timeout time.Duration) (Client, error) {
+	if timeout <= 0 {
+		timeout = Timeout
+	}
 	if baseURL == "" || token == "" {
 		return nil, nil
 	}
@@ -56,7 +65,7 @@ func New(baseURL, token string) (Client, error) {
 	return &HTTPClient{
 		endpoint: endpoint,
 		token:    token,
-		timeout:  Timeout,
+		timeout:  timeout,
 		http: &http.Client{
 			// A redirect could send the token to another host. MA does not
 			// redirect its API, so treat one as a failure.

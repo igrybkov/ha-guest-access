@@ -145,6 +145,23 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
+func TestNewWithTimeout(t *testing.T) {
+	for _, tc := range []struct {
+		in, want time.Duration
+	}{{0, Timeout}, {-time.Second, Timeout}, {300 * time.Millisecond, 300 * time.Millisecond}} {
+		c, err := NewWithTimeout("http://ma:8095", token, tc.in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := c.(*HTTPClient).timeout; got != tc.want {
+			t.Errorf("timeout %v: got %v, want %v", tc.in, got, tc.want)
+		}
+	}
+	if c, err := NewWithTimeout("", token, time.Second); c != nil || err != nil {
+		t.Errorf("no url: %v, %v", c, err)
+	}
+}
+
 func TestNewEmptyOrBadConfig(t *testing.T) {
 	for _, tc := range [][2]string{{"", ""}, {"http://ma:8095", ""}, {"", token}} {
 		c, err := New(tc[0], tc[1])

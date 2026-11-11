@@ -97,3 +97,23 @@ func TestValidCustomSlug(t *testing.T) {
 		t.Errorf("hex slug: %v", err)
 	}
 }
+
+func TestValidCustomSlugLen(t *testing.T) {
+	for _, tc := range []struct {
+		slug     string
+		min, max int
+		ok       bool
+	}{
+		{"abcdefghijklmnop", 16, 20, true},
+		{"abcdefghijklmno", 16, 20, false},
+		{"abcdefghijklmnopqrstu", 16, 20, false},
+		{"abcdefghijkl", 4, 20, true},     // min raised to 12
+		{"abcdefghijk", 4, 20, false},     // still too short
+		{"abcdefghijklm-", 12, 20, false}, // other rules still apply
+	} {
+		err := ValidCustomSlugLen(tc.slug, tc.min, tc.max)
+		if (err == nil) != tc.ok {
+			t.Errorf("%q [%d,%d]: %v, want ok=%v", tc.slug, tc.min, tc.max, err, tc.ok)
+		}
+	}
+}
