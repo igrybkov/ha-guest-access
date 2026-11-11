@@ -40,12 +40,12 @@ func (s *Server) guestEvents(g *guestReq) {
 		writeError(g.w, http.StatusServiceUnavailable, msgHAFailed)
 		return
 	}
-	if !s.streams.acquire(g.link.ID, g.lim.streams) {
+	if !s.streams.acquire(g.link.ID, g.limKey, g.lim.streams, g.lim.streamsPerIP) {
 		g.rateLimited(reasonLimitStreams)
 		tooMany(g.w, s.deps.Options.StreamRetry)
 		return
 	}
-	defer s.streams.release(g.link.ID)
+	defer s.streams.release(g.link.ID, g.limKey)
 
 	h := g.w.Header()
 	h.Set("Content-Type", "text/event-stream")
@@ -144,8 +144,8 @@ const (
 )
 
 // recheck loads the link again and works out the plan at the current
-// time. The link must still be active under the same slug, and the
-// password session must still name a password of the link.
+// time. The link must still be active and servable under the same slug,
+// and the password session must still name a password of the link.
 //
 // The device gate is not run again here: it writes a response, which a
 // stream can't take. StillValid checks that the device the stream opened
@@ -153,7 +153,7 @@ const (
 func (s *Server) recheck(ctx context.Context, g *guestReq, fp string) streamVerdict {
 	l, err := s.deps.Links.Get(g.link.ID)
 	g.now = s.now()
-	if err != nil || l.Slug != g.slug || !l.Active(g.now) {
+	if err != nil || l.Slug != g.slug || !l.Active(g.now) || !s.servable(l) {
 		return streamEnd
 	}
 	g.link = l

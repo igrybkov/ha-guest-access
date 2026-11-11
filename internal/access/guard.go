@@ -27,11 +27,15 @@ type GuardOptions struct {
 	Block time.Duration
 	// LinkDelay is the least time between two tries on a slowed link.
 	LinkDelay time.Duration
+	// IPv6Prefix is the prefix length an IPv6 client is keyed on (see
+	// KeyAddr). Zero means DefaultIPv6Prefix.
+	IPv6Prefix int
 }
 
 // PasswordGuard locks the password form after too many wrong tries.
 //
-//   - Per link + client IP: PerIPFails fails within PerIPWindow block that
+//   - Per link + client IP (an IPv6 client by its IPv6Prefix, see
+//     KeyAddr): PerIPFails fails within PerIPWindow block that
 //     IP on that link for Block. Fail counts of that key reset when the
 //     block starts.
 //   - Per link: PerLinkFails fails from any IPs within PerLinkWin slow the
@@ -137,7 +141,7 @@ func (g *PasswordGuard) Allow(linkID string, ip netip.Addr, now time.Time) (ok b
 // logs returns the fail logs of linkID and of linkID + ip, made if new.
 // The caller holds g.mu.
 func (g *PasswordGuard) logs(linkID string, ip netip.Addr) (link, byIP *failLog) {
-	key := guardIPKey{linkID, normalize(ip)}
+	key := guardIPKey{linkID, KeyAddr(ip, g.opts.IPv6Prefix)}
 	link, byIP = g.perLink[linkID], g.perIP[key]
 	if link == nil {
 		link = &failLog{}

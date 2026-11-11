@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/igrybkov/ha-guest-access/internal/access"
 	"github.com/igrybkov/ha-guest-access/internal/model"
 )
 
@@ -32,6 +33,9 @@ type Options struct {
 	MusicAssistantToken string
 	// MATimeout bounds every Music Assistant call.
 	MATimeout time.Duration
+	// MACheckInterval is how often the app checks that Music Assistant
+	// takes the token, after the check at start. Zero means only at start.
+	MACheckInterval time.Duration
 	// NearTTL is how long a location check lasts.
 	NearTTL time.Duration
 	// MaxAccuracyM is the worst location accuracy the guest page takes.
@@ -43,9 +47,18 @@ type Options struct {
 	// CustomSlugMinLen and CustomSlugMaxLen bound a slug the admin types.
 	CustomSlugMinLen int
 	CustomSlugMaxLen int
+	// CustomSlugWarnLen is the length under which the admin API warns that
+	// a slug is short. It is at most access.RandomSlugLen, so a random
+	// slug never gets the warning.
+	CustomSlugWarnLen int
 	// GuestBodyBytes and AdminBodyBytes cap JSON request bodies.
 	GuestBodyBytes int64
 	AdminBodyBytes int64
+	// HTTPReadTimeout bounds how long both servers wait for one request,
+	// headers and body. It does not end an open event stream.
+	HTTPReadTimeout time.Duration
+	// MaxHeaderBytes caps the request headers on both servers.
+	MaxHeaderBytes int
 	// DiagRequests is how many guest requests the diagnostics keep.
 	DiagRequests int
 	// InventoryMaxAge is how long a registry snapshot is served without a
@@ -64,11 +77,18 @@ type Options struct {
 	StreamCheck     time.Duration
 	StreamHeartbeat time.Duration
 	StreamRetry     time.Duration
+	// StreamMaxPerIP caps the open event streams of one client (an IPv6
+	// client by its prefix) on one link, inside the per-link cap.
+	StreamMaxPerIP int
 	// AuditEnabled writes the audit file. The audit log line goes to the
 	// app log either way. AuditMaxFileBytes is the size at which the file
 	// is rotated.
 	AuditEnabled      bool
 	AuditMaxFileBytes int64
+	// AuditMaxDenialsPerMin caps the guest denial records a minute, from
+	// all clients together. Past it, one summary record counts the rest.
+	// Admin, device and allowed records are never capped.
+	AuditMaxDenialsPerMin int
 }
 
 // ApprovalOptions tune device approval.
@@ -91,9 +111,10 @@ type rawOptions struct {
 	TrustedProxies     []string                  `json:"trusted_proxies"`
 	HomeRadiusDefaultM int                       `json:"home_radius_default_m"`
 	MusicAssistant     struct {
-		URL       string `json:"url"`
-		Token     string `json:"token"`
-		TimeoutMS int    `json:"timeout_ms"`
+		URL              string `json:"url"`
+		Token            string `json:"token"`
+		TimeoutMS        int    `json:"timeout_ms"`
+		CheckIntervalMin int    `json:"check_interval_min"`
 	} `json:"music_assistant"`
 	Guest    model.GuestSettings `json:"guest"`
 	Location struct {
@@ -107,12 +128,15 @@ type rawOptions struct {
 		PasswordWindowPerLinkMin int `json:"password_window_per_link_min"`
 	} `json:"rate_limits"`
 	Links struct {
-		CustomSlugMinLen int `json:"custom_slug_min_len"`
-		CustomSlugMaxLen int `json:"custom_slug_max_len"`
+		CustomSlugMinLen  int `json:"custom_slug_min_len"`
+		CustomSlugMaxLen  int `json:"custom_slug_max_len"`
+		CustomSlugWarnLen int `json:"custom_slug_warn_len"`
 	} `json:"links"`
 	HTTP struct {
 		GuestBodyKiB int `json:"guest_body_kib"`
 		AdminBodyKiB int `json:"admin_body_kib"`
+		ReadTimeoutS int `json:"read_timeout_s"`
+		MaxHeaderKiB int `json:"max_header_kib"`
 	} `json:"http"`
 	Diagnostics struct {
 		Requests int `json:"requests"`
@@ -135,10 +159,12 @@ type rawOptions struct {
 		RecheckS    int `json:"recheck_s"`
 		HeartbeatS  int `json:"heartbeat_s"`
 		RetryAfterS int `json:"retry_after_s"`
+		MaxPerIP    int `json:"max_per_ip"`
 	} `json:"streams"`
 	Audit struct {
-		Enabled    bool `json:"enabled"`
-		MaxFileKiB int  `json:"max_file_kib"`
+		Enabled          bool `json:"enabled"`
+		MaxFileKiB       int  `json:"max_file_kib"`
+		MaxDenialsPerMin int  `json:"max_denials_per_min"`
 	} `json:"audit"`
 }
 
@@ -151,6 +177,7 @@ func defaultRaw() rawOptions {
 	r.TrustedProxies = []string{}
 	r.HomeRadiusDefaultM = d.HomeRadiusDefaultM
 	r.MusicAssistant.TimeoutMS = 2000
+	r.MusicAssistant.CheckIntervalMin = 60
 	r.Guest = d.Guest
 	r.Location.TTLMin = 15
 	r.Location.MaxAccuracyM = 1000
@@ -160,8 +187,11 @@ func defaultRaw() rawOptions {
 	r.RateLimits.PasswordWindowPerLinkMin = 60
 	r.Links.CustomSlugMinLen = 12
 	r.Links.CustomSlugMaxLen = 64
+	r.Links.CustomSlugWarnLen = 16
 	r.HTTP.GuestBodyKiB = 16
 	r.HTTP.AdminBodyKiB = 1024
+	r.HTTP.ReadTimeoutS = 30
+	r.HTTP.MaxHeaderKiB = 64
 	r.Diagnostics.Requests = 20
 	r.Inventory.MaxAgeS = 5
 	r.Approval.PendingTTLMin = 10
@@ -174,8 +204,10 @@ func defaultRaw() rawOptions {
 	r.Streams.RecheckS = 5
 	r.Streams.HeartbeatS = 25
 	r.Streams.RetryAfterS = 30
+	r.Streams.MaxPerIP = 3
 	r.Audit.Enabled = true
 	r.Audit.MaxFileKiB = 2048
+	r.Audit.MaxDenialsPerMin = 120
 	return r
 }
 
@@ -238,14 +270,18 @@ func (r rawOptions) options() (Options, error) {
 		comment string
 	}{
 		{"music_assistant.timeout_ms", r.MusicAssistant.TimeoutMS, 100, 60_000, ""},
+		{"music_assistant.check_interval_min", r.MusicAssistant.CheckIntervalMin, 0, 7 * 24 * 60, "0 checks at start only"},
 		{"location.ttl_min", r.Location.TTLMin, 1, 24 * 60, ""},
 		{"location.max_accuracy_m", r.Location.MaxAccuracyM, 1, 100_000, ""},
 		{"rate_limits.password_window_per_ip_min", r.RateLimits.PasswordWindowPerIPMin, 1, 7 * 24 * 60, ""},
 		{"rate_limits.password_window_per_link_min", r.RateLimits.PasswordWindowPerLinkMin, 1, 7 * 24 * 60, ""},
 		{"links.custom_slug_min_len", r.Links.CustomSlugMinLen, 12, 128, "stored slugs are 12 to 128 characters"},
 		{"links.custom_slug_max_len", r.Links.CustomSlugMaxLen, max(12, r.Links.CustomSlugMinLen), 128, "and at least custom_slug_min_len"},
+		{"links.custom_slug_warn_len", r.Links.CustomSlugWarnLen, 12, access.RandomSlugLen, "a random slug is 22 characters"},
 		{"http.guest_body_kib", r.HTTP.GuestBodyKiB, 1, 1024, ""},
 		{"http.admin_body_kib", r.HTTP.AdminBodyKiB, 16, 16 * 1024, ""},
+		{"http.read_timeout_s", r.HTTP.ReadTimeoutS, 1, 3600, ""},
+		{"http.max_header_kib", r.HTTP.MaxHeaderKiB, 4, 1024, ""},
 		{"diagnostics.requests", r.Diagnostics.Requests, 1, 1000, ""},
 		{"inventory.max_age_s", r.Inventory.MaxAgeS, 1, 3600, ""},
 		{"approval.pending_ttl_min", r.Approval.PendingTTLMin, 1, 24 * 60, ""},
@@ -258,7 +294,9 @@ func (r rawOptions) options() (Options, error) {
 		{"streams.recheck_s", r.Streams.RecheckS, 1, 300, ""},
 		{"streams.heartbeat_s", r.Streams.HeartbeatS, 5, 600, ""},
 		{"streams.retry_after_s", r.Streams.RetryAfterS, 1, 3600, ""},
+		{"streams.max_per_ip", r.Streams.MaxPerIP, 1, 1000, ""},
 		{"audit.max_file_kib", r.Audit.MaxFileKiB, 64, 64 << 10, ""},
+		{"audit.max_denials_per_min", r.Audit.MaxDenialsPerMin, 1, 100_000, ""},
 	} {
 		if f.v < f.lo || f.v > f.hi {
 			msg := fmt.Sprintf("%s: must be between %d and %d", f.name, f.lo, f.hi)
@@ -279,14 +317,18 @@ func (r rawOptions) options() (Options, error) {
 		LimitsEnabled:         r.RateLimits.Enabled,
 		MusicAssistantToken:   r.MusicAssistant.Token,
 		MATimeout:             time.Duration(r.MusicAssistant.TimeoutMS) * time.Millisecond,
+		MACheckInterval:       minutes(r.MusicAssistant.CheckIntervalMin),
 		NearTTL:               minutes(r.Location.TTLMin),
 		MaxAccuracyM:          r.Location.MaxAccuracyM,
 		PasswordWindowPerIP:   minutes(r.RateLimits.PasswordWindowPerIPMin),
 		PasswordWindowPerLink: minutes(r.RateLimits.PasswordWindowPerLinkMin),
 		CustomSlugMinLen:      r.Links.CustomSlugMinLen,
 		CustomSlugMaxLen:      r.Links.CustomSlugMaxLen,
+		CustomSlugWarnLen:     r.Links.CustomSlugWarnLen,
 		GuestBodyBytes:        int64(r.HTTP.GuestBodyKiB) << 10,
 		AdminBodyBytes:        int64(r.HTTP.AdminBodyKiB) << 10,
+		HTTPReadTimeout:       seconds(r.HTTP.ReadTimeoutS),
+		MaxHeaderBytes:        r.HTTP.MaxHeaderKiB << 10,
 		DiagRequests:          r.Diagnostics.Requests,
 		InventoryMaxAge:       time.Duration(r.Inventory.MaxAgeS) * time.Second,
 		Approval: ApprovalOptions{
@@ -296,13 +338,15 @@ func (r rawOptions) options() (Options, error) {
 			EventsPerHour: r.Approval.EventsPerHour,
 			TouchThrottle: minutes(r.Approval.TouchThrottleMin),
 		},
-		HACallTimeout:     seconds(r.HA.CallTimeoutS),
-		HAEventTimeout:    seconds(r.HA.EventTimeoutS),
-		StreamCheck:       seconds(r.Streams.RecheckS),
-		StreamHeartbeat:   seconds(r.Streams.HeartbeatS),
-		StreamRetry:       seconds(r.Streams.RetryAfterS),
-		AuditEnabled:      r.Audit.Enabled,
-		AuditMaxFileBytes: int64(r.Audit.MaxFileKiB) << 10,
+		HACallTimeout:         seconds(r.HA.CallTimeoutS),
+		HAEventTimeout:        seconds(r.HA.EventTimeoutS),
+		StreamCheck:           seconds(r.Streams.RecheckS),
+		StreamHeartbeat:       seconds(r.Streams.HeartbeatS),
+		StreamRetry:           seconds(r.Streams.RetryAfterS),
+		StreamMaxPerIP:        r.Streams.MaxPerIP,
+		AuditEnabled:          r.Audit.Enabled,
+		AuditMaxFileBytes:     int64(r.Audit.MaxFileKiB) << 10,
+		AuditMaxDenialsPerMin: r.Audit.MaxDenialsPerMin,
 	}, nil
 }
 

@@ -426,7 +426,10 @@ func TestSettingsValidate(t *testing.T) {
 			"rate_limits.password_fails_per_ip", "rate_limits.password_fails_per_link",
 			"rate_limits.password_lockout_min", "rate_limits.admin_per_min",
 			"rate_limits.continuous_per_min", "rate_limits.continuous_burst",
-			"rate_limits.assets_per_min", "rate_limits.assets_burst", "rate_limits.password_link_delay_s"}},
+			"rate_limits.assets_per_min", "rate_limits.assets_burst", "rate_limits.password_link_delay_s",
+			"rate_limits.ipv6_prefix"}},
+		{"ipv6 prefix too short", func(s *Settings) { s.RateLimits.IPv6Prefix = 31 }, []string{"rate_limits.ipv6_prefix"}},
+		{"ipv6 prefix too long", func(s *Settings) { s.RateLimits.IPv6Prefix = 129 }, []string{"rate_limits.ipv6_prefix"}},
 		{"zero link delay", func(s *Settings) { s.RateLimits.PasswordLinkDelayS = 0 }, []string{"rate_limits.password_link_delay_s"}},
 		{"negative assets rate", func(s *Settings) { s.RateLimits.AssetsPerMin = -1 }, []string{"rate_limits.assets_per_min"}},
 		{"slider interval too short", func(s *Settings) { s.Guest.SliderIntervalMS = 99 }, []string{"guest.slider_interval_ms"}},
@@ -445,7 +448,7 @@ func TestDefaultSettings(t *testing.T) {
 	}
 	if s.RateLimits != (RateLimits{GuestPerMin: 20, GuestBurst: 15, ActionsPerMin: 120, ActionsBurst: 40, ContinuousPerMin: 600, ContinuousBurst: 120, MaxStreamsPerLink: 10, MissesPerHourPerIP: 10, MissesPerHourGlobal: 100,
 		PasswordFailsPerIP: 5, PasswordFailsPerLink: 30, PasswordLockoutMin: 60, PasswordLinkDelayS: 10, AdminPerMin: 600,
-		AssetsPerMin: 300, AssetsBurst: 100}) {
+		AssetsPerMin: 300, AssetsBurst: 100, IPv6Prefix: 64}) {
 		t.Errorf("default rate limits = %+v", s.RateLimits)
 	}
 	if len(s.TrustedProxies) != 0 {
@@ -540,5 +543,22 @@ func TestRateLimitsWithDefaults(t *testing.T) {
 	got := RateLimits{GuestPerMin: 99, PasswordLockoutMin: -1}.WithDefaults()
 	if got.GuestPerMin != 99 || got.PasswordLockoutMin != -1 || got.AdminPerMin != 600 {
 		t.Errorf("WithDefaults = %+v; set values must stay, negatives are left for Validate", got)
+	}
+}
+
+// HA reports 0, 0 when no home is set. Only that pair counts as unset.
+func TestHomeSet(t *testing.T) {
+	for _, tc := range []struct {
+		h    Home
+		want bool
+	}{
+		{Home{}, false},
+		{Home{Lat: 0, Lon: 0.0001}, true},
+		{Home{Lat: -33.9, Lon: 0}, true},
+		{Home{Lat: 51.5, Lon: -0.1}, true},
+	} {
+		if got := tc.h.Set(); got != tc.want {
+			t.Errorf("%+v.Set() = %v", tc.h, got)
+		}
 	}
 }

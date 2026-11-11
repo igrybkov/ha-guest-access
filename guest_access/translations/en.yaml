@@ -44,6 +44,11 @@ configuration:
       timeout_ms:
         name: Timeout
         description: How long to wait for Music Assistant, in milliseconds.
+      check_interval_min:
+        name: Token check
+        description: >-
+          Minutes between checks that Music Assistant takes the token. The app
+          also checks at start. 0 checks at start only.
   guest:
     name: Guest page
     description: Plain text only.
@@ -126,6 +131,11 @@ configuration:
           wrong passwords. Applies to all addresses.
       admin_per_min:
         name: Admin requests per minute
+      ipv6_prefix:
+        name: IPv6 prefix per client
+        description: >-
+          Every per-address limit counts an IPv6 client by this prefix
+          length. One home or phone gets a whole /64.
   links:
     name: Links
     fields:
@@ -134,6 +144,9 @@ configuration:
         description: At least 12 characters.
       custom_slug_max_len:
         name: Longest custom link name
+      custom_slug_warn_len:
+        name: Short custom link warning
+        description: The admin page warns about a custom link name shorter than this. Random ones are 22 characters.
   http:
     name: Request size
     fields:
@@ -142,6 +155,12 @@ configuration:
         description: In KiB.
       admin_body_kib:
         name: Largest admin request
+        description: In KiB.
+      read_timeout_s:
+        name: Request read timeout
+        description: Seconds a client has to send one request, headers and body. Live updates stay open past it.
+      max_header_kib:
+        name: Largest request headers
         description: In KiB.
   diagnostics:
     name: Diagnostics
@@ -192,6 +211,9 @@ configuration:
       retry_after_s:
         name: Retry after
         description: Seconds a guest page waits when the link has the most open pages.
+      max_per_ip:
+        name: Open pages per address
+        description: Open live-update pages per link from one client address.
   audit:
     name: Audit log
     fields:
@@ -201,5 +223,11 @@ configuration:
       max_file_kib:
         name: Audit file size
         description: KiB at which the audit file starts over. The app keeps one older file.
+      max_denials_per_min:
+        name: Refusals recorded per minute
+        description: >-
+          Refused guest requests recorded each minute, from all addresses.
+          Past it, one record counts the rest. Admin, device and allowed
+          records are always kept.
 network:
   8888/tcp: Guest links. Point your reverse proxy here.

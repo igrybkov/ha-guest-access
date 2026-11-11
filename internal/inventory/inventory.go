@@ -1,5 +1,6 @@
-// Package inventory builds model.Inventory snapshots from HA's registries
-// and streams state changes for a set of entities.
+// Package inventory builds model.Inventory snapshots from HA's registries,
+// keeps a cache of entity states, and streams state changes for a set of
+// entities.
 package inventory
 
 import (
@@ -31,7 +32,17 @@ var registryEvents = []string{
 }
 
 // Cache builds model.Inventory snapshots on demand and keeps the last one
-// until a registry changes or it is MaxAge old (see SetMaxAge). Safe for concurrent use.
+// until a registry changes or it is MaxAge old (see SetMaxAge). Safe for
+// concurrent use.
+//
+// After Run it also keeps every entity state, so a guest request never
+// asks HA for the state of the whole house. One get_states seeds the
+// cache on first use. state_changed events keep it current. It starts
+// over (the next use fetches again) whenever events may have been lost
+// (ha.Client.OnEventsLost: the HA connection dropped or came back, or an
+// event queue overflowed), and when the entity registry changes, which
+// can add or remove entities without a state event. Events that arrive while a fetch is in flight are newer than its
+// answer and are applied on top of it.
 type Cache struct {
 	client ha.Client
 	now    func() time.Time
@@ -42,6 +53,15 @@ type Cache struct {
 	inv   model.Inventory
 	built time.Time // zero = no snapshot
 	gen   uint64    // bumped by registry events
+
+	// The state cache. states is nil until seeded. stateGen is bumped
+	// each time the cache starts over, so a fetch that started before
+	// is not kept. While a fetch runs, seeding is open and pending holds
+	// the events that arrived since it started.
+	states   map[string]ha.State
+	stateGen uint64
+	seeding  chan struct{}
+	pending  map[string]*ha.State // nil value = entity removed
 
 	watchers map[*watcher]struct{}
 	watchCtx context.Context // Run's ctx; nil before Run
@@ -72,14 +92,123 @@ func (c *Cache) SetMaxAge(d time.Duration) {
 // returns once subscribed. Watch needs Run.
 func (c *Cache) Run(ctx context.Context) error {
 	for _, typ := range registryEvents {
-		if err := c.client.SubscribeEvents(ctx, typ, func(ha.Event) { c.Invalidate() }); err != nil {
+		dropStates := typ == "entity_registry_updated"
+		if err := c.client.SubscribeEvents(ctx, typ, func(ha.Event) {
+			c.Invalidate()
+			if dropStates {
+				c.dropStates()
+			}
+		}); err != nil {
 			return err
 		}
 	}
+	c.client.OnEventsLost(c.dropStates)
 	c.mu.Lock()
 	c.watchCtx = ctx
 	c.mu.Unlock()
 	return c.client.SubscribeEvents(ctx, "state_changed", c.dispatch)
+}
+
+// dropStates empties the state cache. The next use fetches again.
+func (c *Cache) dropStates() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.states = nil
+	c.stateGen++
+}
+
+// allStates returns the states of ids, or of every entity when ids is
+// nil: from the cache after Run, or from HA before it (there are no
+// events to keep a cache current then). The map is the caller's own. A
+// read of a few ids copies only those, not the whole house.
+func (c *Cache) allStates(ctx context.Context, ids map[string]bool) (map[string]ha.State, error) {
+	for {
+		c.mu.Lock()
+		if c.watchCtx == nil {
+			c.mu.Unlock()
+			all, err := c.fetchStates(ctx)
+			return pick(all, ids), err
+		}
+		if c.states != nil {
+			out := pick(c.states, ids)
+			if ids == nil {
+				out = maps.Clone(c.states)
+			}
+			c.mu.Unlock()
+			return out, nil
+		}
+		if wait := c.seeding; wait != nil {
+			// Another caller is fetching. Wait for it, then look again.
+			c.mu.Unlock()
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		done := make(chan struct{})
+		c.seeding, c.pending = done, map[string]*ha.State{}
+		gen := c.stateGen
+		c.mu.Unlock()
+		all, err := c.seed(ctx, gen, done)
+		return pick(all, ids), err
+	}
+}
+
+// pick returns the entries of all named in ids, or all itself when ids
+// is nil.
+func pick(all map[string]ha.State, ids map[string]bool) map[string]ha.State {
+	if ids == nil || all == nil {
+		return all
+	}
+	out := make(map[string]ha.State, len(ids))
+	for id := range ids {
+		if st, ok := all[id]; ok {
+			out[id] = st
+		}
+	}
+	return out
+}
+
+// seed fetches every state and keeps it, with the events that came in
+// meanwhile applied on top, unless the cache started over meanwhile.
+func (c *Cache) seed(ctx context.Context, gen uint64, done chan struct{}) (map[string]ha.State, error) {
+	fresh, err := c.fetchStates(ctx)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	pending := c.pending
+	c.seeding, c.pending = nil, nil
+	close(done)
+	if err != nil {
+		return nil, err
+	}
+	for id, st := range pending {
+		if st == nil {
+			delete(fresh, id)
+		} else {
+			fresh[id] = *st
+		}
+	}
+	if gen == c.stateGen {
+		c.states = maps.Clone(fresh)
+	}
+	return fresh, nil
+}
+
+// fetchStates asks HA for every state.
+func (c *Cache) fetchStates(ctx context.Context) (map[string]ha.State, error) {
+	all, err := c.client.States(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]ha.State, len(all))
+	for _, st := range all {
+		if st.EntityID != "" {
+			out[st.EntityID] = st
+		}
+	}
+	return out, nil
 }
 
 // Invalidate drops the current snapshot.
@@ -107,7 +236,11 @@ func (c *Cache) Inventory(ctx context.Context) (model.Inventory, error) {
 	gen := c.gen
 	c.mu.Unlock()
 
-	inv, err := Build(ctx, c.client)
+	states, err := c.allStates(ctx, nil)
+	if err != nil {
+		return model.Inventory{}, err
+	}
+	inv, err := build(ctx, c.client, slices.Collect(maps.Values(states)))
 	if err != nil {
 		return model.Inventory{}, err
 	}
@@ -131,6 +264,15 @@ func (c *Cache) Inventory(ctx context.Context) (model.Inventory, error) {
 //     id and friendly name only: no device, area or labels, not hidden,
 //     not disabled.
 func Build(ctx context.Context, client ha.Client) (model.Inventory, error) {
+	states, err := client.States(ctx)
+	if err != nil {
+		return model.Inventory{}, err
+	}
+	return build(ctx, client, states)
+}
+
+// build is Build with the states given.
+func build(ctx context.Context, client ha.Client, states []ha.State) (model.Inventory, error) {
 	areas, err := client.Areas(ctx)
 	if err != nil {
 		return model.Inventory{}, err
@@ -144,10 +286,6 @@ func Build(ctx context.Context, client ha.Client) (model.Inventory, error) {
 		return model.Inventory{}, err
 	}
 	labels, err := client.Labels(ctx)
-	if err != nil {
-		return model.Inventory{}, err
-	}
-	states, err := client.States(ctx)
 	if err != nil {
 		return model.Inventory{}, err
 	}
@@ -214,19 +352,21 @@ func Build(ctx context.Context, client ha.Client) (model.Inventory, error) {
 	return inv, nil
 }
 
-// States returns the current states of ids. Entities HA has no state for
-// are left out. Attributes are HA's, unfiltered: filter them with the
-// catalog's allowlist before a guest sees them.
+// States returns the current states of ids, from the state cache after
+// Run. Entities HA has no state for are left out. Attributes are HA's,
+// unfiltered: filter them with the catalog's allowlist before a guest
+// sees them, and do not change them, since the cache shares them.
 func (c *Cache) States(ctx context.Context, ids map[string]bool) (map[string]model.State, error) {
-	all, err := c.client.States(ctx)
+	if len(ids) == 0 {
+		return map[string]model.State{}, nil
+	}
+	got, err := c.allStates(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]model.State, len(ids))
-	for _, st := range all {
-		if ids[st.EntityID] {
-			out[st.EntityID] = toState(st)
-		}
+	out := make(map[string]model.State, len(got))
+	for id, st := range got {
+		out[id] = toState(st)
 	}
 	return out, nil
 }
@@ -280,6 +420,28 @@ type stateChanged struct {
 	NewState *ha.State `json:"new_state"`
 }
 
+// applyLocked puts one state change into the state cache, or into
+// pending while a fetch runs. The caller holds c.mu.
+func (c *Cache) applyLocked(d stateChanged) {
+	if d.EntityID == "" {
+		return
+	}
+	var st *ha.State
+	if d.NewState != nil {
+		x := *d.NewState
+		x.EntityID = d.EntityID
+		st = &x
+	}
+	switch {
+	case c.states != nil && st == nil:
+		delete(c.states, d.EntityID)
+	case c.states != nil:
+		c.states[d.EntityID] = *st
+	case c.pending != nil:
+		c.pending[d.EntityID] = st
+	}
+}
+
 func (c *Cache) dispatch(ev ha.Event) {
 	var d stateChanged
 	if err := json.Unmarshal(ev.Data, &d); err != nil {
@@ -292,6 +454,7 @@ func (c *Cache) dispatch(ev ha.Event) {
 		st.EntityID = d.EntityID
 	}
 	c.mu.Lock()
+	c.applyLocked(d)
 	var fns []func(model.State)
 	for w := range c.watchers {
 		if w.ids[d.EntityID] {

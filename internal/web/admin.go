@@ -82,7 +82,7 @@ func (s *Server) adminGuard(next http.Handler) http.Handler {
 		peer := peerAddr(r.RemoteAddr)
 		if !s.deps.DevAdminAnyPeer && peer != supervisorIngress {
 			s.log.Warn("admin: refused peer", "peer", r.RemoteAddr, "path", r.URL.Path)
-			if ok, skipped := s.auditThrottle.Allow("admin.refused|"+peer.String(), s.now()); ok {
+			if ok, skipped := s.auditThrottle.Allow("admin.refused|"+access.LimitKey(peer, s.settings().RateLimits.IPv6Prefix), s.now()); ok {
 				rec := audit.Record{Time: s.now(), Event: "admin.refused", Result: audit.ResultDenied, Reason: "peer",
 					Method: r.Method, Route: routeLabel(r.URL.Path), Count: skipped}
 				setClient(&rec, access.Client{IP: peer}, peer)
@@ -91,7 +91,7 @@ func (s *Server) adminGuard(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "access only through Home Assistant")
 			return
 		}
-		if ok, retry := s.lim.admin.Allow(peer.String(), s.now()); !ok {
+		if ok, retry := s.lim.admin.Allow(access.LimitKey(peer, s.settings().RateLimits.IPv6Prefix), s.now()); !ok {
 			tooMany(w, retry)
 			return
 		}

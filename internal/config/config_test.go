@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -125,5 +126,64 @@ func TestLogLevel(t *testing.T) {
 		if c.LogLevel != tc.level || c.SlogLevel() != tc.want {
 			t.Errorf("%s: %q / %v, want %q / %v", tc.name, c.LogLevel, c.SlogLevel(), tc.level, tc.want)
 		}
+	}
+}
+
+// DEV_ADMIN_ANY_PEER turns off the admin peer check, so it needs a
+// LISTEN that binds loopback only. Under Supervisor the flag is ignored.
+func TestDevAdminAnyPeerListen(t *testing.T) {
+	for _, tc := range []struct {
+		listen string
+		ok     bool
+	}{
+		{"", false}, // the default, :8099, binds every interface
+		{":8099", false},
+		{"0.0.0.0:8099", false},
+		{"[::]:8099", false},
+		{"192.0.2.10:8099", false},
+		{"hass.example:8099", false},
+		{"127.0.0.1", false}, // no port
+		{"127.0.0.1:8099", true},
+		{"127.1.2.3:8099", true},
+		{"[::1]:8099", true},
+		{"localhost:8099", true},
+	} {
+		t.Run(tc.listen, func(t *testing.T) {
+			m := map[string]string{"HA_URL": "https://hass.example", "HA_TOKEN": "t", "DEV_ADMIN_ANY_PEER": "1"}
+			if tc.listen != "" {
+				m["LISTEN"] = tc.listen
+			}
+			c, err := load(env(m), files(nil))
+			if (err == nil) != tc.ok {
+				t.Fatalf("err = %v, want ok %v", err, tc.ok)
+			}
+			if err != nil && !strings.Contains(err.Error(), "loopback") {
+				t.Errorf("error does not say why: %v", err)
+			}
+			if tc.ok && !c.DevAdminAnyPeer {
+				t.Error("flag not set")
+			}
+		})
+	}
+	// Without the flag, any LISTEN is fine.
+	if _, err := load(env(map[string]string{"HA_URL": "https://hass.example", "HA_TOKEN": "t"}), files(nil)); err != nil {
+		t.Errorf("no flag: %v", err)
+	}
+	// Under Supervisor the flag is ignored, so the default LISTEN is fine.
+	c, err := load(env(map[string]string{"SUPERVISOR_TOKEN": "s", "DEV_ADMIN_ANY_PEER": "1"}), files(nil))
+	if err != nil || c.DevAdminAnyPeer {
+		t.Errorf("supervisor: %v %v", err, c.DevAdminAnyPeer)
+	}
+}
+
+// The default config dir is inside the folder Supervisor mounts for the
+// homeassistant_config map, so templates.yaml survives an app update.
+func TestDefaultConfigDirIsInHAConfigMount(t *testing.T) {
+	if !strings.HasPrefix(defaultConfigDir, "/homeassistant/") {
+		t.Fatalf("defaultConfigDir = %q, want a folder under /homeassistant", defaultConfigDir)
+	}
+	m := readManifest(t)
+	if m["panel_admin"] != true {
+		t.Errorf("panel_admin = %v, want true", m["panel_admin"])
 	}
 }

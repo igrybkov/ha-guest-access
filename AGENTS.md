@@ -65,7 +65,7 @@ Rate limiting can be turned off with `rate_limits.enabled: false`. It is not rec
 - `web`: the two HTTP servers. Admin (`AdminHandler`) is the JSON API and admin UI, for the Supervisor ingress peer only. Guest (`GuestHandler`) is a separate mux with no admin routes. Guest routes live under `/g/{slug}/`. `internal/web/ui` holds the embedded vanilla JS for both.
 - `ha` and `ha/hatest`: the HA websocket client (copied from ha-nfc-player) and its fakes.
 - `inventory`: builds the inventory snapshot and streams state changes.
-- `links`: the link store. One-time use is consumed under its lock before the HA call and refunded on failure.
+- `links`: the link store. One-time use is consumed under its lock before the HA call, and refunded only when HA answered with an error (`ha.Refused`). A timeout or a lost connection keeps the use.
 - `ma`: the optional Music Assistant client. The app must work fully without it.
 - `config`: env and app options (`/data/options.json`). Every setting comes from the options. There is no settings file.
 - `store` and `migrate`: see Storage.

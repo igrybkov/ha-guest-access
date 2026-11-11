@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/igrybkov/ha-guest-access/internal/catalog"
+	"github.com/igrybkov/ha-guest-access/internal/config"
 	"github.com/igrybkov/ha-guest-access/internal/model"
 )
 
@@ -130,6 +131,22 @@ func (s *Server) listDevices(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// localNoProxyWarning is the warning while local access is on with no
+// trusted proxy.
+const localNoProxyWarning = "Local access is on, but trusted_proxies is empty. Behind a reverse proxy or tunnel, " +
+	"every guest then has the proxy's address. If that address is on your network, every guest counts as local, " +
+	"so local-only rules and near home pass for anyone with a link. Add the proxy to trusted_proxies, or turn local access off."
+
+// OptionWarnings lists option setups that are risky though valid. The app
+// logs each at start, and the diagnostics show them.
+func OptionWarnings(o config.Options) []string {
+	var out []string
+	if o.Settings.LocalAccess.Enabled && len(o.Settings.TrustedProxies) == 0 {
+		out = append(out, localNoProxyWarning)
+	}
+	return out
+}
+
 // diagnosticsView is GET /api/diagnostics: the last guest requests as the
 // app saw them, newest first, and warnings about the proxy setup.
 type diagnosticsView struct {
@@ -155,6 +172,7 @@ func (s *Server) getDiagnostics(w http.ResponseWriter, _ *http.Request) {
 	if s.lim.off {
 		v.Warnings = append(v.Warnings, "Rate limits are off.")
 	}
+	v.Warnings = append(v.Warnings, OptionWarnings(s.deps.Options)...)
 	if s.maRefused.Load() {
 		v.Warnings = append(v.Warnings, maRefusedWarning)
 	}

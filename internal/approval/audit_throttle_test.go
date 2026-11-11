@@ -3,6 +3,7 @@ package approval
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,5 +42,39 @@ func TestRefusedRequestsThrottled(t *testing.T) {
 	}
 	if len(refused) != 2 || refused[0].Count != 0 || refused[1].Count != 49 || refused[1].Reason != "too_many_pending" {
 		t.Errorf("refused records = %+v", refused)
+	}
+}
+
+// Refused requests from many addresses of one IPv6 /64 share one
+// throttle key, so they give one record per period, not one per address.
+func TestRefusedRequestsThrottledPerIPv6Prefix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), audit.FileName)
+	al, err := audit.New(audit.Options{Path: path, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { al.Close() })
+	e := newEnv(t, Options{MaxPending: 1, Audit: al})
+	l := e.newLink(manual)
+	want(t, "first", e.call(e.m.RequestAccess, l.ID, newBrowser(iPhoneUA), "{}"), 200, "pending")
+	for i := range 30 {
+		b := newBrowser(androidUA)
+		b.ip = fmt.Sprintf("2001:db8:1:2::%x", i+1)
+		want(t, "refused", e.call(e.m.RequestAccess, l.ID, b, "{}"), 429, "try_later")
+	}
+	al.Close()
+	raw, _ := os.ReadFile(path)
+	n := 0
+	for _, line := range bytes.Split(bytes.TrimSpace(raw), []byte("\n")) {
+		var r audit.Record
+		if err := json.Unmarshal(line, &r); err != nil {
+			t.Fatalf("bad line %q: %v", line, err)
+		}
+		if r.Event == "device.request" && r.Result == audit.ResultDenied {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("%d refused records from one /64, want 1", n)
 	}
 }

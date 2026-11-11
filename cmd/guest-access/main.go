@@ -121,6 +121,9 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 	if !o.LimitsEnabled {
 		log.Warn("rate limits are off (rate_limits.enabled: false); nothing limits guesses at links or passwords")
 	}
+	for _, w := range web.OptionWarnings(o) {
+		log.Warn(w)
+	}
 
 	// A bad key stops startup. It is never made again: that would end
 	// every signed cookie, and may hide a bad restore.
@@ -179,6 +182,7 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		MaxBodyBytes:  o.GuestBodyBytes,
 		EventTimeout:  o.HAEventTimeout,
 		Audit:         auditLog,
+		IPv6Prefix:    o.Settings.RateLimits.IPv6Prefix,
 	})
 	if err := devices.Run(ctx, client.SubscribeEvents); err != nil { // returns once subscribed
 		closeAll()
@@ -201,9 +205,13 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		Logger:          log,
 	})
 	servers := []*http.Server{newServer(ctx, srv.AdminHandler(), log), newServer(ctx, srv.GuestHandler(), log)}
+	for _, s := range servers {
+		setBounds(s, o)
+	}
 
 	var wg sync.WaitGroup
 	wg.Go(func() { _ = client.Run(ctx) }) // returns only when ctx is done
+	wg.Go(func() { srv.RunMACheck(ctx) }) // returns at once without Music Assistant
 	serveErr := make(chan error, len(servers))
 	for i, ln := range []net.Listener{adminLn, guestLn} {
 		s := servers[i]
@@ -242,15 +250,30 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 	return runErr
 }
 
+// newServer returns a server for h with the request bounds of the
+// default app options. run sets the bounds from the real options.
 func newServer(ctx context.Context, h http.Handler, log *slog.Logger) *http.Server {
-	return &http.Server{
+	s := &http.Server{
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
-		// No WriteTimeout: event streams stay open.
+		// No WriteTimeout: it would cut every event stream.
 		IdleTimeout: 2 * time.Minute,
 		BaseContext: func(net.Listener) context.Context { return ctx },
 		ErrorLog:    slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
+	setBounds(s, config.DefaultOptions())
+	return s
+}
+
+// setBounds sets how long and how big a request may be. ReadTimeout
+// covers the headers and the body, so a client that sends a body one
+// byte at a time is cut off. It does not end a response that streams:
+// once the body is read, the server clears the read deadline. The header
+// timeout is never longer than the read timeout.
+func setBounds(s *http.Server, o config.Options) {
+	s.ReadTimeout = o.HTTPReadTimeout
+	s.ReadHeaderTimeout = min(10*time.Second, o.HTTPReadTimeout)
+	s.MaxHeaderBytes = o.MaxHeaderBytes
 }
 
 // checkHealth GETs /healthz on the loopback port of listen (LISTEN, default

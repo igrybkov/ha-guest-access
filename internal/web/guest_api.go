@@ -125,8 +125,12 @@ type accessCheck struct {
 
 func (s *Server) accessFor(g *guestReq) accessCheck {
 	a := accessCheck{localOn: g.st.LocalAccess.Enabled, local: g.client.Local(g.nets)}
-	if c, err := g.r.Cookie(access.LinkCookie(nearCookie, g.link.ID)); err == nil {
-		a.near, a.hasNear = s.deps.Signer.VerifyNear(g.link.ID, c.Value, g.now)
+	// Of several location cookies, the nearest valid one counts. Each is
+	// signed by the app, so none can claim more than a check found.
+	for _, c := range g.r.CookiesNamed(access.LinkCookie(nearCookie, g.link.ID)) {
+		if m, ok := s.deps.Signer.VerifyNear(g.link.ID, c.Value, g.now); ok && (!a.hasNear || m < a.near) {
+			a.near, a.hasNear = m, true
+		}
 	}
 	return a
 }
@@ -380,15 +384,17 @@ func (s *Server) decodeAct(g *guestReq) (authz.Request, bool) {
 //     data fits the catalog.
 //  2. links.Consume, before the HA call, so a one-time pair is used at
 //     most once even under parallel requests.
-//  3. The HA call, with a target of exactly one entity. On error the use
-//     is refunded.
+//  3. The HA call, with a target of exactly one entity. The use is
+//     refunded only when HA answers with an error (ha.Refused). After a
+//     timeout or a lost connection the call may have run, so the use
+//     stays spent.
 //  4. The guest_access_action event.
 func (s *Server) guestAct(g *guestReq) {
 	req, ok := s.decodeAct(g)
 	if !ok {
 		// The reply is written; a bad body still counts against the
 		// guest's limit.
-		g.lim.authed.Allow(g.link.ID+"|"+g.ipKey(), g.now)
+		g.lim.authed.Allow(g.link.ID+"|"+g.limKey, g.now)
 		return
 	}
 	// The record names the entity, the action and the data keys, never
@@ -454,9 +460,17 @@ func (s *Server) guestAct(g *guestReq) {
 	defer cancel()
 	if _, err := s.deps.HA.CallService(hctx, call.Domain, call.Service, call.Data,
 		&ha.Target{EntityID: []string{call.EntityID}}, false); err != nil {
-		refund()
-		g.deny(reasonHAError)
-		s.log.Warn("guest action failed", "link", g.link.ID, "guest", g.label, "entity_id", call.EntityID, "action", req.Action, "err", err)
+		// Give a one-time use back only when HA refused the call. After a
+		// timeout or a lost connection the call may have run, so the use
+		// stays spent.
+		reason := reasonHAUnknown
+		if ha.Refused(err) {
+			refund()
+			reason = reasonHAError
+		}
+		g.deny(reason)
+		s.log.Warn("guest action failed", "link", g.link.ID, "guest", g.label, "entity_id", call.EntityID, "action", req.Action,
+			"refused", ha.Refused(err), "err", err)
 		writeError(g.w, http.StatusBadGateway, msgHAFailed)
 		return
 	}
@@ -488,7 +502,8 @@ type whereBody struct {
 }
 
 // guestWhere measures the distance to home and sets the location cookie.
-// Coordinates are never stored or logged. The reply holds no distance,
+// It refuses while HA has no home location. Coordinates are never stored
+// or logged. The reply holds no distance,
 // so repeated tries can't locate the home.
 func (s *Server) guestWhere(g *guestReq) {
 	var b whereBody
@@ -512,6 +527,13 @@ func (s *Server) guestWhere(g *guestReq) {
 		g.deny(reasonHAError)
 		s.log.Warn("guest where: inventory", "err", err)
 		writeError(g.w, http.StatusServiceUnavailable, msgHAFailed)
+		return
+	}
+	if !inv.Home.Set() {
+		// No home in HA: anyone could claim to stand at 0, 0.
+		g.deny(reasonNoHome)
+		s.log.Warn("guest where: HA has no home location; near-home rules deny every request")
+		writeError(g.w, http.StatusConflict, msgNoHome)
 		return
 	}
 	d := access.DistanceM(*b.Lat, *b.Lon, inv.Home.Lat, inv.Home.Lon) + *b.Accuracy
@@ -555,13 +577,60 @@ func (s *Server) guestParty(g *guestReq) {
 	writeJSON(g.w, http.StatusOK, map[string]string{"url": u})
 }
 
+// RunMACheck checks that Music Assistant takes the token: once now, then
+// every MACheckInterval (never again when it is zero), until ctx is done.
+// The result feeds the refused-token warning, so the admin sees a bad
+// token before a guest taps the party button. Without Music Assistant
+// set up it returns at once and never calls it.
+func (s *Server) RunMACheck(ctx context.Context) {
+	o := s.deps.Options
+	if !o.MusicAssistantEnabled() {
+		return
+	}
+	s.checkMA(ctx)
+	if o.MACheckInterval <= 0 {
+		return
+	}
+	t := time.NewTicker(o.MACheckInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.checkMA(ctx)
+		}
+	}
+}
+
+// checkMA asks Music Assistant for the party URL once and notes whether
+// it took the token. MA down or slow changes nothing.
+func (s *Server) checkMA(ctx context.Context) {
+	o := s.deps.Options
+	client, err := s.newMA(o.Settings.MusicAssistant.URL, o.MusicAssistantToken, o.MATimeout)
+	if err != nil || client == nil {
+		s.log.Debug("music assistant check: no client", "err", err)
+		return
+	}
+	mctx, cancel := context.WithTimeout(ctx, o.MATimeout)
+	defer cancel()
+	_, err = client.PartyURL(mctx)
+	if ctx.Err() != nil {
+		return
+	}
+	s.noteMAToken(err)
+	if err != nil && !errors.Is(err, ma.ErrUnauthorized) {
+		s.log.Debug("music assistant check", "err", err)
+	}
+}
+
 // maRefusedWarning is the admin warning while Music Assistant refuses the
 // token.
 const maRefusedWarning = "Music Assistant refused the token, so guests see no party button. " +
 	"Make a new long-lived token in Music Assistant and put it in the music_assistant.token option."
 
 // noteMAToken tracks whether Music Assistant takes the token, from the
-// result of a call. It logs once when MA starts refusing it, and once
+// result of a party call or a token check. It logs once when MA starts refusing it, and once
 // when it takes it again. Other errors (MA down or slow) change nothing.
 func (s *Server) noteMAToken(err error) {
 	switch {

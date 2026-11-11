@@ -195,3 +195,41 @@ func TestThrottle(t *testing.T) {
 		t.Errorf("%d keys", len(th.keys))
 	}
 }
+
+func TestCap(t *testing.T) {
+	c := NewCap(3, time.Minute)
+	for i := range 3 {
+		if ok, s := c.Allow(t0.Add(time.Duration(i) * time.Second)); !ok || s != 0 {
+			t.Fatalf("record %d: %v %d", i, ok, s)
+		}
+	}
+	for range 5 {
+		if ok, _ := c.Allow(t0.Add(10 * time.Second)); ok {
+			t.Fatal("over the cap")
+		}
+	}
+	if s := c.Flush(t0.Add(30 * time.Second)); s != 0 {
+		t.Errorf("flush inside the window: %d", s)
+	}
+	// The next window reports the five left out, once.
+	if ok, s := c.Allow(t0.Add(time.Minute)); !ok || s != 5 {
+		t.Errorf("new window: %v %d", ok, s)
+	}
+	if _, s := c.Allow(t0.Add(time.Minute + time.Second)); s != 0 {
+		t.Errorf("summary repeated: %d", s)
+	}
+	// Flush ends a window with no capped record coming.
+	for range 4 {
+		c.Allow(t0.Add(time.Minute + 2*time.Second))
+	}
+	if s := c.Flush(t0.Add(3 * time.Minute)); s != 3 { // 2 + 4 tries, 3 let through
+		t.Errorf("flush after the window: %d", s)
+	}
+	// No cap.
+	c = NewCap(0, time.Minute)
+	for range 1000 {
+		if ok, _ := c.Allow(t0); !ok {
+			t.Fatal("max 0 capped")
+		}
+	}
+}

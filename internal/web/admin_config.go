@@ -32,14 +32,18 @@ type settingsView struct {
 // tunablesView holds the other app options, in plain units.
 type tunablesView struct {
 	MATimeoutMS              int64          `json:"ma_timeout_ms"`
+	MACheckIntervalMin       int64          `json:"ma_check_interval_min"`
 	LocationTTLMin           int64          `json:"location_ttl_min"`
 	MaxAccuracyM             int            `json:"max_accuracy_m"`
 	PasswordWindowPerIPMin   int64          `json:"password_window_per_ip_min"`
 	PasswordWindowPerLinkMin int64          `json:"password_window_per_link_min"`
 	CustomSlugMinLen         int            `json:"custom_slug_min_len"`
 	CustomSlugMaxLen         int            `json:"custom_slug_max_len"`
+	CustomSlugWarnLen        int            `json:"custom_slug_warn_len"`
 	GuestBodyKiB             int64          `json:"guest_body_kib"`
 	AdminBodyKiB             int64          `json:"admin_body_kib"`
+	HTTPReadTimeoutS         int64          `json:"http_read_timeout_s"`
+	MaxHeaderKiB             int            `json:"max_header_kib"`
 	DiagRequests             int            `json:"diagnostics_requests"`
 	InventoryMaxAgeS         int64          `json:"inventory_max_age_s"`
 	Approval                 approvalTuning `json:"approval"`
@@ -48,8 +52,10 @@ type tunablesView struct {
 	StreamRecheckS           int64          `json:"stream_recheck_s"`
 	StreamHeartbeatS         int64          `json:"stream_heartbeat_s"`
 	StreamRetryAfterS        int64          `json:"stream_retry_after_s"`
+	StreamMaxPerIP           int            `json:"stream_max_per_ip"`
 	AuditEnabled             bool           `json:"audit_enabled"`
 	AuditMaxFileKiB          int64          `json:"audit_max_file_kib"`
+	AuditMaxDenialsPerMin    int            `json:"audit_max_denials_per_min"`
 }
 
 type approvalTuning struct {
@@ -66,14 +72,18 @@ func newSettingsView(o config.Options, maRefused bool) settingsView {
 	v.MAToken.Refused = maRefused
 	v.Tunables = tunablesView{
 		MATimeoutMS:              o.MATimeout.Milliseconds(),
+		MACheckIntervalMin:       int64(o.MACheckInterval.Minutes()),
 		LocationTTLMin:           int64(o.NearTTL.Minutes()),
 		MaxAccuracyM:             o.MaxAccuracyM,
 		PasswordWindowPerIPMin:   int64(o.PasswordWindowPerIP.Minutes()),
 		PasswordWindowPerLinkMin: int64(o.PasswordWindowPerLink.Minutes()),
 		CustomSlugMinLen:         o.CustomSlugMinLen,
 		CustomSlugMaxLen:         o.CustomSlugMaxLen,
+		CustomSlugWarnLen:        o.CustomSlugWarnLen,
 		GuestBodyKiB:             o.GuestBodyBytes >> 10,
 		AdminBodyKiB:             o.AdminBodyBytes >> 10,
+		HTTPReadTimeoutS:         int64(o.HTTPReadTimeout.Seconds()),
+		MaxHeaderKiB:             o.MaxHeaderBytes >> 10,
 		DiagRequests:             o.DiagRequests,
 		InventoryMaxAgeS:         int64(o.InventoryMaxAge.Seconds()),
 		Approval: approvalTuning{
@@ -83,13 +93,15 @@ func newSettingsView(o config.Options, maRefused bool) settingsView {
 			EventsPerHour:    o.Approval.EventsPerHour,
 			TouchThrottleMin: int64(o.Approval.TouchThrottle.Minutes()),
 		},
-		HACallTimeoutS:    int64(o.HACallTimeout.Seconds()),
-		HAEventTimeoutS:   int64(o.HAEventTimeout.Seconds()),
-		StreamRecheckS:    int64(o.StreamCheck.Seconds()),
-		StreamHeartbeatS:  int64(o.StreamHeartbeat.Seconds()),
-		StreamRetryAfterS: int64(o.StreamRetry.Seconds()),
-		AuditEnabled:      o.AuditEnabled,
-		AuditMaxFileKiB:   o.AuditMaxFileBytes >> 10,
+		HACallTimeoutS:        int64(o.HACallTimeout.Seconds()),
+		HAEventTimeoutS:       int64(o.HAEventTimeout.Seconds()),
+		StreamRecheckS:        int64(o.StreamCheck.Seconds()),
+		StreamHeartbeatS:      int64(o.StreamHeartbeat.Seconds()),
+		StreamRetryAfterS:     int64(o.StreamRetry.Seconds()),
+		StreamMaxPerIP:        o.StreamMaxPerIP,
+		AuditEnabled:          o.AuditEnabled,
+		AuditMaxFileKiB:       o.AuditMaxFileBytes >> 10,
+		AuditMaxDenialsPerMin: o.AuditMaxDenialsPerMin,
 	}
 	return v
 }

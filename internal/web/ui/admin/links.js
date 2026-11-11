@@ -6,6 +6,7 @@ import {
 import {
   paths, PRESETS, preset, toLocalInput, fromLocalInput, fmtTime, fmtWindow, buildLink, linkForm,
   approvalMode, splitTemplates, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
+  linkProblems, brokenLinkNote, removePasswordPrompt,
 } from './lib.js';
 import { Slots, ruleEditor, loadInventory } from './rules.js';
 
@@ -67,6 +68,8 @@ async function list(view) {
     h('td', {},
       h('a', { class: 'title', href: `#/links/edit/${encodeURIComponent(l.id)}`, text: l.name }),
       h('div', {}, linkBadges(l).map((b) => h('span', { class: 'badge', text: b }))),
+      linkProblems(l).length > 0 && h('div', { class: 'error small', text: 'Does not validate: guests get not found' }),
+      l.slug_warning && h('div', { class: 'warning small', text: 'Short custom URL' }),
       (l.warnings || []).length > 0 && h('div', { class: 'error small', text: `${l.warnings.length} warning${l.warnings.length > 1 ? 's' : ''}` })),
     h('td', { class: 'small', text: fmtWindow(l) }),
     h('td', { class: 'small' },
@@ -239,7 +242,7 @@ async function editor(view, id) {
       }
       try {
         const saved = isNew ? await post(paths.links, body) : await put(paths.link(id), body);
-        toast(`Saved ${saved.name}`);
+        toast(saved.slug_warning ? `Saved ${saved.name}. ${saved.slug_warning}` : `Saved ${saved.name}`);
         if (isNew) location.hash = `#/links/edit/${encodeURIComponent(saved.id)}`;
         else reload();
       } catch (e) {
@@ -254,6 +257,9 @@ async function editor(view, id) {
   h('div', { class: 'toolbar' }, back('#/links', 'Links'),
     h('h1', { text: isNew ? 'New link' : f.name }),
     linkView && h('span', { class: `status ${linkView.status}`, text: STATUS_LABELS[linkView.status] || linkView.status })),
+  linkView && linkProblems(linkView).length > 0 && h('div', { class: 'error' },
+    h('p', { text: brokenLinkNote }), h('ul', {}, linkProblems(linkView).map((text) => h('li', { text })))),
+  linkView && linkView.slug_warning && h('p', { class: 'warning', text: linkView.slug_warning }),
   linkView && (linkView.warnings || []).length > 0 && h('ul', { class: 'warning' }, linkView.warnings.map((w) => h('li', { text: w.message }))),
   slots.top,
   h('div', { class: 'cols' },
@@ -337,7 +343,8 @@ function passwordsSection(l, reload) {
         h('span', { class: 'grow' }, h('span', { text: p.label }), ' ', h('span', { class: 'muted small', text: `added ${fmtTime(p.created_at)}` })),
         h('button', { type: 'button', class: 'danger', text: 'Remove', onclick: async (ev) => {
           const btn = ev.currentTarget;
-          if (!(await ask(`Remove the password for ${p.label}?`, 'Guests signed in with it lose access at once.', { ok: 'Remove', danger: true }))) return;
+          const q = removePasswordPrompt(l, p);
+          if (!(await ask(q.title, q.body, { ok: q.ok, danger: true }))) return;
           run(btn, async () => { await del(paths.password(l.id, p.id)); toast('Password removed'); reload(); });
         } }))))
       : h('p', { class: 'muted', text: 'No passwords. The URL alone opens the link.' }),

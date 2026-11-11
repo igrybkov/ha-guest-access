@@ -133,6 +133,10 @@ type Options struct {
 	EventTimeout time.Duration
 	// Audit records device.* events. nil records nothing.
 	Audit *audit.Logger
+	// IPv6Prefix keys the refused-request audit throttle on an IPv6
+	// client's prefix (see access.KeyAddr). Zero means
+	// access.DefaultIPv6Prefix.
+	IPv6Prefix int
 }
 
 // Request is a pending device request, as the admin API shows it.
@@ -373,7 +377,7 @@ func (m *Manager) RequestAccess(w http.ResponseWriter, r *http.Request, link mod
 		if errors.Is(err, ErrTooManyEvents) {
 			reason = "too_many_events"
 		}
-		if ok, skipped := m.refused.Allow(link.ID+"|"+reason+"|"+c.IP.String(), now); ok {
+		if ok, skipped := m.refused.Allow(link.ID+"|"+reason+"|"+access.LimitKey(c.IP, m.opts.IPv6Prefix), now); ok {
 			m.record(audit.Record{Event: "device.request", Result: audit.ResultDenied, Reason: reason, Count: skipped,
 				LinkID: link.ID, LinkName: link.Name, PasswordLabel: label, Device: device}, c)
 		}

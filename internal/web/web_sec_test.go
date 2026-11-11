@@ -108,8 +108,8 @@ func TestSecHandWrittenLinkFailsClosed(t *testing.T) {
 	})
 }
 
-// Safe: variables with a "code" key in a hand-written link drop the
-// script grant, and a zero valid_until is an expired link.
+// Safe: a hand-written link with a "code" key in its variables, or with a
+// zero valid_until, does not validate, so guests get not found for it.
 func TestSecHandWrittenLinkSafeCases(t *testing.T) {
 	const slug = "handwrittenslug0002"
 	h := handWritten(t, handLink(slug, model.Rule{
@@ -117,14 +117,14 @@ func TestSecHandWrittenLinkSafeCases(t *testing.T) {
 		Variables: map[string]any{"Code": "1234"},
 	}))
 	if rec := h.g(req{method: "POST", path: "/g/" + slug + "/act",
-		body: map[string]any{"entity_id": "script.let_me_in", "action": "script.run"}}); rec.Code != http.StatusForbidden {
+		body: map[string]any{"entity_id": "script.let_me_in", "action": "script.run"}}); rec.Code != http.StatusNotFound {
 		t.Errorf("script with a code variable: %d", rec.Code)
 	}
 	l := handLink(slug, model.Rule{Select: model.Selector{Entities: []string{"light.guest_room"}}, Actions: []string{"light.turn_on"}})
 	l.ValidUntil = time.Time{}
 	h = handWritten(t, l)
 	if rec := h.g(req{method: "POST", path: "/g/" + slug + "/act",
-		body: map[string]any{"entity_id": "light.guest_room", "action": "light.turn_on"}}); rec.Code != http.StatusGone {
+		body: map[string]any{"entity_id": "light.guest_room", "action": "light.turn_on"}}); rec.Code != http.StatusNotFound {
 		t.Errorf("zero valid_until: %d", rec.Code)
 	}
 }
@@ -707,17 +707,11 @@ func TestSecDataSmuggling(t *testing.T) {
 	}
 }
 
-// The wrong-link limiter answers a miss with 429 once a client is over
-// its budget, but a hit still gets its normal answer. A client over budget
-// therefore still learns, for every guess, whether it hit. Only the
-// pre-auth limiter (20 a minute per address, and one bucket per IPv6
-// address) slows guessing, not the 10 an hour the docs promise. This
-// matters for custom slugs, which can be words.
-//
-// This one needs a decision. DOCS say "a valid link always works, whatever
-// the wrong-link limits say", so a fix goes against the docs: for example refuse hits without a session from
-// an address that is over its miss budget.
-func TestSecSlugGuessBudgetBindsHits(t *testing.T) {
+// A valid slug keeps working for a client over its miss budget: limits
+// on wrong links never lock out a real guest. Misses past the budget
+// still get 429. Short custom slugs get a warning in the admin API
+// instead (TestShortCustomSlugWarning).
+func TestSecValidSlugWorksOverMissBudget(t *testing.T) {
 	h := newHarness(t)
 	l := h.link("guest_room")
 	const ip = "203.0.113.77:4000"
@@ -731,8 +725,11 @@ func TestSecSlugGuessBudgetBindsHits(t *testing.T) {
 	if over == 0 {
 		t.Fatal("the miss limiter never answered 429")
 	}
-	if rec := h.g(req{method: "GET", path: "/g/" + l.Slug + "/state", peer: ip}); rec.Code == http.StatusOK {
-		t.Fatalf("a client over its miss budget still gets a definite hit (%d): it can keep guessing slugs at the pre-auth rate", rec.Code)
+	if rec := h.g(req{method: "GET", path: fmt.Sprintf("/g/guess-number-%02d-aaaaaaaa/state", 99), peer: ip}); rec.Code != http.StatusTooManyRequests {
+		t.Errorf("a miss over budget: %d", rec.Code)
+	}
+	if rec := h.g(req{method: "GET", path: "/g/" + l.Slug + "/state", peer: ip}); rec.Code != http.StatusOK {
+		t.Fatalf("a valid slug over the miss budget: %d", rec.Code)
 	}
 }
 

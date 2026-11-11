@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/config"
 	"github.com/igrybkov/ha-guest-access/internal/ma"
@@ -83,4 +85,65 @@ func TestMATokenRefusedWarning(t *testing.T) {
 // withLog sends the server's log to buf.
 func withLog(buf *lockedBuffer) harnessOpt {
 	return func(_ *config.Options, d *Deps) { d.Logger = slog.New(slog.NewTextHandler(buf, nil)) }
+}
+
+// countMA counts PartyURL calls and answers with switchMA.
+type countMA struct {
+	switchMA
+	n atomic.Int32
+}
+
+func (m *countMA) PartyURL(ctx context.Context) (string, error) {
+	m.n.Add(1)
+	return m.switchMA.PartyURL(ctx)
+}
+
+// The token check runs at start and on its interval, and its result sets
+// and clears the refused-token warning with no guest call.
+func TestMATokenCheck(t *testing.T) {
+	stub := &countMA{}
+	stub.set(ma.ErrUnauthorized)
+	h := newHarness(t, withMA(stub), func(o *config.Options, _ *Deps) { o.MACheckInterval = 20 * time.Millisecond })
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { h.srv.RunMACheck(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	waitUntil(t, func() bool { return h.srv.maRefused.Load() })
+	stub.set(nil)
+	waitUntil(t, func() bool { return !h.srv.maRefused.Load() })
+	// MA down is not a token problem.
+	stub.set(ma.ErrUnavailable)
+	n := stub.n.Load()
+	waitUntil(t, func() bool { return stub.n.Load() > n+2 })
+	if h.srv.maRefused.Load() {
+		t.Error("MA down set the refused warning")
+	}
+}
+
+// With the interval at zero the check runs once, at start.
+func TestMATokenCheckOnce(t *testing.T) {
+	stub := &countMA{}
+	h := newHarness(t, withMA(stub), func(o *config.Options, _ *Deps) { o.MACheckInterval = 0 })
+	done := make(chan struct{})
+	go func() { h.srv.RunMACheck(t.Context()); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunMACheck with no interval did not return")
+	}
+	if n := stub.n.Load(); n != 1 {
+		t.Errorf("%d checks, want 1", n)
+	}
+}
+
+// Without Music Assistant set up there is no check and no call.
+func TestMATokenCheckOff(t *testing.T) {
+	stub := &countMA{}
+	h := newHarness(t, func(_ *config.Options, d *Deps) {
+		d.NewMA = func(string, string, time.Duration) (ma.Client, error) { return stub, nil }
+	})
+	h.srv.RunMACheck(t.Context())
+	if n := stub.n.Load(); n != 0 {
+		t.Errorf("%d calls with MA off", n)
+	}
 }

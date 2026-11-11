@@ -9,6 +9,8 @@
   "timezone": "America/Chicago",
   "schedule": ["before 6am on monday"],
   "minimumReleaseAge": "3 days",
+  "minimumReleaseAgeBehaviour": "timestamp-required",
+  "internalChecksFilter": "strict",
   "postUpdateOptions": ["gomodTidy"],
   "packageRules": [
     {
@@ -30,9 +32,11 @@
       "groupName": "go toolchain"
     },
     {
-      "description": "One PR for GitHub Actions.",
+      "description": "One PR for GitHub Actions. It waits 7 days and needs a manual review. This rule comes after the automerge rule, so it wins.",
       "matchManagers": ["github-actions"],
-      "groupName": "github actions"
+      "groupName": "github actions",
+      "minimumReleaseAge": "7 days",
+      "automerge": false
     }
   ]
 }

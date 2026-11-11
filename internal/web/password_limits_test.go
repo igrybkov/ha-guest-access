@@ -32,8 +32,8 @@ func (h *harness) tryPassword(l model.Link, pw, peer string) *httptest.ResponseR
 	return h.g(req{method: "POST", path: "/g/" + l.Slug + "/password", body: map[string]any{"password": pw}, peer: peer})
 }
 
-// peerN is a distinct client address for each n.
-func peerN(n int) string { return fmt.Sprintf("[2001:db8::%x]:4000", n+1) }
+// peerN is a distinct client for each n: an address in its own /64.
+func peerN(n int) string { return fmt.Sprintf("[2001:db8:%x::1]:4000", n+1) }
 
 // lockoutScopes lists the scope of each guest_access_lockout event.
 func (h *harness) lockoutScopes() []string {

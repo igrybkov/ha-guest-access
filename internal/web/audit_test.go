@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -343,5 +344,53 @@ func TestAuditDenialFloodKeepsAdminRecords(t *testing.T) {
 	}
 	if n := bytes.Count(all, []byte(`"event":"guest.act.denied"`)); n > 5 {
 		t.Errorf("%d denial records for one client in 5 s", n)
+	}
+}
+
+// A miss flood from rotating addresses passes the per-key throttle, so
+// the global cap holds it: past audit.max_denials_per_min, the rest of
+// the minute becomes one summary record. Allowed and admin records in
+// the same minute are all kept.
+func TestAuditCapsDenialFloodFromManyIPs(t *testing.T) {
+	const max, flood = 10, 50
+	ah := newAuditHarness(t, func(o *config.Options, _ *Deps) {
+		o.AuditMaxDenialsPerMin = max
+		o.LimitsEnabled = false // the limiters would stop the flood first
+	})
+	l := ah.link("guest_room")
+	for i := range flood {
+		ah.g(req{method: "GET", path: "/g/no-such-slug-here/state", peer: fmt.Sprintf("198.51.%d.%d:1000", i/250, i%250+1)})
+	}
+	const acts = 5
+	for range acts {
+		ah.act(l, "light.guest_room", "light.turn_off", nil) // a discrete action: no slider throttle
+	}
+	ah.a(req{method: "POST", path: "/api/links/" + l.ID + "/revoke", body: map[string]any{}})
+	count := func(event string) (n int, sum int) {
+		for _, r := range ah.records() {
+			if r.Event == event {
+				n++
+				sum += r.Count
+			}
+		}
+		return n, sum
+	}
+	if n, _ := count("guest.slug.miss"); n != max {
+		t.Errorf("%d miss records, want %d", n, max)
+	}
+	if n, _ := count(auditEventDenialsCapped); n != 0 {
+		t.Errorf("summary before the minute ended: %d", n)
+	}
+	if n, _ := count("guest.act.allowed"); n != acts {
+		t.Errorf("%d allowed records, want %d", n, acts)
+	}
+	if n, _ := count("admin.link.revoke"); n != 1 {
+		t.Errorf("%d admin records", n)
+	}
+	// The next record, of any kind, after the minute writes the summary.
+	ah.advance(time.Minute)
+	ah.g(req{method: "GET", path: "/g/" + l.Slug})
+	if n, sum := count(auditEventDenialsCapped); n != 1 || sum != flood-max {
+		t.Errorf("summaries %d with count %d, want 1 with %d", n, sum, flood-max)
 	}
 }

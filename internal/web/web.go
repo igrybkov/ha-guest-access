@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -134,10 +135,16 @@ type Server struct {
 	audit   *audit.Logger
 	// auditThrottle holds back records a client can cause in bulk.
 	auditThrottle *audit.Throttle
+	// denialCap caps bulk denial records per minute across all clients.
+	denialCap *audit.Cap
 	// sliderThrottle spaces the allowed records of slider drags.
 	sliderThrottle *audit.Throttle
 	diag           *diagRing
 	assets         *assetSet
+	// badLinks holds the problems last logged for each link that fails
+	// policy.ServableLink, so each is logged once.
+	badMu    sync.Mutex
+	badLinks map[string]string
 	// maRefused is true while Music Assistant refuses the token: set by
 	// a party call that gets ma.ErrUnauthorized, cleared by one that
 	// works. The admin API shows it as a warning.
@@ -147,15 +154,17 @@ type Server struct {
 // New returns a Server.
 func New(d Deps) *Server {
 	s := &Server{
-		deps:    d,
-		log:     d.Logger,
-		devices: d.Devices,
-		newMA:   d.NewMA,
-		streams: streamCounter{open: map[string]int{}},
-		audit:   d.Audit,
+		deps:     d,
+		log:      d.Logger,
+		devices:  d.Devices,
+		newMA:    d.NewMA,
+		streams:  newStreamCounter(),
+		badLinks: map[string]string{},
+		audit:    d.Audit,
 
 		auditThrottle:  audit.NewThrottle(auditThrottlePeriod),
 		sliderThrottle: audit.NewThrottle(sliderAuditPeriod),
+		denialCap:      audit.NewCap(d.Options.AuditMaxDenialsPerMin, time.Minute),
 		diag:           newDiagRing(max(1, d.Options.DiagRequests)),
 		assets:         loadAssets(),
 	}
@@ -211,7 +220,7 @@ func New(d Deps) *Server {
 			PendingTTL: a.PendingTTL, MaxPending: a.MaxPending, MaxDevices: a.MaxDevices,
 			EventsPerHour: a.EventsPerHour, TouchThrottle: a.TouchThrottle,
 			MaxBodyBytes: s.deps.Options.GuestBodyBytes, EventTimeout: s.deps.Options.HAEventTimeout,
-			Audit: d.Audit,
+			Audit: d.Audit, IPv6Prefix: s.deps.Options.Settings.RateLimits.IPv6Prefix,
 		})
 	}
 	return s

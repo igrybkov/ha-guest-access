@@ -4,6 +4,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/catalog"
 	"github.com/igrybkov/ha-guest-access/internal/model"
@@ -138,5 +139,40 @@ func TestEveryCatalogActionPasses(t *testing.T) {
 	}
 	if err := ValidateLink(model.Link{Extra: []model.Rule{r}}, model.Templates{}, settings(false), false); err != nil {
 		t.Error(err)
+	}
+}
+
+// ServableLink refuses a stored link that a hand edit broke, and leaves
+// the checks that depend on options, HA or templates to the guest side.
+func TestServableLink(t *testing.T) {
+	ok := func() model.Link {
+		return model.Link{ID: "abcd0001", Name: "Hand", Slug: "handwrittenslug0001",
+			ValidUntil: time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC), TemplateIDs: []string{"gone"}, Extra: []model.Rule{rule(nil)}}
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*model.Link)
+		want []string
+	}{
+		{"valid", func(*model.Link) {}, nil},
+		{"missing template is not a link problem", func(l *model.Link) { l.TemplateIDs = []string{"nope"} }, nil},
+		{"local while off is not a link problem", func(l *model.Link) { l.Extra[0].Access = local() }, nil},
+		{"near home is not a link problem", func(l *model.Link) { l.Extra[0].Access = near() }, nil},
+		{"network typo", func(l *model.Link) { l.Extra[0].Access = &model.Access{Network: "LOCAL"} }, []string{"extra[0].access.network"}},
+		{"negative radius", func(l *model.Link) { l.Extra[0].Access = &model.Access{NearHomeM: -5} }, []string{"extra[0].access.near_home_m"}},
+		{"wildcard only", func(l *model.Link) { l.Extra[0].Select = model.Selector{Entities: []string{"*"}} }, []string{"extra[0].select.entities[0]"}},
+		{"short slug", func(l *model.Link) { l.Slug = "abc" }, []string{"slug"}},
+		{"no end", func(l *model.Link) { l.ValidUntil = time.Time{} }, []string{"valid_until"}},
+		{"code variable", func(l *model.Link) {
+			l.Extra[0] = model.Rule{Select: model.Selector{Entities: []string{"script.x"}}, Actions: []string{"script.run"},
+				Variables: map[string]any{"Code": "1"}}
+		}, []string{"extra[0].variables"}},
+		{"unknown action", func(l *model.Link) { l.Extra[0].Actions = []string{"lock.smash"} }, []string{"extra[0].actions[0]"}},
+	} {
+		l := ok()
+		tc.edit(&l)
+		if got := paths(t, ServableLink(l)); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: problems at %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

@@ -61,7 +61,19 @@ type RateLimits struct {
 	PasswordLinkDelayS   int `yaml:"password_link_delay_s" json:"password_link_delay_s"`
 	// AdminPerMin limits the admin API.
 	AdminPerMin int `yaml:"admin_per_min" json:"admin_per_min"`
+	// IPv6Prefix is the prefix length every per-IP limit and the password
+	// guard key an IPv6 client on. One home or phone gets a whole /64 and
+	// can use any address in it.
+	IPv6Prefix int `yaml:"ipv6_prefix" json:"ipv6_prefix"`
 }
+
+// IPv6 prefix bounds for RateLimits.IPv6Prefix. A shorter prefix would
+// put many homes in one bucket.
+const (
+	DefaultIPv6Prefix = 64
+	MinIPv6Prefix     = 32
+	MaxIPv6Prefix     = 128
+)
 
 // DefaultRateLimits returns the limits of a new install.
 func DefaultRateLimits() RateLimits {
@@ -82,6 +94,7 @@ func DefaultRateLimits() RateLimits {
 		PasswordLockoutMin:   60,
 		PasswordLinkDelayS:   10,
 		AdminPerMin:          600,
+		IPv6Prefix:           DefaultIPv6Prefix,
 	}
 }
 
@@ -106,6 +119,7 @@ func (r RateLimits) WithDefaults() RateLimits {
 		{&r.PasswordLockoutMin, &d.PasswordLockoutMin},
 		{&r.PasswordLinkDelayS, &d.PasswordLinkDelayS},
 		{&r.AdminPerMin, &d.AdminPerMin},
+		{&r.IPv6Prefix, &d.IPv6Prefix},
 	} {
 		if *f.v == 0 {
 			*f.v = *f.def
@@ -139,6 +153,9 @@ func (r RateLimits) validate(p *problems, path string) {
 		if f.v <= 0 {
 			p.add(join(path, f.name), "must be positive")
 		}
+	}
+	if r.IPv6Prefix < MinIPv6Prefix || r.IPv6Prefix > MaxIPv6Prefix {
+		p.add(join(path, "ipv6_prefix"), "must be between %d and %d", MinIPv6Prefix, MaxIPv6Prefix)
 	}
 }
 

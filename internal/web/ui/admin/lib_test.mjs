@@ -7,6 +7,7 @@ import {
   parseVarValue, slugifyID, normalizeTemplatePath, parentPath, fieldFor, groupProblems,
   approvalMode, splitTemplates, linkBadges, rotateWarning, grantSummary,
   auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections, settingsWarnings, addMonth, PRESETS,
+  linkProblems, removePasswordPrompt,
 } from './lib.js';
 
 // ---- Patterns ----
@@ -385,7 +386,7 @@ const settingsSample = {
     continuous_per_min: 205, continuous_burst: 206, max_streams_per_link: 207,
     misses_per_hour_per_ip: 208, misses_per_hour_global: 209,
     password_fails_per_ip: 210, password_fails_per_link: 211, password_lockout_min: 212, admin_per_min: 213,
-    assets_per_min: 214, assets_burst: 215, password_link_delay_s: 216,
+    assets_per_min: 214, assets_burst: 215, password_link_delay_s: 216, ipv6_prefix: 217,
   },
   tunables: {
     ma_timeout_ms: 301, location_ttl_min: 302, max_accuracy_m: 303,
@@ -395,6 +396,8 @@ const settingsSample = {
     approval: { pending_ttl_min: 312, max_pending: 313, max_devices: 314, events_per_hour: 315, touch_throttle_min: 316 },
     ha_call_timeout_s: 317, ha_event_timeout_s: 318, stream_recheck_s: 319, stream_heartbeat_s: 320,
     stream_retry_after_s: 321, audit_enabled: true, audit_max_file_kib: 322,
+    ma_check_interval_min: 323, custom_slug_warn_len: 324, http_read_timeout_s: 325, max_header_kib: 326,
+    stream_max_per_ip: 327, audit_max_denials_per_min: 328,
   },
 };
 
@@ -468,4 +471,26 @@ test('1 month: December rolls into January of the next year', () => {
   const ymd = (d) => [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()];
   assert.deepEqual(ymd(addMonth(new Date(2026, 11, 15, 18, 0))), [2027, 1, 15, 18, 0]);
   assert.deepEqual(ymd(addMonth(new Date(2026, 11, 31, 23, 59))), [2027, 1, 31, 23, 59]);
+});
+
+// ---- Link problems and passwords ----
+
+test('linkProblems lists path and message, and nothing for a good link', () => {
+  assert.deepEqual(linkProblems({}), []);
+  assert.deepEqual(linkProblems({ problems: [] }), []);
+  assert.deepEqual(linkProblems({ problems: [{ path: 'extra[0].access.network', message: 'must be any or local' }, { path: '', message: 'x' }] }),
+    ['extra[0].access.network: must be any or local', 'x']);
+});
+
+test('removing the last password says the link opens to anyone with the URL', () => {
+  const anna = { id: 'p1', label: 'Anna' };
+  const bob = { id: 'p2', label: 'Bob' };
+  const last = removePasswordPrompt({ passwords: [anna] }, anna);
+  assert.match(last.title, /last password/);
+  assert.match(last.body, /anyone with the URL/);
+  assert.notEqual(last.ok, 'Remove');
+  const one = removePasswordPrompt({ passwords: [anna, bob] }, anna);
+  assert.doesNotMatch(one.title, /last/);
+  assert.doesNotMatch(one.body, /anyone/);
+  assert.equal(one.ok, 'Remove');
 });

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -57,7 +59,9 @@ const (
 //
 // Under Supervisor (SUPERVISOR_TOKEN set) the HA websocket is the
 // Supervisor proxy, and HA_URL, HA_TOKEN and DEV_ADMIN_ANY_PEER are
-// ignored. Outside it, HA_URL and HA_TOKEN are required. HA_URL may be the
+// ignored. Outside it, HA_URL and HA_TOKEN are required, and
+// DEV_ADMIN_ANY_PEER=1 needs a loopback LISTEN: it lets any peer reach the
+// admin API, so it must never listen on a network interface. HA_URL may be the
 // HA base URL (https://hass.example) or a full websocket URL.
 func Load() (Config, error) { return load(os.Getenv, os.ReadFile) }
 
@@ -97,6 +101,9 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error)) (Co
 		return c, nil
 	}
 	c.DevAdminAnyPeer = getenv("DEV_ADMIN_ANY_PEER") == "1"
+	if c.DevAdminAnyPeer && !loopbackListen(c.Listen) {
+		return Config{}, fmt.Errorf("DEV_ADMIN_ANY_PEER=1 turns off the admin peer check, so LISTEN must be a loopback address such as 127.0.0.1:8099, not %q", c.Listen)
+	}
 	c.HAToken = getenv("HA_TOKEN")
 	if getenv("HA_URL") == "" || c.HAToken == "" {
 		return Config{}, errors.New("outside Supervisor, HA_URL and HA_TOKEN are required")
@@ -106,6 +113,20 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error)) (Co
 		return Config{}, err
 	}
 	return c, nil
+}
+
+// loopbackListen reports whether listen ("host:port") binds a loopback
+// address only. An empty host binds every interface.
+func loopbackListen(listen string) bool {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.IsLoopback()
 }
 
 // SlogLevel returns the slog level for c.LogLevel.

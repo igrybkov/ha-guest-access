@@ -19,6 +19,11 @@ type Home struct {
 	Lon float64 `json:"lon"`
 }
 
+// Set reports whether HA has a home location. HA reports 0, 0 when none
+// is set. Those coordinates are public knowledge, so a near-home check
+// against them must fail.
+func (h Home) Set() bool { return h != Home{} }
+
 // Entity is an entity registry entry.
 type Entity struct {
 	ID       string `json:"entity_id"`

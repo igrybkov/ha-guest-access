@@ -64,5 +64,16 @@ build leaves no tag. A version ending in `-dev` is never released.
 
 ## Dependencies
 
-Renovate opens update PRs on Monday mornings. Minor, patch and digest
-updates merge by themselves once CI passes. Major updates wait for review.
+Renovate opens update PRs on Monday mornings (`renovate.json`).
+
+- Every release soaks before Renovate proposes it: 3 days for Go modules
+  and Docker base images, 7 days for GitHub Actions. No branch or PR
+  exists for a version until its soak ends.
+- An update with no release timestamp never counts as soaked, so Renovate
+  holds it. Docker Hub and the Go module proxy give timestamps.
+- Go modules and Docker base images (versions, digests and pins) merge by
+  themselves once CI passes, when the update is minor, patch, digest or
+  pin. That keeps security fixes fast.
+- GitHub Actions updates always wait for review. An action runs with the
+  repo's tokens.
+- Major updates always wait for review.

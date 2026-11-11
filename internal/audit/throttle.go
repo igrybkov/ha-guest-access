@@ -63,3 +63,61 @@ func (t *Throttle) sweep(now time.Time) {
 		clear(t.keys)
 	}
 }
+
+// Cap lets at most max records through per window, whatever their key.
+// Throttle holds back one key; Cap holds back a flood spread over many
+// keys, such as denials from many addresses. Each window that left
+// records out is summed up once (see Allow and Flush), so the file still
+// says how many there were. A max of 0 or less means no cap.
+type Cap struct {
+	max int
+	per time.Duration
+
+	mu      sync.Mutex
+	start   time.Time // zero = no window yet
+	n       int       // records let through in this window
+	skipped int       // records left out in this window
+}
+
+// NewCap returns a Cap of max records per window per.
+func NewCap(max int, per time.Duration) *Cap {
+	return &Cap{max: max, per: per}
+}
+
+// Allow reports whether one more record may go out at now. summary is
+// the count left out in a window that has just ended; when it is above
+// zero, the caller writes one summary record with it.
+func (c *Cap) Allow(now time.Time) (ok bool, summary int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	summary = c.roll(now)
+	if c.max <= 0 {
+		return true, summary
+	}
+	if c.n >= c.max {
+		c.skipped++
+		return false, summary
+	}
+	c.n++
+	return true, summary
+}
+
+// Flush ends the window if it is over and returns the count it left out,
+// for a summary record. Call it with any record, so a summary does not
+// wait for the next capped one.
+func (c *Cap) Flush(now time.Time) (summary int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.roll(now)
+}
+
+// roll starts a new window when the current one is over (or the clock
+// stepped back), and returns what the old one left out. It requires c.mu.
+func (c *Cap) roll(now time.Time) int {
+	if !c.start.IsZero() && now.Sub(c.start) < c.per && !now.Before(c.start) {
+		return 0
+	}
+	skipped := c.skipped
+	c.start, c.n, c.skipped = now, 0, 0
+	return skipped
+}

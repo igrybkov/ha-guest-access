@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
 )
@@ -13,6 +14,29 @@ import (
 // diagnostics show them; access.ClientFrom reads only X-Forwarded-For and
 // X-Forwarded-Proto, and only from a trusted peer.
 var forwardHeaders = []string{"Forwarded", "X-Forwarded-For", "X-Forwarded-Proto", "X-Forwarded-Host", "X-Real-Ip", "Cf-Connecting-Ip"}
+
+// maxDiagValue bounds each text value a diagnostics entry keeps: a route
+// and each forwarding header. A client picks these, and the ring keeps
+// many entries, so each one stays small. It is a fixed bound, not an
+// option: the values only help to read the proxy setup, and 256 bytes
+// hold any real address list.
+const maxDiagValue = 256
+
+// clip cuts s to at most n bytes, on a rune boundary.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	// Back up to the start of the rune that crosses n, if one does.
+	cut := n
+	for cut > 0 && cut > n-utf8.UTFMax && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	if !utf8.RuneStart(s[cut]) {
+		cut = n // not UTF-8 here: cut at n
+	}
+	return s[:cut]
+}
 
 // DiagEntry is how the app saw one guest request. It never holds the path
 // (the slug is in it), a body or a cookie.
@@ -82,7 +106,7 @@ func diagEntry(r *http.Request, c access.Client, local bool, at time.Time) DiagE
 			if e.Headers == nil {
 				e.Headers = map[string]string{}
 			}
-			e.Headers[h] = strings.Join(v, ", ")
+			e.Headers[h] = clip(strings.Join(v, ", "), maxDiagValue)
 		}
 	}
 	e.UntrustedForwarding = len(e.Headers) > 0 && !c.ViaProxy
@@ -90,7 +114,8 @@ func diagEntry(r *http.Request, c access.Client, local bool, at time.Time) DiagE
 }
 
 // routeLabel names a path without its slug, for logs and diagnostics:
-// "/g/<slug>/state" is "g/state", "/g/<slug>" is "g/page".
+// "/g/<slug>/state" is "g/state", "/g/<slug>" is "g/page". A path under
+// /api/ is kept, cut to maxDiagValue bytes.
 func routeLabel(path string) string {
 	switch {
 	case strings.HasPrefix(path, "/g/"):
@@ -106,7 +131,7 @@ func routeLabel(path string) string {
 	case strings.HasPrefix(path, "/assets/"):
 		return "assets"
 	case strings.HasPrefix(path, "/api/"):
-		return path
+		return clip(path, maxDiagValue)
 	}
 	return "other"
 }

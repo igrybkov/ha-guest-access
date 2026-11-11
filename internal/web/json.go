@@ -26,6 +26,7 @@ const (
 	msgTooLarge   = "Request too large."
 	msgJSONOnly   = "Send JSON."
 	msgOrigin     = "Cross-site request refused."
+	msgNoHome     = "Location checks are not set up."
 )
 
 type errorBody struct {

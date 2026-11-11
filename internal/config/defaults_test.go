@@ -9,6 +9,7 @@ import (
 	"github.com/igrybkov/ha-guest-access/internal/config"
 	"github.com/igrybkov/ha-guest-access/internal/inventory"
 	"github.com/igrybkov/ha-guest-access/internal/ma"
+	"github.com/igrybkov/ha-guest-access/internal/model"
 )
 
 // Package constants are only fallbacks for zero options, but a fallback
@@ -36,6 +37,8 @@ func TestPackageDefaultsMatchOptions(t *testing.T) {
 		{"approval.DefaultEventTimeout", approval.DefaultEventTimeout, o.HAEventTimeout},
 		{"ma.Timeout", ma.Timeout, o.MATimeout},
 		{"inventory.MaxAge", inventory.MaxAge, o.InventoryMaxAge},
+		{"access.DefaultIPv6Prefix", access.DefaultIPv6Prefix, rl.IPv6Prefix},
+		{"model.DefaultIPv6Prefix", model.DefaultIPv6Prefix, rl.IPv6Prefix},
 	} {
 		if c.got != c.want {
 			t.Errorf("%s = %v, option default %v", c.name, c.got, c.want)

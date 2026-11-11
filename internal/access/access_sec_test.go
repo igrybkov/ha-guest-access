@@ -153,7 +153,7 @@ func TestSecGuardParallelAllow(t *testing.T) {
 		var wg sync.WaitGroup
 		for range 300 {
 			wg.Go(func() {
-				if ok, _ := g.Allow("l", netip.MustParseAddr("203.0.113.1"), now); ok {
+				if ok, _, _ := g.Allow("l", netip.MustParseAddr("203.0.113.1"), now); ok {
 					n.Add(1)
 				}
 			})
@@ -169,7 +169,7 @@ func TestSecGuardParallelAllow(t *testing.T) {
 		var wg sync.WaitGroup
 		for i := range 300 {
 			wg.Go(func() {
-				if ok, _ := g.Allow("l", netip.AddrFrom4([4]byte{198, 51, 100, byte(i)}), now); ok {
+				if ok, _, _ := g.Allow("l", netip.AddrFrom4([4]byte{198, 51, 100, byte(i)}), now); ok {
 					n.Add(1)
 				}
 			})

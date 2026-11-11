@@ -388,6 +388,31 @@ export function groupProblems(problems, keys, normalize = (p) => p) {
 
 export const STATUS_LABELS = { active: 'Active', scheduled: 'Scheduled', expired: 'Expired', revoked: 'Revoked' };
 
+// brokenLinkNote is what the admin sees on a link that does not
+// validate (a hand edit of links.yaml broke it).
+export const brokenLinkNote = 'This link does not validate, so guests get "not found". Fix these and save:';
+
+// linkProblems turns a link's problems into lines like
+// "extra[0].access.network: ...". An empty list means the link is fine.
+export function linkProblems(l) {
+  return (l.problems || []).map((p) => (p.path ? `${p.path}: ${p.message}` : p.message));
+}
+
+// removePasswordPrompt is the confirm dialog for removing password p of
+// link l. Removing the last one opens the link to anyone with the URL,
+// so that case says so.
+export function removePasswordPrompt(l, p) {
+  const others = (l.passwords || []).filter((x) => x.id !== p.id).length;
+  if (others === 0) {
+    return {
+      title: `Remove the last password, for ${p.label}?`,
+      body: 'The link then has no password, so anyone with the URL can open it.',
+      ok: 'Remove and open the link',
+    };
+  }
+  return { title: `Remove the password for ${p.label}?`, body: 'Guests signed in with it lose access at once.', ok: 'Remove' };
+}
+
 // linkBadges lists the small tags on a link row.
 export function linkBadges(l) {
   const out = [];
@@ -513,6 +538,7 @@ export function settingsSections(s) {
       ['URL', s.music_assistant?.url],
       ['Token', tokenState(s.ma_token)],
       ['Timeout (ms)', t.ma_timeout_ms],
+      ['Token check (min, 0 = at start only)', t.ma_check_interval_min],
     ] },
     { id: 'guest', title: 'Guest page', rows: [
       ['Title', g.title],
@@ -537,6 +563,7 @@ export function settingsSections(s) {
       ['Password lockout per address (min)', r.password_lockout_min],
       ['Slowed link delay (s)', r.password_link_delay_s],
       ['Admin requests per minute', r.admin_per_min],
+      ['IPv6 prefix length per client', r.ipv6_prefix],
     ] },
     { id: 'ha', title: 'Home Assistant', rows: [
       ['Service call timeout (s)', t.ha_call_timeout_s],
@@ -547,6 +574,7 @@ export function settingsSections(s) {
       ['Access recheck (s)', t.stream_recheck_s],
       ['Heartbeat (s)', t.stream_heartbeat_s],
       ['Reconnect wait (s)', t.stream_retry_after_s],
+      ['Open pages per address, per link', t.stream_max_per_ip],
     ] },
     { id: 'approval', title: 'Device approval', rows: [
       ['Device request expires (min)', a.pending_ttl_min],
@@ -558,6 +586,7 @@ export function settingsSections(s) {
     { id: 'audit', title: 'Activity log', rows: [
       ['Log file', onOff(t.audit_enabled)],
       ['Max file size (KiB)', t.audit_max_file_kib],
+      ['Refusals recorded per minute', t.audit_max_denials_per_min],
     ] },
     { id: 'tunables', title: 'Other', rows: [
       ['Location valid for (min)', t.location_ttl_min],
@@ -565,8 +594,11 @@ export function settingsSections(s) {
       ['Password window per IP (min)', t.password_window_per_ip_min],
       ['Password window per link (min)', t.password_window_per_link_min],
       ['Custom slug length', t.custom_slug_min_len != null ? `${t.custom_slug_min_len} to ${t.custom_slug_max_len}` : null],
+      ['Short custom slug warning below', t.custom_slug_warn_len],
       ['Guest body limit (KiB)', t.guest_body_kib],
       ['Admin body limit (KiB)', t.admin_body_kib],
+      ['Request read timeout (s)', t.http_read_timeout_s],
+      ['Header limit (KiB)', t.max_header_kib],
       ['Diagnostics kept', t.diagnostics_requests],
     ] },
   ];

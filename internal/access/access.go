@@ -31,6 +31,9 @@ func DistanceM(lat1, lon1, lat2, lon2 float64) float64 {
 // slugBytes is the entropy of a random slug: 128 bits.
 const slugBytes = 16
 
+// RandomSlugLen is the length of a slug from NewSlug.
+const RandomSlugLen = 22
+
 // NewSlug returns a random slug: 16 bytes from crypto/rand, base64url
 // without padding (22 characters).
 func NewSlug() string {

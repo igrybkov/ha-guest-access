@@ -57,6 +57,8 @@ An entity's own area wins over its device's area. A device in the area "Guest ro
 
 The app does not expand floors, groups or child devices.
 
+A `devices:` pattern matches the display name, and that name can change without you. An HA user can rename a device, and some integrations take the name from the device itself. A device whose new name matches the pattern joins the rule, and its entities become guest controls. Device IDs never change, so use them for anything that matters, such as locks and alarms.
+
 ### Wildcards
 
 A `*` matches any run of characters, none included. It is the only wildcard.
@@ -246,7 +248,7 @@ A link is a URL, a validity window and a set of templates plus optional extra ru
 
 A link with **one time** on lets each pair of entity and action run once. Other pairs stay available. A guest who unlocks the door once can still dim a light, and can dim it once.
 
-The app marks the use before it calls HA. If the HA call fails, the app gives the use back. Parallel taps on the same control let exactly one through.
+The app marks the use before it calls HA. A failed call gives the use back only when HA clearly refused it, for example with an error about the entity. After a timeout or a lost connection the app can't tell whether the action ran, so the use stays spent. Parallel taps on the same control let exactly one through.
 
 ### Random and custom slugs
 
@@ -254,6 +256,8 @@ The slug is the secret part of the URL: `/g/<slug>`.
 
 - A random slug is 22 characters from 128 random bits. It cannot be guessed.
 - A custom slug is easier to remember and easier to guess. It uses `a-z`, `0-9` and `-`. It cannot start or end with `-` or hold `--`. Its length is between `links.custom_slug_min_len` and `links.custom_slug_max_len` (12 to 64 by default). Pair a custom slug with a password.
+- Random slugs are the default and the safest. A custom slug shorter than `links.custom_slug_warn_len` (16) gets a warning on the admin page. It still works.
+- The limits on wrong links slow down guessing, but they never block a valid link. A guest with the right URL always gets in, even from an address that guessed wrong too often.
 
 The app keeps each slug so the admin screen can show the URL again.
 
@@ -368,6 +372,8 @@ This is opt-in and best effort. Turn it on with `local_access.enabled`. It is of
 - You cannot save a rule with `network: local`.
 - An existing `network: local` rule denies every request (it fails closed). The link shows a warning.
 
+When it is on, set `trusted_proxies` if guests come through a reverse proxy or tunnel. Without it, every guest has the proxy's address, and if that address is on your network, every guest counts as local. The app warns about this in the log at start and on the Diagnostics page.
+
 Local only can fail. A guest on your Wi-Fi may still look like an outside guest. That guest loses the local controls. Nobody gains any access. Read the failure cases below before you rely on it.
 
 ### What counts as local
@@ -428,7 +434,7 @@ If **Peer** is your proxy and **Client** is the same address, add the proxy to `
 
 ## Near home
 
-A rule can ask for `near_home_m`, a radius in meters around your HA home location. Set the home location in HA first (Settings, System, General).
+A rule can ask for `near_home_m`, a radius in meters around your HA home location. Set the home location in HA first (Settings, System, General). Without one, HA reports 0, 0. The app then refuses every location check, so near-home rules deny every request.
 
 How it works:
 
@@ -459,6 +465,8 @@ To turn it on:
 
 The app asks MA for the join URL each time the page needs it. The call times out after `music_assistant.timeout_ms` milliseconds (2000). If MA is down, slow or refuses the token, the button is left out and nothing else changes.
 
+The app also checks the token once at start, and then every `music_assistant.check_interval_min` minutes (60). A refused token shows as a warning on the Settings and Diagnostics pages, before a guest finds the button missing. Without Music Assistant set up, the app never calls it.
+
 A long-lived token expires. When it does, the party button disappears. Make a new token and update the option.
 
 When MA refuses the token, the app logs a warning, and the Settings and Diagnostics pages show it. The app learns this only when a guest asks for the party, so the warning shows after the first refused call. It goes away after the next call that works.
@@ -481,7 +489,7 @@ Every route has a limit. Over a limit, the app answers 429 with a `Retry-After` 
 | Wrong links, all addresses together | 100 per hour | one global key |
 | Discrete actions and state reads | 120 per minute, burst 40 | link and client address |
 | Continuous actions (sliders) | 600 per minute, burst 120 | link, client address and entity |
-| Open live-update streams | 10 | link |
+| Open live-update streams | 10 per link, 3 per client address | link, and link and client address |
 | Wrong passwords | see **Passwords**: a lockout per address, a slow-down per link | link and client address, and link |
 | New device requests | see **Device approval** | link |
 | Admin API | 600 per minute | peer |
@@ -489,6 +497,8 @@ Every route has a limit. Over a limit, the app answers 429 with a `Retry-After` 
 Notes:
 
 - A valid link always works, whatever the wrong-link limits say. Someone else's misses never lock a real guest out.
+- **IPv6 clients count by prefix.** A home or a phone gets a whole /64 of IPv6 addresses and can use a new one for each request. So every "client address" limit, and the password lockout, counts all addresses of one `rate_limits.ipv6_prefix` (/64) as one client. The log and the activity records still name the full address.
+- **Slow requests are cut off.** A client has `http.read_timeout_s` seconds (30) to send one request, and its headers may be at most `http.max_header_kib` KiB (64). Live updates stay open longer: the timeout only covers reading the request.
 - **Page files have their own limit.** The page's script and style files are the same for everyone and hold no secret. They do not count against the limit before sign-in, so many guests behind one home or mobile network address can load the page often.
 - **Continuous and discrete are separate.** Light brightness and color, fan speed and media volume send many values while a guest drags a slider. They use the continuous limiter, so dragging does not use up the limit for buttons. Note that `light.turn_on` counts as continuous, so a plain "on" tap uses it too.
 - Behind a proxy you do not trust, all guests share the proxy's address and one limiter. If many guests hit 429 together, check `trusted_proxies`.
@@ -537,6 +547,7 @@ Set these in the app's Configuration tab. Saving restarts the app. Each row show
 | `trusted_proxies` | `[]` | Proxies whose `X-Forwarded-For` the app believes, as IPs or CIDRs. Add your reverse proxy and your tunnel. |
 | `home_radius_default_m` | `300` | The near-home radius, in meters, that the template editor suggests. |
 | `music_assistant.timeout_ms` | `2000` | How long to wait for Music Assistant, in milliseconds. |
+| `music_assistant.check_interval_min` | `60` | Minutes between checks that Music Assistant takes the token. The app also checks once at start. `0` checks at start only. |
 | `guest.title` | `Welcome` | Title of the guest page. Plain text. |
 | `guest.slider_interval_ms` | `300` | Least milliseconds between two values the page sends while a slider moves. The final value always goes. |
 | `location.ttl_min` | `15` | Minutes a shared location counts. |
@@ -560,10 +571,14 @@ Set these in the app's Configuration tab. Saving restarts the app. Each row show
 | `rate_limits.password_lockout_min` | `60` | Minutes a locked-out address stays locked out of the link. |
 | `rate_limits.password_link_delay_s` | `10` | Seconds between two password tries on a slowed link, from any address. |
 | `rate_limits.admin_per_min` | `600` | Admin requests per minute, per peer. |
+| `rate_limits.ipv6_prefix` | `64` | Every per-address limit, and the password lockout, counts an IPv6 client by this prefix length. One home or phone gets a whole /64 and can use any address in it. 32 to 128. |
 | `links.custom_slug_min_len` | `12` | Shortest custom slug. Not below 12. |
 | `links.custom_slug_max_len` | `64` | Longest custom slug. |
+| `links.custom_slug_warn_len` | `16` | The admin page warns about a custom slug shorter than this. 12 to 22. |
 | `http.guest_body_kib` | `16` | Largest guest request body, in KiB. |
 | `http.admin_body_kib` | `1024` | Largest admin request body, in KiB. |
+| `http.read_timeout_s` | `30` | Seconds a client has to send one whole request, headers and body. Open live-update pages are not cut. |
+| `http.max_header_kib` | `64` | Largest request headers, in KiB. |
 | `diagnostics.requests` | `20` | Recent guest requests the Diagnostics page keeps. |
 | `inventory.max_age_s` | `5` | Seconds to keep the entity, device and area lists between HA registry changes. |
 | `approval.pending_ttl_min` | `10` | Minutes a new device waits for approval. |
@@ -576,8 +591,10 @@ Set these in the app's Configuration tab. Saving restarts the app. Each row show
 | `streams.recheck_s` | `5` | Seconds between checks that an open page may still see its link. A revoke ends the page's updates within this time. |
 | `streams.heartbeat_s` | `25` | Seconds between keep-alive messages, so proxies keep the connection open. |
 | `streams.retry_after_s` | `30` | Seconds a page waits when its link has the most open pages. |
+| `streams.max_per_ip` | `3` | Open live-update pages per link from one client address, inside `rate_limits.max_streams_per_link`. One address can't take every slot. |
 | `audit.enabled` | `true` | Write `/data/audit.jsonl`. The app log gets each record either way. |
 | `audit.max_file_kib` | `2048` | Size in KiB at which the audit file starts over. One older file is kept. |
+| `audit.max_denials_per_min` | `120` | Refused guest requests recorded each minute, from all addresses together. Past it, one `guest.denials.capped` record counts the rest. Admin, device and allowed records are always kept. |
 
 These options have no default. They are empty until you set them:
 
@@ -657,7 +674,7 @@ Pending device requests live in memory only. They are lost on a restart.
 
 **A link says it is not active.** The link has ended, has not started, or was revoked. Check its window on the **Links** screen.
 
-**A guest gets 404.** The slug is wrong, or it was rotated. Send the new URL.
+**A guest gets 404.** The slug is wrong, or it was rotated. Send the new URL. A link in `links.yaml` that a hand edit broke also gives 404: the app never serves a link that does not validate. The **Links** screen marks it and lists its problems, and the log has one warning for it.
 
 **A guest gets 429.** A rate limit was hit. If many guests get it, they probably share one address. Check `trusted_proxies` in **Diagnostics**.
 

@@ -15,6 +15,7 @@ import (
 	"github.com/igrybkov/ha-guest-access/internal/authz"
 	"github.com/igrybkov/ha-guest-access/internal/catalog"
 	"github.com/igrybkov/ha-guest-access/internal/model"
+	"github.com/igrybkov/ha-guest-access/internal/policy"
 )
 
 // Cookie name bases. The real name adds the link id
@@ -100,6 +101,9 @@ type guestReq struct {
 	lim    *limitSet
 	client access.Client
 	nets   []netip.Prefix // local networks from settings
+	// limKey keys the per-IP limiters: the client IP, or its IPv6 prefix
+	// (see access.KeyAddr). Logs and audit records use the full IP.
+	limKey string
 
 	// Set by the chain.
 	slug   string
@@ -113,7 +117,8 @@ type guestReq struct {
 	audit         guestAudit
 }
 
-// ipKey is the client IP as a limiter key.
+// ipKey is the full client IP, for logs and HA events. Limiters use
+// limKey.
 func (g *guestReq) ipKey() string {
 	if !g.client.IP.IsValid() {
 		return "invalid"
@@ -123,7 +128,7 @@ func (g *guestReq) ipKey() string {
 
 // allowPreauth takes a token from the pre-auth limiter, or answers 429.
 func (g *guestReq) allowPreauth() bool {
-	ok, retry := g.lim.preauth.Allow(g.ipKey(), g.now)
+	ok, retry := g.lim.preauth.Allow(g.limKey, g.now)
 	if !ok {
 		g.rateLimited(reasonLimitPreauth)
 		tooMany(g.w, retry)
@@ -134,7 +139,7 @@ func (g *guestReq) allowPreauth() bool {
 // allowAuthed takes a token from the per link + IP limiter of an
 // authenticated guest, or answers 429.
 func (g *guestReq) allowAuthed() bool {
-	ok, retry := g.lim.authed.Allow(g.link.ID+"|"+g.ipKey(), g.now)
+	ok, retry := g.lim.authed.Allow(g.link.ID+"|"+g.limKey, g.now)
 	if !ok {
 		g.rateLimited(reasonLimitActions)
 		tooMany(g.w, retry)
@@ -151,7 +156,7 @@ func (g *guestReq) allowAct(req authz.Request, grants authz.Grants) bool {
 	if _, granted := grants[authz.GrantKey{EntityID: req.EntityID, Action: req.Action}]; !ok || !act.Continuous || !granted {
 		return g.allowAuthed()
 	}
-	ok, retry := g.lim.cont.Allow(g.link.ID+"|"+g.ipKey()+"|"+req.EntityID, g.now)
+	ok, retry := g.lim.cont.Allow(g.link.ID+"|"+g.limKey+"|"+req.EntityID, g.now)
 	if !ok {
 		g.rateLimited(reasonLimitContinuous)
 		tooMany(g.w, retry)
@@ -176,7 +181,8 @@ type guestKey struct{}
 //     If steps 3 or 6 refuse it first, it takes a per link + IP token
 //     before the refusal is sent.
 //  2. The slug lookup. A valid slug always works, whatever the miss
-//     limiters say.
+//     limiters say. A link that fails policy.ServableLink (a hand edit
+//     of links.yaml broke it) counts as a miss.
 //  3. POST shape: JSON content type and a same-origin Origin header.
 //  4. link.Active(now).
 //  5. The password session, if the link has passwords.
@@ -197,7 +203,7 @@ func (s *Server) GuestHandler() http.Handler {
 	mux.HandleFunc("/g/{slug}/{route...}", slug)
 	mux.HandleFunc(assetsPrefix, func(w http.ResponseWriter, r *http.Request) {
 		g := reqOf(r)
-		if ok, retry := g.lim.assets.Allow(g.ipKey(), g.now); !ok {
+		if ok, retry := g.lim.assets.Allow(g.limKey, g.now); !ok {
 			g.rateLimited(reasonLimitAssets)
 			tooMany(w, retry)
 			return
@@ -244,7 +250,8 @@ func (s *Server) guestBase(next http.Handler) http.Handler {
 			}
 			s.log.Debug("guest request", attrs...)
 		}
-		g := &guestReq{w: w, now: now, st: st, lim: s.lim, client: c, nets: nets}
+		g := &guestReq{w: w, now: now, st: st, lim: s.lim, client: c, nets: nets,
+			limKey: access.LimitKey(c.IP, st.RateLimits.IPv6Prefix)}
 		g.r = r.WithContext(context.WithValue(r.Context(), guestKey{}, g))
 		next.ServeHTTP(w, g.r)
 		s.emitGuest(g)
@@ -286,6 +293,9 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 	// Steps 1 and 2.
 	g.slug = r.PathValue("slug")
 	link, found := s.deps.Links.FindBySlug(g.slug)
+	if found && !s.servable(link) {
+		found = false // a broken link is never served: it reads as a miss
+	}
 	if !found {
 		if g.allowPreauth() {
 			s.miss(g)
@@ -350,10 +360,30 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 	route.handle(s, g)
 }
 
+// servable reports whether a guest may use l: it passes
+// policy.ServableLink. A link that fails is logged once with its
+// problems, and again when they change. The admin API lists it with its
+// problems, so it can be fixed.
+func (s *Server) servable(l model.Link) bool {
+	err := policy.ServableLink(l)
+	s.badMu.Lock()
+	defer s.badMu.Unlock()
+	if err == nil {
+		delete(s.badLinks, l.ID)
+		return true
+	}
+	if msg := err.Error(); s.badLinks[l.ID] != msg {
+		s.badLinks[l.ID] = msg
+		s.log.Warn("a link in links.yaml does not validate; guests get not found until it is fixed",
+			"link", l.ID, "name", l.Name, "problems", msg)
+	}
+	return false
+}
+
 // miss answers an unknown slug: 404, or 429 once the client or everyone
 // together has missed too often.
 func (s *Server) miss(g *guestReq) {
-	if ok, retry := g.lim.missIP.Allow(g.ipKey(), g.now); !ok {
+	if ok, retry := g.lim.missIP.Allow(g.limKey, g.now); !ok {
 		g.rateLimited(reasonLimitMisses)
 		tooMany(g.w, retry)
 		return
@@ -369,30 +399,36 @@ func (s *Server) miss(g *guestReq) {
 }
 
 // session reports whether the request may use the link as far as
-// passwords go: the link has none, or the session cookie names a
-// password the link still has. It sets g.label.
+// passwords go: the link has none, or a session cookie names a password
+// the link still has. It sets g.label.
 func (s *Server) session(g *guestReq) bool {
 	g.label, g.sessionReason = "", ""
 	if len(g.link.Passwords) == 0 {
 		return true
 	}
-	c, err := g.r.Cookie(access.LinkCookie(sessionCookie, g.link.ID))
-	if err != nil {
+	// A browser can hold several cookies of one name (another path, or
+	// one a page script tossed in). Any one that checks out will do, so
+	// a stray cookie can't lock a guest out.
+	cs := g.r.CookiesNamed(access.LinkCookie(sessionCookie, g.link.ID))
+	if len(cs) == 0 {
 		g.sessionReason = reasonNoSession
 		return false
 	}
 	g.sessionReason = reasonSessionInvalid
-	pwID, ok := s.deps.Signer.VerifySession(g.link.ID, c.Value, g.now)
-	if !ok {
-		return false
+	for _, c := range cs {
+		pwID, ok := s.deps.Signer.VerifySession(g.link.ID, c.Value, g.now)
+		if !ok {
+			continue
+		}
+		pw, ok := g.link.Password(pwID)
+		if !ok {
+			continue // its password was removed
+		}
+		g.sessionReason = ""
+		g.label = pw.Label
+		return true
 	}
-	pw, ok := g.link.Password(pwID)
-	if !ok {
-		return false
-	}
-	g.sessionReason = ""
-	g.label = pw.Label
-	return true
+	return false
 }
 
 // checkPost refuses a POST that is not JSON or not from the page's own

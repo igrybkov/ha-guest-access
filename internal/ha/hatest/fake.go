@@ -43,6 +43,7 @@ type Fake struct {
 
 	mu   sync.Mutex
 	subs map[string][]*sub
+	lost []func()
 }
 
 type sub struct {
@@ -164,6 +165,25 @@ func (f *Fake) SetState(st ha.State) {
 
 func (f *Fake) stateIndex(entityID string) int {
 	return slices.IndexFunc(f.StateList, func(s ha.State) bool { return s.EntityID == entityID })
+}
+
+// OnEventsLost records fn. LoseEvents calls it.
+func (f *Fake) OnEventsLost(fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lost = append(f.lost, fn)
+}
+
+// LoseEvents acts out a dropped and restored connection: it calls every
+// OnEventsLost callback. Events emitted before it still reached
+// subscribers; a test that wants them lost should not emit them.
+func (f *Fake) LoseEvents() {
+	f.mu.Lock()
+	fns := slices.Clone(f.lost)
+	f.mu.Unlock()
+	for _, fn := range fns {
+		fn()
+	}
 }
 
 // FireEvent records the event. Read it with FiredEvents.

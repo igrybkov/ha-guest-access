@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/igrybkov/ha-guest-access/internal/approval"
 	"github.com/igrybkov/ha-guest-access/internal/authz"
 	"github.com/igrybkov/ha-guest-access/internal/model"
+	"github.com/igrybkov/ha-guest-access/internal/policy"
 )
 
 // linkView is one link in the admin API. Password hashes never appear:
@@ -24,6 +26,12 @@ type linkView struct {
 	// rule that selects nothing, network: local while local access is
 	// off.
 	Warnings []warningView `json:"warnings"`
+	// Problems are why the stored link does not validate (a hand edit of
+	// links.yaml). Guests get not found for it until it is fixed.
+	Problems []model.Problem `json:"problems"`
+	// SlugWarning is set when the slug is shorter than
+	// links.custom_slug_warn_len. Only a custom slug can be.
+	SlugWarning string `json:"slug_warning,omitempty"`
 	// Passwords and Devices shadow the link's fields so they are always
 	// lists, never left out. Approval comes from model.Link.
 	Passwords []model.LinkPassword `json:"passwords"`
@@ -35,7 +43,15 @@ type linkView struct {
 func (s *Server) linkView(l model.Link, inv *model.Inventory, ts []model.Template) linkView {
 	v := linkView{
 		Link: l, Status: l.Status(s.now()), Path: guestPath(l.Slug), URL: s.guestURL(l.Slug), Warnings: []warningView{},
+		Problems:  []model.Problem{},
 		Passwords: nonNil(l.Passwords), Devices: nonNil(l.Devices), Pending: s.devices.Pending(l.ID),
+	}
+	var ve *model.ValidationError
+	if err := policy.ServableLink(l); errors.As(err, &ve) {
+		v.Problems = ve.Problems
+	}
+	if len(l.Slug) < s.deps.Options.CustomSlugWarnLen {
+		v.SlugWarning = shortSlugWarning
 	}
 	if inv != nil {
 		_, warns := authz.Resolve(l, ts, *inv)
@@ -45,6 +61,9 @@ func (s *Server) linkView(l model.Link, inv *model.Inventory, ts []model.Templat
 	}
 	return v
 }
+
+// shortSlugWarning is the admin warning on a short custom slug.
+const shortSlugWarning = "This custom URL is short. Short URLs are easier to guess. A random URL is safest."
 
 func guestPath(slug string) string { return "/g/" + slug }
 

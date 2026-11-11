@@ -32,6 +32,7 @@ const (
 	reasonBadRequest      = "bad_request"
 	reasonTooLarge        = "too_large"
 	reasonHAError         = "ha_error"
+	reasonHAUnknown       = "ha_no_answer"
 	reasonOrigin          = "origin"
 	reasonContentType     = "content_type"
 	reasonWrongPassword   = "wrong_password"
@@ -45,6 +46,7 @@ const (
 	reasonLimitMisses     = "limit_slug_misses"
 	reasonLimitStreams    = "limit_streams"
 	reasonAccuracyTooLow  = "accuracy_too_low"
+	reasonNoHome          = "no_home"
 	auditThrottlePeriod   = time.Minute
 	// sliderAuditPeriod spaces the allowed records of a slider drag.
 	sliderAuditPeriod     = 10 * time.Second
@@ -107,38 +109,70 @@ var unthrottledDenials = map[string]bool{
 
 // bulkKey returns the throttle key of a record a client can cause in
 // bulk, or "" for a record that is always written. Rate limits and slug
-// misses are keyed per client IP. Every other guest denial is keyed per
-// event, reason, link and client IP, so a flood of one kind can't push
+// misses are keyed per client (limKey). Every other guest denial is keyed
+// per event, reason, link and client, so a flood of one kind can't push
 // older records (admin writes among them) out of the rotated file.
 func bulkKey(r audit.Record, g *guestReq) string {
 	switch {
 	case r.Event == auditEventRateLimited || r.Event == auditEventSlugMiss:
-		return r.Event + "|" + g.ipKey()
+		return r.Event + "|" + g.limKey
 	case r.Result == audit.ResultDenied && !unthrottledDenials[r.Event]:
-		return r.Event + "|" + r.Reason + "|" + g.link.ID + "|" + g.ipKey()
+		return r.Event + "|" + r.Reason + "|" + g.link.ID + "|" + g.limKey
 	}
 	return ""
 }
 
+// auditEventDenialsCapped is the summary record of denials the global
+// cap left out.
+const auditEventDenialsCapped = "guest.denials.capped"
+
+// capped reports whether bulk record r counts against the global denial
+// cap. Device records never do: approval keeps its own limits on them,
+// and an owner wants each one.
+func capped(r audit.Record) bool { return !strings.Contains(r.Event, "device") }
+
+// denialSummary writes one record for n denials the global cap left out
+// in the window that just ended. n of 0 writes nothing.
+func (s *Server) denialSummary(now time.Time, n int) {
+	if n <= 0 {
+		return
+	}
+	s.audit.Log(audit.Record{Time: now, Event: auditEventDenialsCapped, Result: audit.ResultDenied, Reason: "cap", Count: n})
+}
+
 // emitGuest writes the request's audit record, if it has one. It adds
 // who: the link (never the slug), the guest, the device and the client.
-// Records a client can cause in bulk are throttled (see bulkKey).
+// Records a client can cause in bulk are throttled per key (see bulkKey),
+// and all of them together, devices apart, by the global denial cap:
+// past audit.max_denials_per_min a minute, the rest of that minute is
+// left out and summed up in one guest.denials.capped record.
 func (s *Server) emitGuest(g *guestReq) {
 	if !g.audit.set {
+		s.denialSummary(g.now, s.denialCap.Flush(g.now))
 		return
 	}
 	r := g.audit.rec
-	if key := bulkKey(r, g); key != "" {
+	key := bulkKey(r, g)
+	if key != "" {
 		ok, skipped := s.auditThrottle.Allow(key, g.now)
 		if !ok {
 			return
 		}
 		r.Count = skipped
 	}
+	if key != "" && capped(r) {
+		ok, summary := s.denialCap.Allow(g.now)
+		s.denialSummary(g.now, summary)
+		if !ok {
+			return
+		}
+	} else {
+		s.denialSummary(g.now, s.denialCap.Flush(g.now))
+	}
 	if act, ok := catalog.Lookup(r.Action); ok && act.Continuous && r.Event == "guest.act.allowed" {
 		// One record per drag period, per link, client and entity. The
 		// next one counts the values left out.
-		ok, skipped := s.sliderThrottle.Allow(g.link.ID+"|"+g.ipKey()+"|"+r.EntityID, g.now)
+		ok, skipped := s.sliderThrottle.Allow(g.link.ID+"|"+g.limKey+"|"+r.EntityID, g.now)
 		if !ok {
 			return
 		}

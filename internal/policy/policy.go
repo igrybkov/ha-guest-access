@@ -3,12 +3,15 @@
 // in links.yaml against the templates. model's Validate methods check one
 // value's shape; the admin save paths call both.
 //
-// These checks guard saves only. A file that already breaks them still
-// loads, and the guest side fails closed on it (a local rule with local
-// access off denies every request).
+// ValidateTemplates and ValidateLink guard saves. A file that already
+// breaks them still loads, and the guest side fails closed on it rule by
+// rule (a local rule with local access off denies every request).
+// ServableLink is the gate for a whole link: the guest side never serves
+// a link that fails it.
 package policy
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/igrybkov/ha-guest-access/internal/catalog"
@@ -49,6 +52,31 @@ func ValidateLink(l model.Link, ts model.Templates, s model.Settings, hasHome bo
 	}
 	for i, r := range l.Extra {
 		c.rule(r, fmt.Sprintf("extra[%d]", i))
+	}
+	return c.err()
+}
+
+// ServableLink checks what a stored link must pass before a guest may use
+// it: its own shape (model.Link.Validate, which a hand edit of links.yaml
+// may break) and the actions of its extra rules against the catalog.
+// Paths are relative to the link. It leaves out the checks that depend on
+// the app options, HA or the templates: those can change under a valid
+// link, and the guest side fails closed on them rule by rule.
+func ServableLink(l model.Link) error {
+	var c checker
+	if err := l.Validate(); err != nil {
+		var ve *model.ValidationError
+		if !errors.As(err, &ve) {
+			return err
+		}
+		c.problems = append(c.problems, ve.Problems...)
+	}
+	for i, r := range l.Extra {
+		for j, a := range r.Actions {
+			if _, ok := catalog.Lookup(a); !ok {
+				c.add(fmt.Sprintf("extra[%d].actions[%d]", i, j), "%q is not an action this app knows", a)
+			}
+		}
 	}
 	return c.err()
 }

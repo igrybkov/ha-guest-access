@@ -16,7 +16,7 @@ func (s *Server) hasHome(ctx context.Context) bool {
 	if err != nil {
 		return true
 	}
-	return inv.Home != (model.Home{})
+	return inv.Home.Set()
 }
 
 // checkTemplates runs the policy over ts. Callers pass only the template

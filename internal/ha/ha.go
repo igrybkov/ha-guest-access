@@ -28,6 +28,12 @@ type Client interface {
 	States(ctx context.Context) ([]State, error)
 	Config(ctx context.Context) (Config, error)
 	FireEvent(ctx context.Context, eventType string, data map[string]any) error
+	// OnEventsLost calls fn whenever events may have been lost: the
+	// connection to HA dropped, a new one is up with every subscription
+	// in place again, or a subscriber's queue was full and an event was
+	// dropped. A cache kept current by events must start over then. fn
+	// must be quick and must not call the client.
+	OnEventsLost(fn func())
 }
 
 // Event is an HA bus event.
@@ -162,7 +168,9 @@ func WebsocketURL(haURL string) (string, error) {
 	return u.String(), nil
 }
 
-// Error is an error result from HA.
+// Error is an error result from HA: HA got the request and answered that
+// it failed. It is the only error that says a request did not run; see
+// Refused.
 type Error struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -173,6 +181,23 @@ func (e *Error) Error() string { return "home assistant: " + e.Code + ": " + e.M
 // ErrDisconnected means the connection dropped before HA answered. The
 // request may or may not have run.
 var ErrDisconnected = errors.New("home assistant: disconnected")
+
+// Refused reports whether err holds an error result from HA (*Error).
+// Only then is it sure that a request did not run. Every other failure
+// leaves it open:
+//
+//   - ErrDisconnected: the connection dropped. The request may have gone
+//     out before it did.
+//   - context.DeadlineExceeded or context.Canceled: the caller stopped
+//     waiting, while HA may still run the request or already has.
+//   - A write error on the socket: part of the request may have gone out.
+//
+// A caller that undoes its own bookkeeping on failure (such as giving a
+// one-time use back) must do so only when Refused is true.
+func Refused(err error) bool {
+	var e *Error
+	return errors.As(err, &e)
+}
 
 // Options configures a websocket client.
 type Options struct {
@@ -204,6 +229,7 @@ type WSClient struct {
 	sess  *session      // nil while disconnected
 	ready chan struct{} // closed while sess != nil
 	subs  map[*subscription]struct{}
+	lost  []func() // OnEventsLost callbacks
 
 	areas    cached[Area]
 	devices  cached[Device]
@@ -319,6 +345,7 @@ func (c *WSClient) runSession(ctx context.Context) (connected bool, err error) {
 		c.ready = make(chan struct{})
 		c.mu.Unlock()
 		s.close()
+		c.eventsLost()
 	}()
 
 	// Ping first: it also guards the resubscribe below against a stalled HA.
@@ -335,6 +362,9 @@ func (c *WSClient) runSession(ctx context.Context) (connected bool, err error) {
 			}
 			break
 		}
+	}
+	if !s.isClosed() {
+		c.eventsLost()
 	}
 
 	select {
@@ -433,7 +463,8 @@ func (c *WSClient) request(ctx context.Context, msg map[string]any) (json.RawMes
 // the subscribe request; if not, it subscribes on the next connection.
 func (c *WSClient) SubscribeEvents(ctx context.Context, eventType string, fn func(Event)) error {
 	sctx, cancel := context.WithCancel(ctx)
-	sub := &subscription{eventType: eventType, fn: fn, ctx: sctx, queue: make(chan Event, eventQueueSize), log: c.log}
+	sub := &subscription{eventType: eventType, fn: fn, ctx: sctx, queue: make(chan Event, eventQueueSize), log: c.log,
+		dropped: c.eventsLost}
 
 	c.mu.Lock()
 	c.subs[sub] = struct{}{}
@@ -471,8 +502,26 @@ func (c *WSClient) removeSub(sub *subscription) {
 	}
 }
 
+// OnEventsLost registers fn. See Client.
+func (c *WSClient) OnEventsLost(fn func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lost = append(c.lost, fn)
+}
+
+// eventsLost calls every OnEventsLost callback.
+func (c *WSClient) eventsLost() {
+	c.mu.Lock()
+	fns := slices.Clone(c.lost)
+	c.mu.Unlock()
+	for _, fn := range fns {
+		fn()
+	}
+}
+
 // CallService calls a service. With returnResponse it returns the service
-// response (the "response" field of the result), else nil.
+// response (the "response" field of the result), else nil. On failure,
+// Refused tells whether HA refused the call or the outcome is unknown.
 func (c *WSClient) CallService(ctx context.Context, domain, service string, data map[string]any, target *Target, returnResponse bool) (json.RawMessage, error) {
 	msg := map[string]any{"type": "call_service", "domain": domain, "service": service}
 	if data != nil {
@@ -617,6 +666,8 @@ type subscription struct {
 	ctx   context.Context
 	queue chan Event
 	log   *slog.Logger
+	// dropped runs when the queue is full and an event is dropped.
+	dropped func()
 }
 
 func (s *subscription) deliver(ev Event) {
@@ -629,6 +680,9 @@ func (s *subscription) deliver(ev Event) {
 	case <-s.ctx.Done():
 	default:
 		s.log.Warn("event queue full, dropping event", "event_type", s.eventType)
+		if s.dropped != nil {
+			s.dropped()
+		}
 	}
 }
 

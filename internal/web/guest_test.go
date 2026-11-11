@@ -681,7 +681,7 @@ func TestGuestParty(t *testing.T) {
 func TestGuestStreamCap(t *testing.T) {
 	h := newHarness(t, func(o *config.Options, _ *Deps) { o.Settings.RateLimits.MaxStreamsPerLink = 1 })
 	l := h.link("guest_room")
-	h.srv.streams.acquire(l.ID, 1)
+	h.srv.streams.acquire(l.ID, "198.51.100.1", 1, 0)
 	rec := h.g(req{method: "GET", path: "/g/" + l.Slug + "/events"})
 	if rec.Code != 429 || rec.Header().Get("Retry-After") == "" {
 		t.Errorf("over the stream cap: %d", rec.Code)
