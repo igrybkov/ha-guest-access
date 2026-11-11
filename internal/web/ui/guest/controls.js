@@ -123,6 +123,9 @@ function actionButton(card, a, opts = {}) {
         return sent;
       }
       disarm();
+      // Disarming may redraw the card and replace this button. Arming a
+      // button that is gone would leave its fresh copy one tap from firing.
+      if (!b.isConnected) return undefined;
       b.textContent = confirmLabel(a.id);
       b.classList.add('armed');
       armed = {

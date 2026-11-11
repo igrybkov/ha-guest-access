@@ -420,7 +420,7 @@ async function checkApprovals() {
   if (r.status === 200 && Array.isArray(r.body.requests)) {
     canApprove = true;
     drawApprovals(r.body.requests);
-  } else if (r.status === 403 || r.status === 404 || r.status === 405) {
+  } else if (r.status === 403 || r.status === 404 || r.status === 405 || r.status === 429) {
     canApprove = false;
     drawApprovals([]);
     return;
