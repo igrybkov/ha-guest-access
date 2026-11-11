@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Admin: a "Waiting to be admitted" panel at the top of every page lists
+  the device requests of all links, with Approve and Deny. It refreshes
+  every `approval.admin_poll_s` seconds while the tab is visible. The menu
+  shows the count. `/app/<slug>/pending` in HA opens the app on it.
+- Each waiting device request shows as an HA persistent notification with
+  the code and a link to the panel. It goes away when the request is
+  approved, denied or expires. Turn it off with
+  `approval.persistent_notification: false`.
+
 ## 0.2.0
 
 The first usable version.

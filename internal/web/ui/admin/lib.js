@@ -672,6 +672,8 @@ export function settingsSections(s) {
       ['Devices per link', a.max_devices],
       ['Device events per hour', a.events_per_hour],
       ['Device last seen update (min)', a.touch_throttle_min],
+      ['HA notification per request', onOff(a.persistent_notification)],
+      ['Waiting list refresh (s)', a.admin_poll_s],
     ] },
     { id: 'audit', title: 'Activity log', rows: [
       ['Log file', onOff(t.audit_enabled)],
@@ -692,4 +694,78 @@ export function settingsSections(s) {
       ['Diagnostics kept', t.diagnostics_requests],
     ] },
   ];
+}
+
+// ---- Waiting to be admitted ----
+
+// PENDING_ROUTE opens the admin page on its pending panel. It is the same
+// value as web.PendingRoute in Go.
+//
+// HA's frontend loads this page in an iframe from the app's ingress URL
+// and drops the path tail, query and hash of its own URL. It passes the
+// path after /app/<slug> to the page only as the route of a
+// "home-assistant/properties" message, which it sends after the page
+// asks with "home-assistant/subscribe-properties". So the notification
+// links to /app/<slug>/pending, and the page reads the route from that
+// message. Opened outside HA (the demo, or run-dev), the hash #/pending
+// does the same.
+export const PENDING_ROUTE = '/pending';
+
+// wantsPending reports whether the page should open on the pending panel,
+// from its hash (such as "#/pending") or the route path HA sent (such as
+// "/pending"). Only the exact marker counts, with or without a trailing
+// slash.
+export function wantsPending(hash, routePath) {
+  const isMarker = (p) => p === PENDING_ROUTE || p === `${PENDING_ROUTE}/`;
+  const h = typeof hash === 'string' ? hash.replace(/^#/, '').split('?')[0] : '';
+  return isMarker(h) || (typeof routePath === 'string' && isMarker(routePath));
+}
+
+// haRoutePath returns route.path of a "home-assistant/properties" message
+// from HA's frontend, or null for any other message.
+export function haRoutePath(data) {
+  if (!data || typeof data !== 'object' || data.type !== 'home-assistant/properties') return null;
+  const p = data.route && data.route.path;
+  return typeof p === 'string' ? p : null;
+}
+
+// pollMs is how often the page asks for pending requests, from the
+// approval.admin_poll_s option. Missing or bad values use the option's
+// default.
+export function pollMs(s) {
+  const v = s && s.tunables && s.tunables.approval && s.tunables.approval.admin_poll_s;
+  return Number.isInteger(v) && v >= 1 ? v * 1000 : 5000;
+}
+
+// ago says how long ago iso was, from nowMs. It counts elapsed time
+// only, so the time zone does not matter.
+export function ago(iso, nowMs) {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const s = Math.max(0, Math.floor((nowMs - t) / 1000));
+  if (s < 60) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ago`;
+  const hrs = Math.floor(m / 60);
+  if (hrs < 24) return `${hrs} h ago`;
+  return `${Math.floor(hrs / 24)} d ago`;
+}
+
+// pendingRows turns GET api/devices/pending into the rows of the pending
+// panel, oldest first as the server sends them.
+export function pendingRows(reqs, nowMs) {
+  return (Array.isArray(reqs) ? reqs : []).map((r) => ({
+    id: r.request_id,
+    link: r.link_name || r.link_id || '',
+    guest: r.label || '',
+    device: r.device || '',
+    code: r.code || '',
+    asked: ago(r.created_at, nowMs),
+  }));
+}
+
+// pendingBadge is the nav badge's text, or "" to hide it.
+export function pendingBadge(n) {
+  if (!Number.isInteger(n) || n <= 0) return '';
+  return n > 99 ? '99+' : String(n);
 }

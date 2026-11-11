@@ -8,6 +8,7 @@ import {
   approvalMode, splitTemplates, linkBadges, rotateWarning, grantSummary,
   auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections, settingsWarnings, addMonth, PRESETS,
   linkProblems, removePasswordPrompt, wallToUTC, wallParts, usableZone, browserZone, zoneNote, fmtTime, fmtWindow,
+  PENDING_ROUTE, wantsPending, haRoutePath, pollMs, ago, pendingRows, pendingBadge,
 } from './lib.js';
 
 // ---- Patterns ----
@@ -483,7 +484,7 @@ const settingsSample = {
     password_window_per_ip_min: 304, password_window_per_link_min: 305,
     custom_slug_min_len: 306, custom_slug_max_len: 307, guest_body_kib: 308, admin_body_kib: 309,
     diagnostics_requests: 310, inventory_max_age_s: 311,
-    approval: { pending_ttl_min: 312, max_pending: 313, max_devices: 314, events_per_hour: 315, touch_throttle_min: 316 },
+    approval: { pending_ttl_min: 312, max_pending: 313, max_devices: 314, events_per_hour: 315, touch_throttle_min: 316, persistent_notification: true, admin_poll_s: 329 },
     ha_call_timeout_s: 317, ha_event_timeout_s: 318, stream_recheck_s: 319, stream_heartbeat_s: 320,
     stream_retry_after_s: 321, audit_enabled: true, audit_max_file_kib: 322,
     ma_check_interval_min: 323, custom_slug_warn_len: 324, http_read_timeout_s: 325, max_header_kib: 326,
@@ -511,6 +512,7 @@ test('settings sections show every number the server sends', () => {
 test('settings sections: on/off, lists and missing values', () => {
   const rows = new Map(settingsSections(settingsSample).flatMap((s) => s.rows));
   assert.equal(rows.get('Log file'), 'On');
+  assert.equal(rows.get('HA notification per request'), 'On');
   assert.equal(rows.get('Local only'), 'On');
   assert.equal(rows.get('Trusted proxies'), '192.0.2.1');
   assert.equal(rows.get('Token'), 'Set');
@@ -587,4 +589,68 @@ test('removing the last password says the link opens to anyone with the URL', ()
   assert.doesNotMatch(one.title, /last/);
   assert.doesNotMatch(one.body, /anyone/);
   assert.equal(one.ok, 'Remove');
+});
+
+// ---- Waiting to be admitted ----
+
+test('wantsPending takes the hash marker or the HA route path', () => {
+  assert.equal(PENDING_ROUTE, '/pending');
+  for (const [hash, route] of [['#/pending', undefined], ['#/pending/', ''], ['#/pending?x=1', null], ['', '/pending'], ['#/links', '/pending/']]) {
+    assert.equal(wantsPending(hash, route), true, `${hash} ${route}`);
+  }
+  for (const [hash, route] of [['', ''], ['#/links', '/'], ['#pending', undefined], ['#/pendingx', '/pendingx'], ['#/links/pending', '/x/pending'],
+    [undefined, { path: '/pending' }], ['', '/pending/x'], ['#/PENDING', '/Pending']]) {
+    assert.equal(wantsPending(hash, route), false, `${hash} ${route}`);
+  }
+});
+
+test('haRoutePath reads only HA property messages', () => {
+  assert.equal(haRoutePath({ type: 'home-assistant/properties', narrow: false, route: { prefix: '/app/x', path: '/pending' } }), '/pending');
+  assert.equal(haRoutePath({ type: 'home-assistant/properties', route: { prefix: '/x', path: '' } }), '');
+  for (const bad of [null, undefined, 'home-assistant/properties', 5, {}, { type: 'other', route: { path: '/pending' } },
+    { type: 'home-assistant/properties' }, { type: 'home-assistant/properties', route: { path: 7 } },
+    { type: 'home-assistant/properties', route: null }]) {
+    assert.equal(haRoutePath(bad), null, JSON.stringify(bad));
+  }
+});
+
+test('pollMs comes from approval.admin_poll_s with a safe default', () => {
+  assert.equal(pollMs({ tunables: { approval: { admin_poll_s: 7 } } }), 7000);
+  for (const s of [undefined, {}, { tunables: {} }, { tunables: { approval: { admin_poll_s: 0 } } },
+    { tunables: { approval: { admin_poll_s: '5' } } }, { tunables: { approval: { admin_poll_s: 1.5 } } }]) {
+    assert.equal(pollMs(s), 5000, JSON.stringify(s));
+  }
+});
+
+test('ago counts elapsed time in rough units', () => {
+  const now = Date.parse('2026-11-11T12:00:00Z');
+  assert.equal(ago('2026-11-11T12:00:00Z', now), 'just now');
+  assert.equal(ago('2026-11-11T12:00:30Z', now), 'just now', 'a clock a bit ahead is not negative');
+  assert.equal(ago('2026-11-11T11:59:01Z', now), 'just now');
+  assert.equal(ago('2026-11-11T11:59:00Z', now), '1 min ago');
+  assert.equal(ago('2026-11-11T12:01:00+01:00', now), '59 min ago', 'the offset of the time counts');
+  assert.equal(ago('2026-11-11T09:30:00Z', now), '2 h ago');
+  assert.equal(ago('2026-11-08T12:00:00Z', now), '3 d ago');
+  assert.equal(ago('', now), '');
+  assert.equal(ago('soon', now), '');
+});
+
+test('pendingRows keeps the server order and fills gaps', () => {
+  const now = Date.parse('2026-11-11T12:00:00Z');
+  const rows = pendingRows([
+    { request_id: 'r1', link_id: 'l1', link_name: 'Anna', label: 'Anna', device: 'iPhone, Safari', code: 'K7Q2', created_at: '2026-11-11T11:57:00Z' },
+    { request_id: 'r2', link_id: 'l2', link_name: '', device: 'Android, Chrome', code: 'X3M9', created_at: '2026-11-11T11:59:30Z' },
+  ], now);
+  assert.deepEqual(rows, [
+    { id: 'r1', link: 'Anna', guest: 'Anna', device: 'iPhone, Safari', code: 'K7Q2', asked: '3 min ago' },
+    { id: 'r2', link: 'l2', guest: '', device: 'Android, Chrome', code: 'X3M9', asked: 'just now' },
+  ]);
+  assert.deepEqual(pendingRows(null, now), []);
+});
+
+test('pendingBadge hides at zero and caps big counts', () => {
+  assert.equal(pendingBadge(0), '');
+  assert.equal(pendingBadge(undefined), '');
+  assert.equal(pendingBadge(2), '2');
+  assert.equal(pendingBadge(150), '99+');
 });

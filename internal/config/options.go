@@ -98,6 +98,12 @@ type ApprovalOptions struct {
 	MaxDevices    int           // approved devices per link
 	EventsPerHour int           // device request events per link per hour
 	TouchThrottle time.Duration // least time between LastSeenAt writes
+	// PersistentNotification creates an HA persistent notification for
+	// each request that waits, and dismisses it when the request ends.
+	PersistentNotification bool
+	// AdminPoll is how often the admin page asks for pending requests
+	// while its tab is visible.
+	AdminPoll time.Duration
 }
 
 // rawOptions is options.json as Supervisor writes it. Its shape is the
@@ -145,11 +151,13 @@ type rawOptions struct {
 		MaxAgeS int `json:"max_age_s"`
 	} `json:"inventory"`
 	Approval struct {
-		PendingTTLMin    int `json:"pending_ttl_min"`
-		MaxPending       int `json:"max_pending"`
-		MaxDevices       int `json:"max_devices"`
-		EventsPerHour    int `json:"events_per_hour"`
-		TouchThrottleMin int `json:"touch_throttle_min"`
+		PendingTTLMin          int  `json:"pending_ttl_min"`
+		MaxPending             int  `json:"max_pending"`
+		MaxDevices             int  `json:"max_devices"`
+		EventsPerHour          int  `json:"events_per_hour"`
+		TouchThrottleMin       int  `json:"touch_throttle_min"`
+		PersistentNotification bool `json:"persistent_notification"`
+		AdminPollS             int  `json:"admin_poll_s"`
 	} `json:"approval"`
 	HA struct {
 		CallTimeoutS  int `json:"call_timeout_s"`
@@ -199,6 +207,8 @@ func defaultRaw() rawOptions {
 	r.Approval.MaxDevices = 10
 	r.Approval.EventsPerHour = 5
 	r.Approval.TouchThrottleMin = 5
+	r.Approval.PersistentNotification = true
+	r.Approval.AdminPollS = 5
 	r.HA.CallTimeoutS = 10
 	r.HA.EventTimeoutS = 5
 	r.Streams.RecheckS = 5
@@ -289,6 +299,7 @@ func (r rawOptions) options() (Options, error) {
 		{"approval.max_devices", r.Approval.MaxDevices, 1, 1000, ""},
 		{"approval.events_per_hour", r.Approval.EventsPerHour, 1, 1000, ""},
 		{"approval.touch_throttle_min", r.Approval.TouchThrottleMin, 1, 24 * 60, ""},
+		{"approval.admin_poll_s", r.Approval.AdminPollS, 1, 3600, ""},
 		{"ha.call_timeout_s", r.HA.CallTimeoutS, 1, 300, ""},
 		{"ha.event_timeout_s", r.HA.EventTimeoutS, 1, 300, ""},
 		{"streams.recheck_s", r.Streams.RecheckS, 1, 300, ""},
@@ -332,11 +343,13 @@ func (r rawOptions) options() (Options, error) {
 		DiagRequests:          r.Diagnostics.Requests,
 		InventoryMaxAge:       time.Duration(r.Inventory.MaxAgeS) * time.Second,
 		Approval: ApprovalOptions{
-			PendingTTL:    minutes(r.Approval.PendingTTLMin),
-			MaxPending:    r.Approval.MaxPending,
-			MaxDevices:    r.Approval.MaxDevices,
-			EventsPerHour: r.Approval.EventsPerHour,
-			TouchThrottle: minutes(r.Approval.TouchThrottleMin),
+			PendingTTL:             minutes(r.Approval.PendingTTLMin),
+			MaxPending:             r.Approval.MaxPending,
+			MaxDevices:             r.Approval.MaxDevices,
+			EventsPerHour:          r.Approval.EventsPerHour,
+			TouchThrottle:          minutes(r.Approval.TouchThrottleMin),
+			PersistentNotification: r.Approval.PersistentNotification,
+			AdminPoll:              seconds(r.Approval.AdminPollS),
 		},
 		HACallTimeout:         seconds(r.HA.CallTimeoutS),
 		HAEventTimeout:        seconds(r.HA.EventTimeoutS),

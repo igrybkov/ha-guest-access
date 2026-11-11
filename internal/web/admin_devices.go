@@ -6,6 +6,12 @@ import (
 	"github.com/igrybkov/ha-guest-access/internal/approval"
 )
 
+// PendingRoute is the route that opens the admin page on its pending
+// panel. HA's frontend passes the path after /app/<slug> to the admin page
+// as its route (see supervisor.PanelPath), and the page also takes it as
+// the hash #/pending. lib.js in ui/admin holds the same value.
+const PendingRoute = "/pending"
+
 // pendingView is one pending device request in the admin API.
 type pendingView struct {
 	approval.Request

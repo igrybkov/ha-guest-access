@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/approval"
+	"github.com/igrybkov/ha-guest-access/internal/config"
+	"github.com/igrybkov/ha-guest-access/internal/ha/hatest"
 	"github.com/igrybkov/ha-guest-access/internal/model"
 )
 
@@ -118,7 +120,7 @@ func TestE2EApprovalManualByHA(t *testing.T) {
 	if c := b.act(l); c != 200 {
 		t.Fatalf("act after approval: %d", c)
 	}
-	waitFor(t, "service call", func() bool { return len(a.fake.ServiceCalls()) == 1 })
+	waitFor(t, "service call", func() bool { return len(a.actionCalls()) == 1 })
 	var view struct {
 		Devices []model.LinkDevice `json:"devices"`
 	}
@@ -140,6 +142,67 @@ func TestE2EApprovalDeny(t *testing.T) {
 	if c := b.act(l); c != 403 {
 		t.Errorf("act after deny: %d", c)
 	}
+	if n := len(a.actionCalls()); n != 0 {
+		t.Errorf("%d HA calls", n)
+	}
+}
+
+// actionCalls returns the service calls HA got, less the app's own
+// persistent notifications.
+func (a *app) actionCalls() []hatest.ServiceCall {
+	var out []hatest.ServiceCall
+	for _, c := range a.fake.ServiceCalls() {
+		if c.Domain != "persistent_notification" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// notifyCalls returns the persistent notification calls HA got.
+func (a *app) notifyCalls() []hatest.ServiceCall {
+	var out []hatest.ServiceCall
+	for _, c := range a.fake.ServiceCalls() {
+		if c.Domain == "persistent_notification" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// Each request shows in HA as a persistent notification over the real
+// websocket client, and the admin's decision dismisses it. Outside
+// Supervisor the notification has no app link.
+func TestE2EApprovalNotification(t *testing.T) {
+	a := approvalApp(t)
+	l := a.approvalLink(true, false)
+	b := a.browser(iPhoneUA)
+	b.do("POST", l, "device/request", nil)
+	ev := a.lastRequestEvent()
+	id := approval.NotificationID(ev["request_id"].(string))
+	waitFor(t, "notification", func() bool { return len(a.notifyCalls()) == 1 })
+	c := a.notifyCalls()[0]
+	msg, _ := c.Data["message"].(string)
+	if c.Service != "create" || c.Data["notification_id"] != id || !strings.Contains(msg, ev["code"].(string)) || strings.Contains(msg, "](") {
+		t.Errorf("create = %+v", c)
+	}
+	if r := a.adminJSON("POST", "/api/devices/pending/"+ev["request_id"].(string), map[string]any{"approve": false}); r.code != 200 {
+		t.Fatalf("deny: %d %s", r.code, r.body)
+	}
+	waitFor(t, "dismiss", func() bool { return len(a.notifyCalls()) == 2 })
+	if c := a.notifyCalls()[1]; c.Service != "dismiss" || c.Data["notification_id"] != id {
+		t.Errorf("dismiss = %+v", c)
+	}
+}
+
+// With approval.persistent_notification off, HA gets no notification.
+func TestE2EApprovalNotificationOff(t *testing.T) {
+	a := startApp(t, appOpts{options: func(o *config.Options) { o.Approval.PersistentNotification = false }})
+	waitFor(t, "decision subscription", func() bool { return a.ha.Subscribers(approval.EventDeviceDecision) > 0 })
+	l := a.approvalLink(true, false)
+	a.browser(iPhoneUA).do("POST", l, "device/request", nil)
+	a.lastRequestEvent()
+	time.Sleep(50 * time.Millisecond)
 	if n := len(a.fake.ServiceCalls()); n != 0 {
 		t.Errorf("%d HA calls", n)
 	}

@@ -89,6 +89,8 @@ options:
     max_devices: 10
     events_per_hour: 5
     touch_throttle_min: 5
+    persistent_notification: true
+    admin_poll_s: 5
   ha:
     call_timeout_s: 10
     event_timeout_s: 5
@@ -164,6 +166,8 @@ schema:
     max_devices: int(1,1000)
     events_per_hour: int(1,1000)
     touch_throttle_min: int(1,1440)
+    persistent_notification: bool
+    admin_poll_s: int(1,3600)
   ha:
     call_timeout_s: int(1,300)
     event_timeout_s: int(1,300)

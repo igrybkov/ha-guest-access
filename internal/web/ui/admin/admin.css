@@ -56,6 +56,15 @@ ul.warning { padding-left: 24px; }
 .banner { background: var(--danger); color: #fff; padding: 10px 16px; }
 .banner-inline { background: var(--danger-bg); color: var(--danger); border-left: 3px solid var(--danger); padding: 8px 10px; border-radius: 4px; }
 
+/* The pending panel shows above every screen while a device waits. */
+.pending { max-width: calc(1100px - 32px); margin: 16px auto 0; border-color: var(--warn-line); background: var(--warn-bg); }
+@media (max-width: 1132px) { .pending { margin: 16px 16px 0; } }
+.pending h2 { margin: 0; }
+.pending h2:focus { outline: none; }
+.pending table { background: var(--card); }
+.pending .toolbar { margin-bottom: 8px; }
+.pending-nav .count { display: inline-block; min-width: 1.4em; padding: 0 6px; border-radius: 999px; background: var(--danger); color: #fff; font-size: 0.8em; text-align: center; }
+
 header.top { position: sticky; top: 0; z-index: 2; background: var(--card); border-bottom: 1px solid var(--line); }
 nav { display: flex; gap: 4px; overflow-x: auto; padding: 6px 12px; scrollbar-width: none; }
 nav a { padding: 8px 12px; border-radius: var(--radius); text-decoration: none; color: var(--fg); white-space: nowrap; }

@@ -4,7 +4,9 @@ blueprint:
     When a new device asks to use a guest link, send an actionable
     notification to your phone. Tap Approve or Deny. The guest sees a short
     code on their screen; the notification shows the same code, so you can
-    check it is them. You never type the code anywhere.
+    check it is them. You never type the code anywhere. You can also
+    approve from the app's own HA notification: its link opens the app's
+    waiting list.
   domain: automation
   source_url: https://github.com/igrybkov/ha-guest-access/blob/main/blueprints/guest_access_device_approval.yaml
   author: Illia Grybkov

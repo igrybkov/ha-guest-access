@@ -1,11 +1,13 @@
-// Entry point: loads settings once, shows the limits banner, and routes
-// by hash. Each screen module exports render(view, rest, params) and may
-// return a cleanup function.
+// Entry point: loads settings once, shows the limits banner, starts the
+// pending panel, and routes by hash. The hash #/pending shows the links
+// screen with the pending panel open (see pending.js). Each screen module
+// exports render(view, rest, params) and may return a cleanup function.
 import * as links from './links.js';
 import * as templates from './templates.js';
 import * as audit from './audit.js';
 import * as diagnostics from './diagnostics.js';
 import * as settingsScreen from './settings.js';
+import * as pending from './pending.js';
 import { h, get, setSettings } from './dom.js';
 import { paths } from './lib.js';
 
@@ -63,6 +65,7 @@ async function boot() {
   }
   window.addEventListener('hashchange', route);
   route();
+  pending.start();
 }
 
 boot();
