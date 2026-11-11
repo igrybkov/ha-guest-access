@@ -89,6 +89,33 @@ type Options struct {
 	// all clients together. Past it, one summary record counts the rest.
 	// Admin, device and allowed records are never capped.
 	AuditMaxDenialsPerMin int
+	// NotFound is what a browser gets on the guest port for an unknown
+	// path or link.
+	NotFound NotFoundOptions
+}
+
+// NotFoundOptions set the answer a browser gets on the guest port for
+// the root, an unknown path or an unknown link.
+type NotFoundOptions struct {
+	// Redirect is the URL the browser is sent to. Empty shows the page.
+	// It is checked with NotFoundRedirectOK; a bad value shows the page.
+	Redirect string
+	// Title and Message are the page text. Plain text.
+	Title   string
+	Message string
+}
+
+// Default text of the not-found page.
+const (
+	DefaultNotFoundTitle   = "This link doesn't work"
+	DefaultNotFoundMessage = "Ask the person who sent it for a new one."
+)
+
+// NotFoundRedirectOK reports whether u can be the not-found redirect: an
+// absolute http or https URL with a host and no user info.
+func NotFoundRedirectOK(u string) bool {
+	pu, err := url.Parse(u)
+	return err == nil && (pu.Scheme == "http" || pu.Scheme == "https") && pu.Host != "" && pu.User == nil
 }
 
 // ApprovalOptions tune device approval.
@@ -108,8 +135,8 @@ type ApprovalOptions struct {
 
 // rawOptions is options.json as Supervisor writes it. Its shape is the
 // options and schema in guest_access/config.yaml. Optional keys
-// (public_base_url, music_assistant url and token, guest welcome and
-// accent_color) are left out when not set.
+// (public_base_url, music_assistant url and token, guest welcome,
+// accent_color and not_found_redirect) are left out when not set.
 type rawOptions struct {
 	LogLevel           string                    `json:"log_level"`
 	PublicBaseURL      string                    `json:"public_base_url"`
@@ -122,7 +149,12 @@ type rawOptions struct {
 		TimeoutMS        int    `json:"timeout_ms"`
 		CheckIntervalMin int    `json:"check_interval_min"`
 	} `json:"music_assistant"`
-	Guest    model.GuestSettings `json:"guest"`
+	Guest struct {
+		model.GuestSettings
+		NotFoundRedirect string `json:"not_found_redirect"`
+		NotFoundTitle    string `json:"not_found_title"`
+		NotFoundMessage  string `json:"not_found_message"`
+	} `json:"guest"`
 	Location struct {
 		TTLMin       int `json:"ttl_min"`
 		MaxAccuracyM int `json:"max_accuracy_m"`
@@ -186,7 +218,9 @@ func defaultRaw() rawOptions {
 	r.HomeRadiusDefaultM = d.HomeRadiusDefaultM
 	r.MusicAssistant.TimeoutMS = 2000
 	r.MusicAssistant.CheckIntervalMin = 60
-	r.Guest = d.Guest
+	r.Guest.GuestSettings = d.Guest
+	r.Guest.NotFoundTitle = DefaultNotFoundTitle
+	r.Guest.NotFoundMessage = DefaultNotFoundMessage
 	r.Location.TTLMin = 15
 	r.Location.MaxAccuracyM = 1000
 	r.RateLimits.Enabled = true
@@ -253,7 +287,7 @@ func (r rawOptions) options() (Options, error) {
 		LocalAccess:        r.LocalAccess,
 		TrustedProxies:     r.TrustedProxies,
 		HomeRadiusDefaultM: r.HomeRadiusDefaultM,
-		Guest:              r.Guest,
+		Guest:              r.Guest.GuestSettings,
 		RateLimits:         r.RateLimits.RateLimits.WithDefaults(),
 	}
 	s.MusicAssistant.URL = r.MusicAssistant.URL
@@ -360,6 +394,11 @@ func (r rawOptions) options() (Options, error) {
 		AuditEnabled:          r.Audit.Enabled,
 		AuditMaxFileBytes:     int64(r.Audit.MaxFileKiB) << 10,
 		AuditMaxDenialsPerMin: r.Audit.MaxDenialsPerMin,
+		NotFound: NotFoundOptions{
+			Redirect: r.Guest.NotFoundRedirect,
+			Title:    r.Guest.NotFoundTitle,
+			Message:  r.Guest.NotFoundMessage,
+		},
 	}, nil
 }
 

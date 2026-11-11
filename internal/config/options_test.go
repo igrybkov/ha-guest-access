@@ -101,7 +101,8 @@ func TestParseOptionsFull(t *testing.T) {
 		"local_access": {"enabled": true, "networks": ["192.168.1.0/24"]},
 		"trusted_proxies": ["172.30.33.0/24"],
 		"music_assistant": {"url": "http://ma:8095", "token": "secret", "timeout_ms": 500},
-		"guest": {"title": "Hi", "welcome": "Make yourself at home", "accent_color": "#112233"},
+		"guest": {"title": "Hi", "welcome": "Make yourself at home", "accent_color": "#112233",
+			"not_found_redirect": "https://www.example.com/", "not_found_title": "Oops"},
 		"location": {"ttl_min": 5, "max_accuracy_m": 200},
 		"rate_limits": {"enabled": false, "guest_per_min": 7, "password_window_per_ip_min": 30},
 		"links": {"custom_slug_min_len": 16, "custom_slug_max_len": 20},
@@ -121,6 +122,8 @@ func TestParseOptionsFull(t *testing.T) {
 		o.Settings.MusicAssistant.URL != "http://ma:8095", o.MusicAssistantToken != "secret",
 		!o.MusicAssistantEnabled(), o.MATimeout != 500*time.Millisecond,
 		o.Settings.Guest.AccentColor != "#112233",
+		o.NotFound.Redirect != "https://www.example.com/", o.NotFound.Title != "Oops",
+		o.NotFound.Message != DefaultNotFoundMessage,
 		o.NearTTL != 5*time.Minute, o.MaxAccuracyM != 200,
 		o.LimitsEnabled, o.Settings.RateLimits.GuestPerMin != 7, o.Settings.RateLimits.GuestBurst != 15,
 		o.PasswordWindowPerIP != 30*time.Minute, o.PasswordWindowPerLink != time.Hour,
@@ -258,5 +261,35 @@ func TestDocsDefaultsMatch(t *testing.T) {
 	}
 	if rows == 0 {
 		t.Error("no option rows in DOCS.md")
+	}
+}
+
+// The not-found redirect must be an absolute http or https URL with a
+// host and no user info. Anything else falls back to the page.
+func TestNotFoundRedirectOK(t *testing.T) {
+	for _, c := range []struct {
+		in string
+		ok bool
+	}{
+		{"https://www.example.com/", true},
+		{"http://example.com", true},
+		{"https://example.com/path?q=1#top", true},
+		{"https://[2001:db8::1]:8443/", true},
+		{"", false},
+		{"/relative", false},
+		{"//example.com/", false},
+		{"example.com", false},
+		{"javascript:alert(1)", false},
+		{"data:text/html,hi", false},
+		{"ftp://example.com/", false},
+		{"https://", false},
+		{"https://user:secret@example.com/", false},
+		{"https://user@example.com/", false},
+		{"https://exa mple.com/", false},
+		{"https://example.com/\r\nX: y", false},
+	} {
+		if got := NotFoundRedirectOK(c.in); got != c.ok {
+			t.Errorf("NotFoundRedirectOK(%q) = %v, want %v", c.in, got, c.ok)
+		}
 	}
 }

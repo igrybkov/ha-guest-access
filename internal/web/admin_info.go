@@ -137,12 +137,20 @@ const localNoProxyWarning = "Local access is on, but trusted_proxies is empty. B
 	"every guest then has the proxy's address. If that address is on your network, every guest counts as local, " +
 	"so local-only rules and near home pass for anyone with a link. Add the proxy to trusted_proxies, or turn local access off."
 
+// notFoundRedirectWarning is the warning when guest.not_found_redirect
+// is set but not usable. The value is not shown: it may hold a password.
+const notFoundRedirectWarning = "guest.not_found_redirect is not an absolute http or https URL with a host, " +
+	"or it holds a user name or password. Browsers get the not-found page instead."
+
 // OptionWarnings lists option setups that are risky though valid. The app
 // logs each at start, and the diagnostics show them.
 func OptionWarnings(o config.Options) []string {
 	var out []string
 	if o.Settings.LocalAccess.Enabled && len(o.Settings.TrustedProxies) == 0 {
 		out = append(out, localNoProxyWarning)
+	}
+	if r := o.NotFound.Redirect; r != "" && !config.NotFoundRedirectOK(r) {
+		out = append(out, notFoundRedirectWarning)
 	}
 	return out
 }

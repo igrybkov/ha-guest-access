@@ -24,13 +24,21 @@ test('guest JS never builds markup or code from strings', async () => {
   }
 });
 
-test('the page shell has no inline script, style or handlers', async () => {
-  const html = await readFile(new URL('index.html', dir), 'utf8');
-  assert.equal(/<script(?![^>]*\bsrc=)[^>]*>/i.test(html), false, 'inline script');
-  assert.equal(/<style\b/i.test(html), false, 'style element');
-  assert.equal(/\sstyle\s*=/i.test(html), false, 'style attribute');
-  assert.equal(/\son[a-z]+\s*=/i.test(html), false, 'event handler attribute');
-  assert.equal(/(src|href)\s*=\s*["']?(https?:)?\/\//i.test(html), false, 'external resource');
+test('the pages have no inline script, style or handlers', async () => {
+  const pages = await sources('.html');
+  assert.deepEqual(pages.map(([n]) => n).sort(), ['index.html', 'notfound.html']);
+  for (const [name, html] of pages) {
+    assert.equal(/<script(?![^>]*\bsrc=)[^>]*>/i.test(html), false, `${name}: inline script`);
+    assert.equal(/<style\b/i.test(html), false, `${name}: style element`);
+    assert.equal(/\sstyle\s*=/i.test(html), false, `${name}: style attribute`);
+    assert.equal(/\son[a-z]+\s*=/i.test(html), false, `${name}: event handler attribute`);
+    assert.equal(/(src|href)\s*=\s*["']?(https?:)?\/\//i.test(html), false, `${name}: external resource`);
+  }
+});
+
+test('the not-found page has no script at all', async () => {
+  const html = await readFile(new URL('notfound.html', dir), 'utf8');
+  assert.equal(/<script\b/i.test(html), false);
 });
 
 test('the CSS loads nothing from outside', async () => {

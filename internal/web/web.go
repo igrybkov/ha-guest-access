@@ -12,6 +12,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -145,6 +146,11 @@ type Server struct {
 	// policy.ServableLink, so each is logged once.
 	badMu    sync.Mutex
 	badLinks map[string]string
+	// notFoundPage is the rendered not-found page. notFoundRedirect is
+	// where browsers go instead, or "" to show the page. Both come from
+	// the options only, so every unknown path gets the same answer.
+	notFoundPage     []byte
+	notFoundRedirect string
 	// maRefused is true while Music Assistant refuses the token: set by
 	// a party call that gets ma.ErrUnauthorized, cleared by one that
 	// works. The admin API shows it as a warning.
@@ -199,6 +205,12 @@ func New(d Deps) *Server {
 	s.trusted = parsePrefixes(o.Settings.TrustedProxies, s.log, "trusted proxy")
 	s.nets = parsePrefixes(o.Settings.LocalAccess.Networks, s.log, "local network")
 	s.lim = newLimitSet(*o)
+	s.notFoundPage = s.assets.renderNotFound(
+		cmp.Or(o.NotFound.Title, config.DefaultNotFoundTitle),
+		cmp.Or(o.NotFound.Message, config.DefaultNotFoundMessage))
+	if r := o.NotFound.Redirect; r != "" && config.NotFoundRedirectOK(r) {
+		s.notFoundRedirect = r
+	}
 	for _, f := range []struct {
 		v   *time.Duration
 		def time.Duration
