@@ -126,3 +126,23 @@ func TestFileModes(t *testing.T) {
 		}
 	}
 }
+
+// The current data fixture covers device approval, so a change to its
+// YAML shape shows here.
+func TestDataFixtureHasDevices(t *testing.T) {
+	set := OpenData(copyDir(t, fixtures(t, "data", DataCurrent)), quietLog)
+	links, err := store.In(set, LinksFile, func() model.Links { return model.Links{} }).Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, ok := links.Find("l-anna")
+	if !ok || !l.Approval.Manual || !l.Approval.SelfService || len(l.Devices) != 2 {
+		t.Fatalf("l-anna = %+v", l)
+	}
+	if d := l.Devices[1]; d.ApprovedBy != "device:"+l.Devices[0].ID || d.Device != "Android, Chrome" || !d.LastSeenAt.IsZero() {
+		t.Errorf("second device = %+v", d)
+	}
+	if l.Devices[0].LastSeenAt.IsZero() {
+		t.Error("last_seen_at not read")
+	}
+}

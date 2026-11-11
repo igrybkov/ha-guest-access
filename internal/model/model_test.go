@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -239,8 +240,72 @@ func TestLinkValidate(t *testing.T) {
 		{"no hash", with(func(l *Link) { p := pw("p1"); p.Hash = ""; l.Passwords = []LinkPassword{p} }), []string{"passwords[0].hash"}},
 		{"plain text hash", with(func(l *Link) { p := pw("p1"); p.Hash = "5551234567"; l.Passwords = []LinkPassword{p} }), []string{"passwords[0].hash"}},
 		{"bcrypt hash", with(func(l *Link) { p := pw("p1"); p.Hash = "$2a$10$abc"; l.Passwords = []LinkPassword{p} }), []string{"passwords[0].hash"}},
+		{"devices", with(func(l *Link) {
+			l.Devices = []LinkDevice{dev("d1", "admin"), dev("d2", "device:d1"), dev("d3", "claim"), dev("d4", "ha")}
+		}), nil},
+		{"approver gone", with(func(l *Link) { l.Devices = []LinkDevice{dev("d2", "device:d1")} }), nil},
+		// The cap is an app option, checked on add, not here.
+		{"many devices", with(func(l *Link) {
+			for i := range 20 {
+				l.Devices = append(l.Devices, dev(fmt.Sprintf("d%d", i), "admin"))
+			}
+		}), nil},
+		{"duplicate device id", with(func(l *Link) { l.Devices = []LinkDevice{dev("d1", "admin"), dev("d1", "ha")} }), []string{"devices[1].id"}},
+		{"bad device id", with(func(l *Link) { l.Devices = []LinkDevice{dev("D 1", "admin")} }), []string{"devices[0].id"}},
+		{"unknown approver", with(func(l *Link) { l.Devices = []LinkDevice{dev("d1", "root")} }), []string{"devices[0].approved_by"}},
+		{"empty device approver", with(func(l *Link) { l.Devices = []LinkDevice{dev("d1", "device:")} }), []string{"devices[0].approved_by"}},
+		{"no approval time", with(func(l *Link) { d := dev("d1", "admin"); d.ApprovedAt = time.Time{}; l.Devices = []LinkDevice{d} }), []string{"devices[0].approved_at"}},
+		{"control in device", with(func(l *Link) { d := dev("d1", "admin"); d.Device = "iPhone\x1b[2J"; l.Devices = []LinkDevice{d} }), []string{"devices[0].device"}},
+		{"long label", with(func(l *Link) {
+			d := dev("d1", "admin")
+			d.Label = strings.Repeat("x", MaxDeviceTextLen+1)
+			l.Devices = []LinkDevice{d}
+		}), []string{"devices[0].label"}},
 	} {
 		wantProblems(t, tc.name, tc.l.Validate(), tc.paths...)
+	}
+}
+
+// dev returns a valid device with id, approved by by.
+func dev(id, by string) LinkDevice {
+	return LinkDevice{ID: id, Device: "iPhone, Safari", ApprovedAt: time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC), ApprovedBy: by}
+}
+
+func TestApprovalModes(t *testing.T) {
+	for _, tc := range []struct {
+		a         Approval
+		on, claim bool
+	}{
+		{Approval{}, false, false},
+		{Approval{Manual: true}, true, false},
+		{Approval{SelfService: true}, true, true},
+		{Approval{Manual: true, SelfService: true}, true, false},
+	} {
+		if tc.a.On() != tc.on || tc.a.Claim() != tc.claim {
+			t.Errorf("%+v: On %v Claim %v, want %v %v", tc.a, tc.a.On(), tc.a.Claim(), tc.on, tc.claim)
+		}
+	}
+	l := Link{Devices: []LinkDevice{dev("d1", "admin")}}
+	if d, ok := l.Device("d1"); !ok || d.ID != "d1" {
+		t.Errorf("Device(d1) = %+v, %v", d, ok)
+	}
+	if _, ok := l.Device("d2"); ok {
+		t.Error("Device(d2) found")
+	}
+}
+
+// With approval off and no devices, links.yaml stays as it was.
+func TestApprovalOmittedWhenOff(t *testing.T) {
+	raw, err := yaml.Marshal(Link{ID: "l1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := string(raw); strings.Contains(s, "approval") || strings.Contains(s, "devices") {
+		t.Errorf("off approval written:\n%s", s)
+	}
+	raw, _ = yaml.Marshal(Link{ID: "l1", Approval: Approval{SelfService: true}, Devices: []LinkDevice{dev("d1", "claim")}})
+	if s := string(raw); !strings.Contains(s, "self_service: true") || strings.Contains(s, "manual") || strings.Contains(s, "last_seen_at") {
+		t.Errorf("approval YAML:\n%s", s)
 	}
 }
 

@@ -30,6 +30,11 @@ var (
 	ErrUsed = errors.New("action already used")
 	// ErrSlugTaken means another link has the slug.
 	ErrSlugTaken = errors.New("slug is used by another link")
+	// ErrTooManyDevices means the link has the most devices it may have.
+	ErrTooManyDevices = errors.New("link has the most approved devices; remove one first")
+	// ErrClaimed means a claim lost: the link already has a device, or it
+	// is not in claim mode.
+	ErrClaimed = errors.New("link is already claimed")
 )
 
 // Options configure a Store. Zero fields get the defaults.
@@ -57,7 +62,12 @@ type Store struct {
 	bySlug map[string]string // access.HashSlug(slug) -> link id
 	rev    uint64            // set revision bySlug was built at
 	built  bool
+	// touched is when TouchDevice last wrote each device. It only throttles
+	// writes; entries go when the device or its link does.
+	touched map[deviceKey]time.Time
 }
+
+type deviceKey struct{ link, device string }
 
 // New returns the link store of a data set (see migrate.OpenData).
 func New(set *store.Set, o Options) *Store {
@@ -78,8 +88,9 @@ func New(set *store.Set, o Options) *Store {
 		file: store.In(set, migrate.LinksFile, func() model.Links {
 			return model.Links{Version: migrate.DataCurrent, Links: []model.Link{}}
 		}),
-		opts: o,
-		log:  log.With("component", "links"),
+		opts:    o,
+		log:     log.With("component", "links"),
+		touched: map[deviceKey]time.Time{},
 	}
 }
 
@@ -181,8 +192,8 @@ func at(ls *model.Links, id string) (*model.Link, error) {
 }
 
 // setEditable copies the fields the admin may edit from src to dst. It is
-// an allowlist on purpose: the slug, passwords, uses and any field added
-// later stay as the server set them.
+// an allowlist on purpose: the slug, passwords, devices, uses and any
+// field added later stay as the server set them.
 func setEditable(dst *model.Link, src model.Link) {
 	dst.Name = src.Name
 	dst.Note = src.Note
@@ -191,10 +202,11 @@ func setEditable(dst *model.Link, src model.Link) {
 	dst.TemplateIDs = slices.Clone(src.TemplateIDs)
 	dst.Extra = slices.Clone(src.Extra)
 	dst.OneTime = src.OneTime
+	dst.Approval = src.Approval
 }
 
 // Create adds a link with the editable fields of draft (name, note,
-// window, templates, extra rules, one time). It sets the id, the slug and
+// window, templates, extra rules, one time, approval). It sets the id, the slug and
 // CreatedAt. An empty customSlug gets a random slug; otherwise customSlug
 // must pass ValidCustomSlug and be unused.
 func (s *Store) Create(draft model.Link, customSlug string) (model.Link, error) {
@@ -274,6 +286,7 @@ func (s *Store) Delete(id string) error {
 			return err
 		}
 		ls.Links = slices.DeleteFunc(ls.Links, func(l model.Link) bool { return l.ID == id })
+		s.forgetTouches(id, "")
 		return nil
 	})
 }
@@ -309,6 +322,129 @@ func (s *Store) RemovePassword(linkID, pwID string) error {
 		return nil
 	})
 	return err
+}
+
+// AddDevice adds an approved device to link linkID and returns it as
+// stored. An empty d.ID gets a random one, and a zero d.ApprovedAt gets
+// now. It refuses an inactive link and, with ErrTooManyDevices, a link
+// that has maxDevices devices or more. maxDevices comes from the app
+// options; a link over a lowered cap keeps its devices.
+func (s *Store) AddDevice(linkID string, d model.LinkDevice, maxDevices int) (model.LinkDevice, error) {
+	return s.addDevice(linkID, d, maxDevices, false)
+}
+
+// ClaimDevice is AddDevice for claim mode. It adds d only while the link
+// is in claim mode and has no device yet, and returns ErrClaimed
+// otherwise. The check and the add run under one lock, so of N parallel
+// claims exactly one wins.
+func (s *Store) ClaimDevice(linkID string, d model.LinkDevice, maxDevices int) (model.LinkDevice, error) {
+	return s.addDevice(linkID, d, maxDevices, true)
+}
+
+func (s *Store) addDevice(linkID string, d model.LinkDevice, maxDevices int, claim bool) (model.LinkDevice, error) {
+	var out model.LinkDevice
+	_, err := s.change(linkID, func(l *model.Link) error {
+		if !l.Active(s.now()) {
+			return ErrInactive
+		}
+		if claim && (!l.Approval.Claim() || len(l.Devices) > 0) {
+			return ErrClaimed
+		}
+		if len(l.Devices) >= maxDevices {
+			return ErrTooManyDevices
+		}
+		if d.ID == "" {
+			d.ID = newID(func(id string) bool { _, ok := l.Device(id); return ok })
+		}
+		if d.ApprovedAt.IsZero() {
+			d.ApprovedAt = s.now()
+		}
+		d.ApprovedAt = d.ApprovedAt.UTC().Round(0)
+		l.Devices = append(l.Devices, d)
+		out = d
+		return nil
+	})
+	if err != nil {
+		return model.LinkDevice{}, err
+	}
+	return out, nil
+}
+
+// RemoveDevice revokes device deviceID of link linkID. Its cookie stops
+// working on the next request.
+func (s *Store) RemoveDevice(linkID, deviceID string) error {
+	_, err := s.change(linkID, func(l *model.Link) error {
+		if _, ok := l.Device(deviceID); !ok {
+			return fmt.Errorf("device: %w", ErrNotFound)
+		}
+		l.Devices = slices.DeleteFunc(l.Devices, func(d model.LinkDevice) bool { return d.ID == deviceID })
+		s.forgetTouches(linkID, deviceID)
+		return nil
+	})
+	return err
+}
+
+// ResetDevices revokes every device of link linkID. In claim mode the
+// next device claims the link again.
+func (s *Store) ResetDevices(linkID string) error {
+	_, err := s.change(linkID, func(l *model.Link) error {
+		l.Devices = nil
+		s.forgetTouches(linkID, "")
+		return nil
+	})
+	return err
+}
+
+// HasDevice reports whether link linkID has device deviceID.
+func (s *Store) HasDevice(linkID, deviceID string) bool {
+	l, err := s.Get(linkID)
+	if err != nil {
+		return false
+	}
+	_, ok := l.Device(deviceID)
+	return ok
+}
+
+// TouchDevice sets LastSeenAt of a device to now. It writes at most once
+// per every (an app option) per device; a call inside that time costs a
+// map lookup and returns nil. A device that is gone is never added back:
+// the call returns ErrNotFound.
+func (s *Store) TouchDevice(linkID, deviceID string, now time.Time, every time.Duration) error {
+	now = now.UTC().Round(0)
+	k := deviceKey{linkID, deviceID}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if last, ok := s.touched[k]; ok && now.Sub(last) < every && !now.Before(last) {
+		return nil
+	}
+	err := s.update(false, func(ls *model.Links) error {
+		l, err := at(ls, linkID)
+		if err != nil {
+			return err
+		}
+		for i := range l.Devices {
+			if l.Devices[i].ID == deviceID {
+				l.Devices[i].LastSeenAt = now
+				return nil
+			}
+		}
+		return fmt.Errorf("device: %w", ErrNotFound)
+	})
+	if err != nil {
+		return err
+	}
+	s.touched[k] = now
+	return nil
+}
+
+// forgetTouches drops the throttle entries of a device, or of every device
+// of the link when deviceID is empty. It requires s.mu.
+func (s *Store) forgetTouches(linkID, deviceID string) {
+	for k := range s.touched {
+		if k.link == linkID && (deviceID == "" || k.device == deviceID) {
+			delete(s.touched, k)
+		}
+	}
 }
 
 // change applies fn to link id, validates and saves.
