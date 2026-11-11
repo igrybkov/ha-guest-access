@@ -158,12 +158,16 @@ export function alarmActions(actions, state) {
 }
 
 // scriptView says what a script card shows: running while its state is
-// on, the run action, and cancel only while running.
+// on, the run action and its label, and cancel only while running. A
+// used one-time run keeps the label "Run", so it reads "Run: done" even
+// while the script still runs.
 export function scriptView(actions, state) {
   const running = state === 'on';
+  const run = findAction(actions, 'script.run');
   return {
     running,
-    run: findAction(actions, 'script.run'),
+    run,
+    runLabel: running && !(run && run.used) ? 'Running…' : 'Run',
     cancel: running ? findAction(actions, 'script.cancel') : null,
   };
 }

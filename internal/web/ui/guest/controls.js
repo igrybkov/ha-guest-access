@@ -302,7 +302,7 @@ const DRAW = {
     const v = scriptView(actions, st && st.state);
     const buttons = [];
     if (v.run) {
-      const b = actionButton(card, v.run, { className: 'big', label: v.running ? 'Running…' : 'Run' });
+      const b = actionButton(card, v.run, { className: 'big', label: v.runLabel });
       if (v.running) b.disabled = true;
       buttons.push(b);
     }

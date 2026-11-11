@@ -114,9 +114,15 @@ test('alarmActions', () => {
 test('scriptView shows cancel only while running', () => {
   const run = { id: 'script.run' };
   const cancel = { id: 'script.cancel' };
-  assert.deepEqual(scriptView([run, cancel], 'off'), { running: false, run, cancel: null });
-  assert.deepEqual(scriptView([run, cancel], 'on'), { running: true, run, cancel });
-  assert.deepEqual(scriptView([run], 'on'), { running: true, run, cancel: null });
+  assert.deepEqual(scriptView([run, cancel], 'off'), { running: false, run, runLabel: 'Run', cancel: null });
+  assert.deepEqual(scriptView([run, cancel], 'on'), { running: true, run, runLabel: 'Running…', cancel });
+  assert.deepEqual(scriptView([run], 'on'), { running: true, run, runLabel: 'Running…', cancel: null });
+});
+
+test('a used one-time run reads "Run" even while the script runs', () => {
+  const run = { id: 'script.run', used: true };
+  assert.equal(scriptView([run], 'on').runLabel, 'Run');
+  assert.equal(scriptView([run], 'off').runLabel, 'Run');
 });
 
 test('mediaInfo', () => {
