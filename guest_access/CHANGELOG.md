@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - Admin: two lists with drag and drop (mouse, touch and keyboard) set
   what a guest page shows and in which order. A link's templates move

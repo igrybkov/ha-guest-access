@@ -1,6 +1,6 @@
 name: Guest Access
 slug: guest_access
-version: "0.2.0"
+version: "0.3.0"
 description: Share links that let guests control a few things at home
 url: https://github.com/igrybkov/ha-guest-access
 arch:
