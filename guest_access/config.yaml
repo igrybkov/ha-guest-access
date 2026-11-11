@@ -20,7 +20,106 @@ ports:
   8888/tcp: 8898
 ports_description:
   8888/tcp: Guest links. Point your reverse proxy here.
+# Every setting lives here. Saving them in the Configuration tab restarts
+# the app. internal/config holds the same defaults; a test keeps them equal.
 options:
   log_level: info
+  local_access:
+    enabled: false
+    networks:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
+      - fc00::/7
+  trusted_proxies: []
+  home_radius_default_m: 300
+  music_assistant:
+    timeout_ms: 2000
+  guest:
+    title: Welcome
+  location:
+    ttl_min: 15
+    max_accuracy_m: 1000
+  rate_limits:
+    enabled: true
+    guest_per_min: 20
+    guest_burst: 15
+    actions_per_min: 120
+    actions_burst: 40
+    max_streams_per_link: 10
+    misses_per_hour_per_ip: 10
+    misses_per_hour_global: 100
+    password_fails_per_ip: 5
+    password_window_per_ip_min: 15
+    password_fails_per_link: 30
+    password_window_per_link_min: 60
+    password_lockout_min: 60
+    admin_per_min: 600
+  links:
+    custom_slug_min_len: 12
+    custom_slug_max_len: 64
+  http:
+    guest_body_kib: 16
+    admin_body_kib: 1024
+  diagnostics:
+    requests: 20
+  inventory:
+    max_age_s: 5
+  approval:
+    pending_ttl_min: 10
+    max_pending: 3
+    max_devices: 10
+    events_per_hour: 5
+    touch_throttle_min: 5
 schema:
   log_level: list(debug|info|warn|error)
+  public_base_url: url?
+  local_access:
+    enabled: bool
+    networks:
+      - str
+  trusted_proxies:
+    - str
+  home_radius_default_m: int(0,100000)
+  music_assistant:
+    url: url?
+    token: password?
+    timeout_ms: int(100,60000)
+  guest:
+    title: str
+    welcome: str?
+    accent_color: match(^#[0-9a-fA-F]{6}$)?
+  location:
+    ttl_min: int(1,1440)
+    max_accuracy_m: int(1,100000)
+  rate_limits:
+    enabled: bool
+    guest_per_min: int(1,)
+    guest_burst: int(1,)
+    actions_per_min: int(1,)
+    actions_burst: int(1,)
+    max_streams_per_link: int(1,)
+    misses_per_hour_per_ip: int(1,)
+    misses_per_hour_global: int(1,)
+    password_fails_per_ip: int(1,)
+    password_window_per_ip_min: int(1,10080)
+    password_fails_per_link: int(1,)
+    password_window_per_link_min: int(1,10080)
+    password_lockout_min: int(1,)
+    admin_per_min: int(1,)
+  links:
+    custom_slug_min_len: int(12,128)
+    custom_slug_max_len: int(12,128)
+  http:
+    guest_body_kib: int(1,1024)
+    admin_body_kib: int(16,16384)
+  diagnostics:
+    requests: int(1,1000)
+  inventory:
+    max_age_s: int(1,3600)
+  approval:
+    pending_ttl_min: int(1,1440)
+    max_pending: int(1,100)
+    max_devices: int(1,1000)
+    events_per_hour: int(1,1000)
+    touch_throttle_min: int(1,1440)

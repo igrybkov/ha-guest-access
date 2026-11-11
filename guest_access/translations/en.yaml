@@ -4,5 +4,63 @@ configuration:
     description: >-
       How much the app writes to its log. At debug, the guest port logs the
       address and proxy headers of each request.
+  public_base_url:
+    name: Public address
+    description: >-
+      The address guests use to reach the guest port, such as
+      https://guest.example.com. The app builds link URLs and QR codes from it.
+  local_access:
+    name: Local network access
+    description: >-
+      "enabled" lets rules require the home network. Off by default: a guest
+      on your Wi-Fi may still look outside. "networks" are the ranges that
+      count as home.
+  trusted_proxies:
+    name: Trusted proxies
+    description: >-
+      Proxies whose X-Forwarded-For header the app believes, as IPs or
+      ranges. Add your reverse proxy and your tunnel. Leave empty if guests
+      reach the app directly.
+  home_radius_default_m:
+    name: Default home radius
+    description: The "near home" radius in meters that new rules start with.
+  music_assistant:
+    name: Music Assistant
+    description: >-
+      Optional. The Music Assistant address and a long-lived token for the
+      party link. "timeout_ms" is how long to wait for it.
+  guest:
+    name: Guest page
+    description: >-
+      The title, welcome text and accent color (such as #1e88e5) of the
+      guest page. Plain text only.
+  location:
+    name: Location check
+    description: >-
+      "ttl_min" is how many minutes a shared location counts. "max_accuracy_m"
+      is the worst accuracy, in meters, the app accepts.
+  rate_limits:
+    name: Rate limits
+    description: >-
+      Limits per guest, link and app. "enabled": not recommended to turn off.
+      With it off, nothing limits guesses at links or passwords.
+  links:
+    name: Links
+    description: The shortest and longest custom slug you can type.
+  http:
+    name: Request size
+    description: The largest request body, in KiB, for guests and for the admin page.
+  diagnostics:
+    name: Diagnostics
+    description: How many recent guest requests the admin page shows.
+  inventory:
+    name: Device list cache
+    description: Seconds to keep the list of entities, devices and areas between updates.
+  approval:
+    name: Device approval
+    description: >-
+      Minutes a new device waits for approval, pending and approved devices
+      per link, approval notices per link per hour, and minutes between
+      "last seen" updates.
 network:
   8888/tcp: Guest links. Point your reverse proxy here.
