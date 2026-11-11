@@ -63,6 +63,17 @@ configuration:
       slider_interval_ms:
         name: Slider updates
         description: Least milliseconds between two values the guest page sends while a slider moves.
+      not_found_redirect:
+        name: Not found redirect
+        description: >-
+          A browser that opens the bare address, an unknown path or a link that
+          does not exist goes here. Empty shows a plain page instead.
+      not_found_title:
+        name: Not found title
+        description: Heading of the page a browser gets for a link that does not work.
+      not_found_message:
+        name: Not found message
+        description: Text under that heading.
   location:
     name: Location check
     fields:

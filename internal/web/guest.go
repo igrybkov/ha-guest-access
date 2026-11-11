@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -192,6 +194,9 @@ type guestKey struct{}
 // Static assets under /assets/ have their own per-IP limiter and no
 // other check: they are public and the same for everyone.
 //
+// The root, an unknown path and an unknown slug get s.notFound after
+// their limiter: a page or a redirect for a browser, JSON otherwise.
+//
 // The page shell (kindOpen) stops after step 2 and is served even for an
 // inactive link, so the page can say so. The password form stops after
 // step 4.
@@ -216,8 +221,8 @@ func (s *Server) GuestHandler() http.Handler {
 		s.assets.serveAsset(w, r)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if reqOf(r).allowPreauth() {
-			writeError(w, http.StatusNotFound, msgNotFound)
+		if g := reqOf(r); g.allowPreauth() {
+			s.notFound(w, r)
 		}
 	})
 	return s.guestBase(s.recoverPanics(mux))
@@ -273,7 +278,7 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 			writeError(w, http.StatusMethodNotAllowed, msgBadRequest)
 			return
 		}
-		writeError(w, http.StatusNotFound, msgNotFound)
+		s.notFound(w, r)
 		return
 	}
 
@@ -395,7 +400,62 @@ func (s *Server) miss(g *guestReq) {
 		return
 	}
 	g.note(auditEventSlugMiss, audit.ResultDenied, "")
-	writeError(g.w, http.StatusNotFound, msgNotFound)
+	s.notFound(g.w, g.r)
+}
+
+// notFound answers the root, an unknown path or an unknown slug. A
+// browser that asks for a page gets the not-found redirect, if one is
+// set, or the not-found page with status 404. Every other request gets
+// the JSON 404.
+//
+// The answer depends on the method, the Accept header and the options
+// only. So an unknown slug, a malformed slug and the root get the same
+// bytes, and the answer tells nothing about which slugs exist. The
+// redirect target never comes from the request.
+func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
+	if !wantsHTML(r) {
+		writeError(w, http.StatusNotFound, msgNotFound)
+		return
+	}
+	if s.notFoundRedirect != "" {
+		w.Header().Set("Location", s.notFoundRedirect)
+		w.WriteHeader(http.StatusFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = w.Write(s.notFoundPage)
+}
+
+// wantsHTML reports whether r is a browser asking for a page: a GET or
+// HEAD whose Accept header lists text/html with a quality above zero.
+// A wildcard such as */* does not count, so fetch and EventSource calls
+// keep their JSON answers.
+func wantsHTML(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	for _, v := range r.Header.Values("Accept") {
+		for part := range strings.SplitSeq(v, ",") {
+			mt, params, err := mime.ParseMediaType(strings.TrimSpace(part))
+			if err != nil || mt != "text/html" {
+				continue
+			}
+			if q, ok := params["q"]; ok && isZeroQ(q) {
+				continue
+			}
+			return true
+		}
+	}
+	return false
+}
+
+// isZeroQ reports whether the quality value q is zero ("0", "0.0",
+// "0.000"). A value that does not parse counts as not zero, which
+// errs toward the page.
+func isZeroQ(q string) bool {
+	f, err := strconv.ParseFloat(q, 64)
+	return err == nil && f <= 0
 }
 
 // session reports whether the request may use the link as far as

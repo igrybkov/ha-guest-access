@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Guest port: a browser that opens the bare address, an unknown path or
+  a link that does not exist gets a plain "This link doesn't work" page
+  with status 404, not raw JSON. The page names nothing about the app.
+  Change its text with `guest.not_found_title` and
+  `guest.not_found_message`, or send browsers to your own site with
+  `guest.not_found_redirect`. Scripts still get the JSON 404, and every
+  unknown or malformed link gets the same answer.
 - Admin: ticked templates on a link can be moved up and down. The guest
   page shows its groups in that order.
 - Guest: a fan's speed slider shows only while the fan is on, like a

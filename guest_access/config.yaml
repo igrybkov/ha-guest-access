@@ -46,6 +46,8 @@ options:
   guest:
     title: Welcome
     slider_interval_ms: 300
+    not_found_title: This link doesn't work
+    not_found_message: Ask the person who sent it for a new one.
   location:
     ttl_min: 15
     max_accuracy_m: 1000
@@ -123,6 +125,9 @@ schema:
     welcome: str?
     accent_color: match(^#[0-9a-fA-F]{6}$)?
     slider_interval_ms: int(100,5000)
+    not_found_redirect: url?
+    not_found_title: str
+    not_found_message: str
   location:
     ttl_min: int(1,1440)
     max_accuracy_m: int(1,100000)
