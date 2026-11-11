@@ -155,11 +155,22 @@ export function fromLocalInput(s) {
 
 const midnight = (d, addDays = 0) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + addDays);
 
+// addMonth returns the same day and local time one month after d. When
+// the next month is shorter, it uses that month's last day: Jan 31
+// gives Feb 28, or Feb 29 in a leap year.
+export function addMonth(d) {
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1; // Date rolls month 12 into January
+  const last = new Date(y, m + 1, 0).getDate();
+  return new Date(y, m, Math.min(d.getDate(), last), d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds());
+}
+
 // PRESETS are the window shortcuts. from null means "from now".
 export const PRESETS = [
   ['today', 'Today'],
   ['weekend', 'This weekend'],
   ['week', '1 week'],
+  ['month', '1 month'],
   ['custom', 'Custom'],
 ];
 
@@ -168,8 +179,11 @@ export const PRESETS = [
 //   - weekend: Friday 17:00 until Monday 00:00. From Friday 17:00 to the
 //     end of Sunday it starts now.
 //   - week: now until the same time 7 days later.
+//   - month: now until the same day and time next month (addMonth).
 export function preset(name, now) {
   switch (name) {
+    case 'month':
+      return { from: null, until: addMonth(now) };
     case 'today':
       return { from: null, until: midnight(now, 1) };
     case 'week':

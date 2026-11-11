@@ -6,7 +6,7 @@ import {
   preset, toLocalInput, fromLocalInput, buildTemplate, buildLink, buildRule, ruleState, linkForm, cleanAccess,
   parseVarValue, slugifyID, normalizeTemplatePath, parentPath, fieldFor, groupProblems,
   approvalMode, splitTemplates, linkBadges, rotateWarning, grantSummary,
-  auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections,
+  auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections, addMonth, PRESETS,
 } from './lib.js';
 
 // ---- Patterns ----
@@ -429,4 +429,29 @@ test('settings sections: on/off, lists and missing values', () => {
 test('link badges count waiting devices', () => {
   assert.deepEqual(linkBadges({ pending: [{}] }), ['1 device waiting']);
   assert.deepEqual(linkBadges({ pending: [{}, {}] }), ['2 devices waiting']);
+});
+
+// ---- Month preset ----
+
+test('1 month: same day and time next month', () => {
+  const got = addMonth(new Date(2026, 4, 12, 15, 30));
+  assert.deepEqual([got.getFullYear(), got.getMonth(), got.getDate(), got.getHours(), got.getMinutes()], [2026, 5, 12, 15, 30]);
+  const p = preset('month', new Date(2026, 4, 12, 15, 30));
+  assert.equal(p.from, null);
+  assert.equal(p.until.getTime(), got.getTime());
+  assert.ok(PRESETS.some(([k]) => k === 'month'));
+});
+
+test('1 month: a short next month clamps to its last day', () => {
+  const ymd = (d) => [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()];
+  assert.deepEqual(ymd(addMonth(new Date(2026, 0, 31, 9, 15))), [2026, 2, 28, 9, 15]);
+  assert.deepEqual(ymd(addMonth(new Date(2028, 0, 31, 9, 15))), [2028, 2, 29, 9, 15], 'leap year');
+  assert.deepEqual(ymd(addMonth(new Date(2026, 2, 31, 8, 0))), [2026, 4, 30, 8, 0]);
+  assert.deepEqual(ymd(addMonth(new Date(2026, 0, 28, 8, 0))), [2026, 2, 28, 8, 0]);
+});
+
+test('1 month: December rolls into January of the next year', () => {
+  const ymd = (d) => [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()];
+  assert.deepEqual(ymd(addMonth(new Date(2026, 11, 15, 18, 0))), [2027, 1, 15, 18, 0]);
+  assert.deepEqual(ymd(addMonth(new Date(2026, 11, 31, 23, 59))), [2027, 1, 31, 23, 59]);
 });

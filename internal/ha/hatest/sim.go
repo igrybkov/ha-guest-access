@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"slices"
 	"sync"
 	"time"
 
@@ -92,11 +91,12 @@ func (s *Sim) Respond(call ServiceCall) (json.RawMessage, error) {
 	return nil, nil
 }
 
-// Calls returns the calls seen so far, oldest first.
+// Calls returns the calls seen so far, oldest first. It is never nil,
+// so it encodes as a JSON list.
 func (s *Sim) Calls() []SimCall {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return slices.Clone(s.log)
+	return append([]SimCall{}, s.log...)
 }
 
 // Stop cancels pending script timers.
