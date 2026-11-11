@@ -10,7 +10,7 @@
 import {
   linkBase, cards, mergeState, errorText, tryAgainText, formatUntil, parseColor, textOn,
   parseRetryAfter, sliderInterval, deviceNext, shouldPoll, POLL_MS, geoErrorText, whereErrorText,
-  approvalsOn, approvalsDelay,
+  approvalsOn, approvalsDelay, APPROVALS_MS,
 } from './lib.js';
 import { el, icon } from './dom.js';
 import { makeCard } from './controls.js';
@@ -423,9 +423,10 @@ async function checkApprovals(seq) {
   if (r.status === 200 && Array.isArray(r.body.requests)) {
     drawApprovals(r.body.requests);
   } else if (r.status === 401 || r.status === 403 || r.status === 410) {
-    // Access changed. /state knows what holds now.
+    // Access changed. /state knows what holds now. Wait one poll first,
+    // so a /state that still says can_approve can't spin a reload loop.
     drawApprovals([]);
-    load();
+    approvalsTimer = setTimeout(() => { if (seq === approvalsSeq) load(); }, APPROVALS_MS);
     return;
   }
   approvalsTimer = setTimeout(() => checkApprovals(seq), approvalsDelay(r.status, r.retry));

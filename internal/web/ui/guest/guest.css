@@ -49,6 +49,12 @@ h2 { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; color: var(--muted); font-weig
 .view > h2:first-child, form > h2:first-child { color: var(--fg); font-size: 1.3rem; margin-top: 0.5rem; }
 #welcome { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
 .muted { color: var(--muted); }
+
+/* The loading view shows a hint after a while. If a script failed to
+   load (say a 429), nothing else would ever replace "Loading…". CSS
+   only, so it works when no script runs. */
+.slow { visibility: hidden; animation: show-late 0s 8s forwards; }
+@keyframes show-late { to { visibility: visible; } }
 .msg { min-height: 1.45em; color: var(--danger); }
 #device-msg { color: var(--muted); }
 .live { font-size: 0.9rem; text-align: center; }
