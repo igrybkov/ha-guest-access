@@ -338,7 +338,7 @@ Each request shows the code, the password label, a short summary of the device (
 
 The panel shows the link, the guest's password label, the device, the code and how long ago the guest asked. It refreshes on its own every `approval.admin_poll_s` seconds while the app's tab is open and visible. It stops while the tab is hidden, and refreshes at once when you come back. With nothing waiting, the panel hides. The **Waiting** item in the menu shows the count.
 
-To open the app on the panel, go to `/app/<app slug>/pending` in HA. The notification link does this for you. Outside HA, add `#/pending` to the app's address.
+To open the app on the panel, go to `/app/<app slug>/pending` in HA 2026.2 or later. The notification link does this for you. Outside HA, add `#/pending` to the app's address.
 
 ### The HA notification
 
@@ -693,7 +693,7 @@ The chain sends `X-Forwarded-For`, and the app reads only that header and `X-For
 
 Each file has a `version`. A newer app reads older files and converts them in memory. It writes nothing until something changes. An app that finds a file from a newer version refuses to write it.
 
-Pending device requests live in memory only. They are lost on a restart.
+Pending device requests live in memory only. They are lost on a restart. Their HA notifications stay; dismiss them in HA.
 
 ## Troubleshooting
 

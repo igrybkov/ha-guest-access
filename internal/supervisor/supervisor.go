@@ -91,6 +91,9 @@ func (c Client) SelfInfo(ctx context.Context) (Info, error) {
 // "home-assistant/properties" message. This works whether or not the app
 // shows in the sidebar; the sidebar panel lives at /<slug> instead
 // (homeassistant/components/hassio/addon_panel.py).
+//
+// The /app panel came with HA 2026.2 (frontend 20260128.0). Older HA has
+// no page at this path.
 func PanelPath(slug, tail string) string {
 	return "/app/" + slug + tail
 }
