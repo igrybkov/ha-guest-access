@@ -29,7 +29,7 @@ CI runs vet, test, lint, test-ui, a cross-build for linux/amd64 and arm64, and a
 
 Keep these true in every change. Each has tests; add a test when you touch one.
 
-- **Deny by default.** A guest request is checked in this order: rate limit → slug → link window → password session (if the link has passwords) → device approval (if on) → `authz.Check` (exact entity and action pair, catalog domain, rule access, typed data) → one-time use → HA call. A missing step is a bug.
+- **Deny by default.** A guest request is checked in this order: rate limit → slug lookup → POST shape (JSON content type, same-origin `Origin`) → link window → password session (if the link has passwords) → device approval (if on) → `authz.Check` (exact entity and action pair, catalog domain, rule access, typed data) → one-time use → HA call. A missing step is a bug. Details are in the `GuestHandler` and `guestAct` comments in `internal/web`.
 - **One entity per call.** The server builds every service call itself with exactly one `entity_id`. Guest data never carries `entity_id`, `area_id`, `device_id`, `label_id` or `floor_id`, and never a `code`.
 - **Domain filter.** An entity picked by an area, label, device or wildcard counts only if the rule allows an action in its domain.
 - **No codes.** The app never stores, sends or sees alarm or lock codes. Entities that need one are exposed through HA scripts.
@@ -56,19 +56,31 @@ Rate limiting can be turned off with `rate_limits.enabled: false`. It is not rec
 `cmd/guest-access/main.go` wires everything. Read it first to see how the packages connect.
 
 - `model`: shared types (templates, rules, links, settings, inventory) with shape validation.
-- `catalog`: every action the app knows, its data fields and the attribute allowlist per domain. An action not in the catalog can't be granted or called.
+- `catalog`: every action the app knows, its data fields and the attribute allowlist per domain. An action not in the catalog can't be granted or called. Continuous actions (sliders) are marked here and use their own rate limit.
 - `authz`: `Resolve` expands a link's templates against the inventory, mirroring HA's target expansion. `Check` validates one guest request and builds the call.
+- `policy`: checks that need more than one source (a rule against the app options and the catalog, a link against the templates). The admin save paths call it. A file that already breaks a check still loads, and the guest side fails closed on it.
 - `access`: client IP, local networks, distance, signed tokens, slugs, rate limiters, passwords and the password guard.
+- `approval`: device approval. Pending requests live in memory. It fires `guest_access_device_request`, listens for `guest_access_device_decision`, and stores approved devices on the link.
+- `audit`: one record per security decision and admin write, to slog and to `/data/audit.jsonl` (size-rotated). Records never hold slugs, passwords, tokens, cookies or coordinates.
+- `web`: the two HTTP servers. Admin (`AdminHandler`) is the JSON API and admin UI, for the Supervisor ingress peer only. Guest (`GuestHandler`) is a separate mux with no admin routes. Guest routes live under `/g/{slug}/`. `internal/web/ui` holds the embedded vanilla JS for both.
 - `ha` and `ha/hatest`: the HA websocket client (copied from ha-nfc-player) and its fakes.
 - `inventory`: builds the inventory snapshot and streams state changes.
 - `links`: the link store. One-time use is consumed under its lock before the HA call and refunded on failure.
 - `ma`: the optional Music Assistant client. The app must work fully without it.
-- `config`: env and app options.
+- `config`: env and app options (`/data/options.json`). Every setting comes from the options. There is no settings file.
 - `store` and `migrate`: see Storage.
 
+Cookies. All guest cookies are `HttpOnly`, `SameSite=Strict`, `Secure` when the request came over HTTPS, with path `/g/`. The name is a base plus the link ID (`access.LinkCookie`), so two links in one browser never clash and a slug rotation keeps them:
+- `ga_session_<link id>`: a password session. Names the password ID.
+- `ga_near_<link id>`: the location check. Holds the distance to home in meters, never coordinates.
+- `ga_device_<link id>`: an approved device. Names the device ID. The server checks the device still exists on every request.
+- `ga_device_request_<link id>`: a random secret that ties a browser to its pending request.
+
+Each token is base64url of version, purpose byte, expiry, an optional ID and an HMAC-SHA256 over the link ID too (`access.Signer`). A token for one purpose or link never passes another check.
+
 Storage:
-- `/homeassistant/guest_access` (config set): `templates.yaml`. Tracked in the user's HA git repo.
-- `/data` (data set): `links.yaml` and `hmac.key`. Never in git.
+- `/homeassistant/guest_access` (config set): `templates.yaml` only. Tracked in the user's HA git repo.
+- `/data` (data set): `links.yaml`, `hmac.key`, and `audit.jsonl` with its older `audit.jsonl.1`. Never in git. Runtime state (sessions, devices, use counts, links, keys) lives here or in memory, never in the config folder.
 - `store` writes atomically, reloads on file change and migrates in memory on read. Nothing is written until something changes.
 - `migrate` owns each set's schema version. To change a file format, add a step that works on YAML nodes only (never app types), bump the set's `Current`, and add `testdata/<set>/v<N>/`. Steps stay forever. File names are never removed.
 
