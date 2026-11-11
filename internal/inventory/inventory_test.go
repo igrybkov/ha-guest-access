@@ -97,6 +97,7 @@ func TestCacheMemo(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	f := fake()
+	f.StateList = nil // so the entity count follows the registry alone
 	c := New(f, quietLog)
 	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 	c.now = func() time.Time { return now }
@@ -229,5 +230,34 @@ func waitFor(t *testing.T, cond func() bool) {
 			t.Fatal("timed out")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// A YAML entity with no unique_id has a state but no registry entry. It
+// must be in the inventory, so an explicit entity id can grant it.
+func TestBuildIncludesStateOnlyEntities(t *testing.T) {
+	f := fake()
+	f.StateList = append(f.StateList,
+		ha.State{EntityID: "light.yaml_porch", State: "off", Attributes: map[string]any{"friendly_name": "Porch"}},
+		ha.State{EntityID: "script.let_me_in", State: "off"},
+	)
+	inv, err := Build(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, name := range map[string]string{"light.yaml_porch": "Porch", "script.let_me_in": ""} {
+		got, ok := inv.Entities[id]
+		want := model.Entity{ID: id, Name: name}
+		if !ok || got.ID != want.ID || got.Name != want.Name || got.DeviceID != "" || got.AreaID != "" ||
+			got.Labels != nil || got.Hidden || got.Disabled || got.EntityCategory != "" {
+			t.Errorf("%s = %+v, %v", id, got, ok)
+		}
+	}
+	// A registry entry wins over its state.
+	if got := inv.Entities["switch.heater"]; !got.Hidden {
+		t.Errorf("registry entity replaced by its state: %+v", got)
+	}
+	if len(inv.Entities) != 6 {
+		t.Errorf("%d entities, want 6", len(inv.Entities))
 	}
 }

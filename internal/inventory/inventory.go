@@ -114,6 +114,9 @@ func (c *Cache) Inventory(ctx context.Context) (model.Inventory, error) {
 //   - Disabled means the entity's disabled_by is set, or its device's.
 //   - Name is the registry name, else the original name, else the
 //     friendly_name attribute of its state.
+//   - An entity with a state but no registry entry is included with its
+//     id and friendly name only: no device, area or labels, not hidden,
+//     not disabled.
 func Build(ctx context.Context, client ha.Client) (model.Inventory, error) {
 	areas, err := client.Areas(ctx)
 	if err != nil {
@@ -179,6 +182,14 @@ func Build(ctx context.Context, client ha.Client) (model.Inventory, error) {
 			Disabled:       e.DisabledBy != "" || (e.DeviceID != "" && disabledDevice[e.DeviceID]),
 			EntityCategory: e.EntityCategory,
 			Name:           name,
+		}
+	}
+	// An entity with a state but no registry entry (a YAML entity with no
+	// unique_id) still exists in HA and can be named explicitly. It has no
+	// device, area or labels, so only an exact entity id selects it.
+	for _, st := range states {
+		if _, ok := inv.Entities[st.EntityID]; !ok && st.EntityID != "" {
+			inv.Entities[st.EntityID] = model.Entity{ID: st.EntityID, Name: friendly[st.EntityID]}
 		}
 	}
 	for _, a := range areas {
