@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
 	"slices"
@@ -218,5 +219,44 @@ func TestParseOptionsTimeoutsAndAudit(t *testing.T) {
 		return r.options()
 	})(); err == nil || !strings.Contains(err.Error(), "streams.heartbeat_s") {
 		t.Errorf("short heartbeat: %v", err)
+	}
+}
+
+// Every option row in DOCS.md names a real option and its default from
+// config.yaml.
+func TestDocsDefaultsMatch(t *testing.T) {
+	opts, _ := appConfig(t)
+	raw, err := os.ReadFile("../../guest_access/DOCS.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		cells := strings.Split(line, "|")
+		if len(cells) < 4 || !strings.HasPrefix(strings.TrimSpace(cells[1]), "`") {
+			continue
+		}
+		key := strings.Trim(strings.TrimSpace(cells[1]), "`")
+		def := strings.Trim(strings.TrimSpace(cells[2]), "`")
+		var v any = opts
+		for _, part := range strings.Split(key, ".") {
+			m, ok := v.(map[string]any)
+			if !ok {
+				v = nil
+				break
+			}
+			v = m[part]
+		}
+		if v == nil {
+			t.Errorf("DOCS.md row %q: no such option in config.yaml", key)
+			continue
+		}
+		if got := fmt.Sprint(v); got != def {
+			t.Errorf("DOCS.md %s default %q, config.yaml %q", key, def, got)
+		}
+		rows++
+	}
+	if rows == 0 {
+		t.Error("no option rows in DOCS.md")
 	}
 }

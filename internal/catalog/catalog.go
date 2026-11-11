@@ -47,6 +47,10 @@ type Action struct {
 	// UI names the guest page control, such as "button", "toggle",
 	// "slider" or "confirm".
 	UI string `json:"ui"`
+	// Continuous marks actions a slider sends many times while the guest
+	// drags. They use their own rate limit, per link, client and entity,
+	// so dragging does not use up the limit of other actions.
+	Continuous bool `json:"continuous,omitempty"`
 }
 
 // Fixed color temperature bounds, in kelvin. A light's own
@@ -71,7 +75,7 @@ var actions = index([]Action{
 	{ID: "alarm_control_panel.alarm_arm_away", Domain: "alarm_control_panel", Service: "alarm_arm_away", UI: "confirm"},
 	{ID: "alarm_control_panel.alarm_arm_night", Domain: "alarm_control_panel", Service: "alarm_arm_night", UI: "confirm"},
 
-	{ID: "light.turn_on", Domain: "light", Service: "turn_on", UI: "slider", Data: map[string]Field{
+	{ID: "light.turn_on", Domain: "light", Service: "turn_on", UI: "slider", Continuous: true, Data: map[string]Field{
 		"brightness_pct": {Kind: KindInt, Min: 1, Max: 100},
 		"color_temp_kelvin": {Kind: KindInt, Min: MinColorTempK, Max: MaxColorTempK,
 			MinAttr: "min_color_temp_kelvin", MaxAttr: "max_color_temp_kelvin"},
@@ -81,14 +85,14 @@ var actions = index([]Action{
 
 	{ID: "fan.turn_on", Domain: "fan", Service: "turn_on", UI: "toggle"},
 	{ID: "fan.turn_off", Domain: "fan", Service: "turn_off", UI: "toggle"},
-	{ID: "fan.set_percentage", Domain: "fan", Service: "set_percentage", UI: "slider", Data: map[string]Field{
+	{ID: "fan.set_percentage", Domain: "fan", Service: "set_percentage", UI: "slider", Continuous: true, Data: map[string]Field{
 		"percentage": {Kind: KindInt, Min: 0, Max: 100},
 	}},
 
 	{ID: "media_player.media_play_pause", Domain: "media_player", Service: "media_play_pause", UI: "button"},
 	{ID: "media_player.media_next_track", Domain: "media_player", Service: "media_next_track", UI: "button"},
 	{ID: "media_player.media_previous_track", Domain: "media_player", Service: "media_previous_track", UI: "button"},
-	{ID: "media_player.volume_set", Domain: "media_player", Service: "volume_set", UI: "slider", Data: map[string]Field{
+	{ID: "media_player.volume_set", Domain: "media_player", Service: "volume_set", UI: "slider", Continuous: true, Data: map[string]Field{
 		"volume_level": {Kind: KindFloat, Min: 0, Max: 1},
 	}},
 	{ID: "media_player.volume_mute", Domain: "media_player", Service: "volume_mute", UI: "toggle", Data: map[string]Field{

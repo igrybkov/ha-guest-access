@@ -603,9 +603,9 @@ func TestGuestActionLimit(t *testing.T) {
 	h := newHarness(t, func(o *config.Options, _ *Deps) { o.Settings.RateLimits.ActionsBurst = 2 })
 	l := h.link("guest_room")
 	for range 2 {
-		h.act(l, "light.guest_room", "light.turn_on", nil)
+		h.act(l, "light.guest_room", "light.turn_off", nil)
 	}
-	if rec := h.act(l, "light.guest_room", "light.turn_on", nil); rec.Code != 429 || rec.Header().Get("Retry-After") == "" {
+	if rec := h.act(l, "light.guest_room", "light.turn_off", nil); rec.Code != 429 || rec.Header().Get("Retry-After") == "" {
 		t.Errorf("over: %d", rec.Code)
 	}
 }
@@ -708,4 +708,33 @@ func flip(c byte) string {
 		return "B"
 	}
 	return "A"
+}
+
+// /g/{slug}/ redirects to /g/{slug} with no body, so the page's relative
+// asset links work.
+func TestGuestTrailingSlashRedirects(t *testing.T) {
+	h := newHarness(t)
+	l := h.link("guest_room")
+	rec := h.g(req{method: "GET", path: "/g/" + l.Slug + "/"})
+	if rec.Code != http.StatusMovedPermanently || rec.Header().Get("Location") != "/g/"+l.Slug || rec.Body.Len() != 0 {
+		t.Errorf("redirect: %d %q %q", rec.Code, rec.Header().Get("Location"), rec.Body)
+	}
+	if rec := h.g(req{method: "GET", path: "/g/" + l.Slug}); rec.Code != 200 {
+		t.Errorf("page: %d", rec.Code)
+	}
+}
+
+// /state carries the slider interval from the app options.
+func TestStateSliderInterval(t *testing.T) {
+	h := newHarness(t, func(o *config.Options, _ *Deps) { o.Settings.Guest.SliderIntervalMS = 250 })
+	l := h.link("guest_room")
+	v := decode[stateView](t, h.g(req{method: "GET", path: "/g/" + l.Slug + "/state"}))
+	if v.Guest.SliderIntervalMS != 250 {
+		t.Errorf("slider interval = %d", v.Guest.SliderIntervalMS)
+	}
+	d := newHarness(t)
+	rec := d.g(req{method: "GET", path: "/g/" + d.link("guest_room").Slug + "/state"})
+	if !strings.Contains(rec.Body.String(), `"slider_interval_ms":300`) {
+		t.Errorf("default not in /state: %s", rec.Body)
+	}
 }

@@ -17,6 +17,9 @@ This app is in early development and does nothing useful yet.
 | Option | Default | Use |
 |---|---|---|
 | `log_level` | `info` | `debug`, `info`, `warn` or `error`. |
+| `guest.slider_interval_ms` | `300` | Least milliseconds between two values the guest page sends while a slider moves. |
+| `rate_limits.continuous_per_min` | `600` | Slider actions per minute, per link, guest and device. Other actions use `actions_per_min`. |
+| `rate_limits.continuous_burst` | `120` | Slider actions allowed at once before the per-minute rate applies. |
 | `ha.call_timeout_s` | `10` | Seconds to wait for HA to run a guest action. |
 | `ha.event_timeout_s` | `5` | Seconds to wait for HA to take an event the app sends. |
 | `streams.recheck_s` | `5` | Seconds between checks of an open guest page. A revoked link or device stops its live updates within this time. |

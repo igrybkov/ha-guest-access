@@ -229,3 +229,13 @@ func TestFilterState(t *testing.T) {
 		t.Fatalf("unknown domain kept %v", unknown.Attributes)
 	}
 }
+
+// Exactly the slider actions are continuous.
+func TestContinuousActions(t *testing.T) {
+	want := map[string]bool{"light.turn_on": true, "fan.set_percentage": true, "media_player.volume_set": true}
+	for _, a := range All() {
+		if a.Continuous != want[a.ID] {
+			t.Errorf("%s: continuous %v", a.ID, a.Continuous)
+		}
+	}
+}

@@ -11,6 +11,8 @@ import (
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
 	"github.com/igrybkov/ha-guest-access/internal/audit"
+	"github.com/igrybkov/ha-guest-access/internal/authz"
+	"github.com/igrybkov/ha-guest-access/internal/catalog"
 	"github.com/igrybkov/ha-guest-access/internal/model"
 )
 
@@ -128,6 +130,34 @@ func (g *guestReq) allowPreauth() bool {
 	return ok
 }
 
+// allowAuthed takes a token from the per link + IP limiter of an
+// authenticated guest, or answers 429.
+func (g *guestReq) allowAuthed() bool {
+	ok, retry := g.lim.authed.Allow(g.link.ID+"|"+g.ipKey(), g.now)
+	if !ok {
+		g.rateLimited(reasonLimitActions)
+		tooMany(g.w, retry)
+	}
+	return ok
+}
+
+// allowAct takes a token for an action. A granted continuous action
+// (a slider) uses the per link + IP + entity limiter; every other action
+// uses allowAuthed. An ungranted pair never gets its own key, so made-up
+// entity ids can't grow the limiter.
+func (g *guestReq) allowAct(req authz.Request, grants authz.Grants) bool {
+	act, ok := catalog.Lookup(req.Action)
+	if _, granted := grants[authz.GrantKey{EntityID: req.EntityID, Action: req.Action}]; !ok || !act.Continuous || !granted {
+		return g.allowAuthed()
+	}
+	ok, retry := g.lim.cont.Allow(g.link.ID+"|"+g.ipKey()+"|"+req.EntityID, g.now)
+	if !ok {
+		g.rateLimited(reasonLimitContinuous)
+		tooMany(g.w, retry)
+	}
+	return ok
+}
+
 type guestKey struct{}
 
 // GuestHandler returns the guest port's handler. It has no admin routes.
@@ -229,6 +259,19 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 		return
 	}
 
+	// /g/{slug}/ would serve the page under a path that breaks its
+	// relative asset links. Send the browser to /g/{slug}. The redirect
+	// only repeats the path the client sent, so it tells nothing about
+	// the slug.
+	if r.PathValue("route") == "" && strings.HasSuffix(r.URL.Path, "/") {
+		if !g.allowPreauth() {
+			return
+		}
+		w.Header().Set("Location", strings.TrimSuffix(r.URL.EscapedPath(), "/"))
+		w.WriteHeader(http.StatusMovedPermanently)
+		return
+	}
+
 	// Steps 1 and 2.
 	g.slug = r.PathValue("slug")
 	link, found := s.deps.Links.FindBySlug(g.slug)
@@ -241,14 +284,18 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 	g.link = link
 	active := link.Active(g.now)
 	authed := active && s.session(g)
-	if route.kind != kindOpen && authed {
-		if ok, retry := g.lim.authed.Allow(link.ID+"|"+g.ipKey(), g.now); !ok {
-			g.rateLimited(reasonLimitActions)
-			tooMany(w, retry)
+	switch {
+	case route.kind != kindOpen && authed && r.PathValue("route") == "act":
+		// guestAct takes the token once it knows the action: continuous
+		// and discrete actions use different limiters.
+	case route.kind != kindOpen && authed:
+		if !g.allowAuthed() {
 			return
 		}
-	} else if !g.allowPreauth() {
-		return
+	default:
+		if !g.allowPreauth() {
+			return
+		}
 	}
 	if r.PathValue("route") == "" {
 		route.handle(s, g)

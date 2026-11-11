@@ -329,3 +329,29 @@ func TestDeviceApprovalOnEndsStream(t *testing.T) {
 		}
 	}
 }
+
+// /state says whether this device may approve others.
+func TestStateCanApprove(t *testing.T) {
+	h := newHarness(t)
+	canApprove := func(j jar, l model.Link) any {
+		rec := h.dev(j, l, "GET", "state", nil)
+		return decode[map[string]any](t, rec)["can_approve"]
+	}
+	self := h.approvalLink(model.Approval{SelfService: true})
+	j := jar{}
+	h.dev(j, self, "POST", "device/request", map[string]any{})
+	if v := canApprove(j, self); v != true {
+		t.Errorf("approved device, self-service: %v", v)
+	}
+	manual := h.approvalLink(model.Approval{Manual: true})
+	jm := jar{}
+	h.dev(jm, manual, "POST", "device/request", map[string]any{})
+	h.approveNext(manual, true)
+	h.dev(jm, manual, "GET", "device/status", nil)
+	if v := canApprove(jm, manual); v != false {
+		t.Errorf("manual only: %v", v)
+	}
+	if v := canApprove(jar{}, h.link("guest_room")); v != false {
+		t.Errorf("approval off: %v", v)
+	}
+}

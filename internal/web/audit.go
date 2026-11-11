@@ -38,6 +38,7 @@ const (
 	reasonInternal        = "internal"
 	reasonLimitPreauth    = "limit_preauth"
 	reasonLimitActions    = "limit_actions"
+	reasonLimitContinuous = "limit_continuous"
 	reasonLimitMisses     = "limit_slug_misses"
 	reasonLimitStreams    = "limit_streams"
 	reasonAccuracyTooLow  = "accuracy_too_low"

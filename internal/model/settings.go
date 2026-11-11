@@ -33,6 +33,11 @@ type RateLimits struct {
 	// ActionsPerMin and ActionsBurst limit actions per link + client IP.
 	ActionsPerMin int `yaml:"actions_per_min" json:"actions_per_min"`
 	ActionsBurst  int `yaml:"actions_burst" json:"actions_burst"`
+	// ContinuousPerMin and ContinuousBurst limit continuous actions
+	// (sliders) per link + client IP + entity. Those actions skip the
+	// ActionsPerMin limit.
+	ContinuousPerMin int `yaml:"continuous_per_min" json:"continuous_per_min"`
+	ContinuousBurst  int `yaml:"continuous_burst" json:"continuous_burst"`
 	// MaxStreamsPerLink caps open SSE state streams per link.
 	MaxStreamsPerLink int `yaml:"max_streams_per_link" json:"max_streams_per_link"`
 	// MissesPerHourPerIP and MissesPerHourGlobal limit unknown slugs; over
@@ -56,6 +61,8 @@ func DefaultRateLimits() RateLimits {
 		GuestBurst:           15,
 		ActionsPerMin:        120,
 		ActionsBurst:         40,
+		ContinuousPerMin:     600,
+		ContinuousBurst:      120,
 		MaxStreamsPerLink:    10,
 		MissesPerHourPerIP:   10,
 		MissesPerHourGlobal:  100,
@@ -75,6 +82,8 @@ func (r RateLimits) WithDefaults() RateLimits {
 		{&r.GuestBurst, &d.GuestBurst},
 		{&r.ActionsPerMin, &d.ActionsPerMin},
 		{&r.ActionsBurst, &d.ActionsBurst},
+		{&r.ContinuousPerMin, &d.ContinuousPerMin},
+		{&r.ContinuousBurst, &d.ContinuousBurst},
 		{&r.MaxStreamsPerLink, &d.MaxStreamsPerLink},
 		{&r.MissesPerHourPerIP, &d.MissesPerHourPerIP},
 		{&r.MissesPerHourGlobal, &d.MissesPerHourGlobal},
@@ -99,6 +108,8 @@ func (r RateLimits) validate(p *problems, path string) {
 		{"guest_burst", r.GuestBurst},
 		{"actions_per_min", r.ActionsPerMin},
 		{"actions_burst", r.ActionsBurst},
+		{"continuous_per_min", r.ContinuousPerMin},
+		{"continuous_burst", r.ContinuousBurst},
 		{"max_streams_per_link", r.MaxStreamsPerLink},
 		{"misses_per_hour_per_ip", r.MissesPerHourPerIP},
 		{"misses_per_hour_global", r.MissesPerHourGlobal},
@@ -134,7 +145,18 @@ type GuestSettings struct {
 	Title       string `yaml:"title" json:"title"`
 	Welcome     string `yaml:"welcome" json:"welcome"`
 	AccentColor string `yaml:"accent_color" json:"accent_color"` // "#rrggbb"; empty = app default
+	// SliderIntervalMS is the least time between two values the guest
+	// page sends while a slider is dragged.
+	SliderIntervalMS int `yaml:"slider_interval_ms" json:"slider_interval_ms"`
 }
+
+// DefaultSliderIntervalMS and MinSliderIntervalMS bound
+// GuestSettings.SliderIntervalMS.
+const (
+	DefaultSliderIntervalMS = 300
+	MinSliderIntervalMS     = 100
+	MaxSliderIntervalMS     = 5000
+)
 
 // DefaultLocalNetworks are the RFC 1918 ranges and IPv6 ULA.
 var DefaultLocalNetworks = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"}
@@ -149,7 +171,7 @@ func DefaultSettings() Settings {
 		LocalAccess:        LocalAccessSettings{Networks: append([]string(nil), DefaultLocalNetworks...)},
 		TrustedProxies:     []string{},
 		HomeRadiusDefaultM: DefaultHomeRadiusM,
-		Guest:              GuestSettings{Title: "Welcome"},
+		Guest:              GuestSettings{Title: "Welcome", SliderIntervalMS: DefaultSliderIntervalMS},
 		RateLimits:         DefaultRateLimits(),
 	}
 }
@@ -179,6 +201,9 @@ func (s Settings) Validate() error {
 		}
 	}
 	s.RateLimits.validate(&p, "rate_limits")
+	if v := s.Guest.SliderIntervalMS; v < MinSliderIntervalMS || v > MaxSliderIntervalMS {
+		p.add("guest.slider_interval_ms", "must be between %d and %d", MinSliderIntervalMS, MaxSliderIntervalMS)
+	}
 	if c := s.Guest.AccentColor; c != "" && !colorRe.MatchString(c) {
 		p.add("guest.accent_color", "must look like #1e88e5")
 	}

@@ -38,8 +38,10 @@ func (noGuard) Fail(string, netip.Addr, time.Time) bool                   { retu
 //
 //   - preauth: every guest request that is not from an authenticated
 //     guest, per client IP.
-//   - authed: state reads and actions of an authenticated guest, per link
-//     and client IP.
+//   - authed: state reads and discrete actions of an authenticated guest,
+//     per link and client IP.
+//   - continuous: continuous actions (sliders) of an authenticated guest,
+//     per link, client IP and entity. They do not use authed.
 //   - missIP and missAll: unknown slugs, per client IP and across all IPs.
 //   - admin: the admin port, per peer.
 //   - guard: wrong passwords.
@@ -48,6 +50,7 @@ type limitSet struct {
 	off     bool
 	preauth rateLimiter
 	authed  rateLimiter
+	cont    rateLimiter
 	missIP  rateLimiter
 	missAll rateLimiter
 	admin   rateLimiter
@@ -59,7 +62,7 @@ type limitSet struct {
 // every one of them is a no-op.
 func newLimitSet(o config.Options) *limitSet {
 	if !o.LimitsEnabled {
-		return &limitSet{off: true, preauth: noLimit{}, authed: noLimit{}, missIP: noLimit{},
+		return &limitSet{off: true, preauth: noLimit{}, authed: noLimit{}, cont: noLimit{}, missIP: noLimit{},
 			missAll: noLimit{}, admin: noLimit{}, guard: noGuard{}}
 	}
 	rl := o.Settings.RateLimits
@@ -68,6 +71,7 @@ func newLimitSet(o config.Options) *limitSet {
 	return &limitSet{
 		preauth: access.NewLimiter(perMin(rl.GuestPerMin), rl.GuestBurst, time.Hour),
 		authed:  access.NewLimiter(perMin(rl.ActionsPerMin), rl.ActionsBurst, time.Hour),
+		cont:    access.NewLimiter(perMin(rl.ContinuousPerMin), rl.ContinuousBurst, time.Hour),
 		missIP:  access.NewLimiter(perHour(rl.MissesPerHourPerIP), rl.MissesPerHourPerIP, time.Hour),
 		missAll: access.NewLimiter(perHour(rl.MissesPerHourGlobal), rl.MissesPerHourGlobal, time.Hour),
 		admin:   access.NewLimiter(perMin(rl.AdminPerMin), rl.AdminPerMin, time.Hour),

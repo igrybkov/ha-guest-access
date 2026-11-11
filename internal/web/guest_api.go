@@ -162,6 +162,10 @@ type (
 		// passes now. Entities whose actions all need location have none.
 		States map[string]model.State `json:"states"`
 		Party  bool                   `json:"party"`
+		// CanApprove means this device may approve new devices of the
+		// link: self-service is on and the request holds an approved
+		// device of the link.
+		CanApprove bool `json:"can_approve"`
 	}
 	guestLink struct {
 		ValidUntil time.Time `json:"valid_until"`
@@ -286,6 +290,7 @@ func (s *Server) plan(ctx context.Context, g *guestReq) (guestPlan, error) {
 	}
 	p.view.Groups = slices.DeleteFunc(p.view.Groups, func(gv groupView) bool { return len(gv.Entities) == 0 })
 	p.view.Party = s.partyAllowed(g, ts, acc)
+	p.view.CanApprove = g.link.Approval.SelfService && g.device != ""
 	return p, nil
 }
 
@@ -349,6 +354,9 @@ func (s *Server) decodeAct(g *guestReq) (authz.Request, bool) {
 func (s *Server) guestAct(g *guestReq) {
 	req, ok := s.decodeAct(g)
 	if !ok {
+		// The reply is written; a bad body still counts against the
+		// guest's limit.
+		g.lim.authed.Allow(g.link.ID+"|"+g.ipKey(), g.now)
 		return
 	}
 	// The record names the entity, the action and the data keys, never
@@ -360,6 +368,9 @@ func (s *Server) guestAct(g *guestReq) {
 	}()
 	ctx := g.r.Context()
 	grants, _, err := s.resolveLink(ctx, g.link)
+	if !g.allowAct(req, grants) {
+		return
+	}
 	if err != nil {
 		g.deny(reasonHAError)
 		s.log.Warn("guest act: inventory", "err", err)

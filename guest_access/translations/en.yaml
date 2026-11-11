@@ -55,6 +55,9 @@ configuration:
       accent_color:
         name: Accent color
         description: "Such as #1e88e5."
+      slider_interval_ms:
+        name: Slider updates
+        description: Least milliseconds between two values the guest page sends while a slider moves.
   location:
     name: Location check
     fields:
@@ -84,6 +87,11 @@ configuration:
         description: Per link and address, once the guest is in.
       actions_burst:
         name: Action burst
+      continuous_per_min:
+        name: Slider actions per minute
+        description: Per link, guest and device. Sliders send many values while they move.
+      continuous_burst:
+        name: Slider burst
       max_streams_per_link:
         name: Live updates per link
         description: Open pages with live updates, per link.
