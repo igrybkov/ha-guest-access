@@ -188,10 +188,12 @@ func AttributeAllowlist(domain string) []string {
 // FilterState returns a copy of st with only the attributes its domain
 // allows. Every state a guest sees must pass through it. An unknown
 // domain keeps no attributes. Values are deep copied, so the result
-// shares nothing with st.
+// shares nothing with st. LastChanged is in UTC, so the encoded time never
+// carries HA's UTC offset.
 func FilterState(st model.State) model.State {
 	allow := attributes[model.Domain(st.EntityID)]
 	out := st
+	out.LastChanged = st.LastChanged.UTC()
 	out.Attributes = make(map[string]any, len(allow))
 	for _, k := range allow {
 		if v, ok := st.Attributes[k]; ok {

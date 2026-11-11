@@ -160,6 +160,8 @@ export function setSettings(s) {
 export const settings = () => settingsCache || {};
 export const localEnabled = () => !!settings().local_access?.enabled;
 export const maEnabled = () => !!settings().music_assistant?.url;
+// haZone is HA's time zone, or "" when HA has not reported one.
+export const haZone = () => settings().time_zone || '';
 
 export const DOCS_URL = 'https://github.com/igrybkov/ha-guest-access/blob/main/guest_access/DOCS.md';
 export const docsLink = (text = 'Read the docs') => h('a', { href: DOCS_URL, target: '_blank', rel: 'noopener noreferrer', text });

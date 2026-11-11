@@ -11,6 +11,23 @@ type Inventory struct {
 	Areas    map[string]Area   `json:"areas"`
 	Labels   map[string]Label  `json:"labels"`
 	Home     Home              `json:"home"`
+	// TimeZone is HA's IANA time zone, such as "America/Chicago". It is
+	// "" when HA reported none or a name this machine does not know.
+	// Only the admin side sends it.
+	TimeZone string `json:"time_zone"`
+}
+
+// TimeZoneName returns name when it is a known IANA zone, else "".
+// time.LoadLocation takes "" as UTC and "Local" as this machine's zone,
+// so both give "" here.
+func TimeZoneName(name string) string {
+	if name == "" || name == "Local" {
+		return ""
+	}
+	if _, err := time.LoadLocation(name); err != nil {
+		return ""
+	}
+	return name
 }
 
 // Home is HA's home location.

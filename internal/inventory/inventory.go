@@ -306,6 +306,7 @@ func build(ctx context.Context, client ha.Client, states []ha.State) (model.Inve
 		Areas:    make(map[string]model.Area, len(areas)),
 		Labels:   make(map[string]model.Label, len(labels)),
 		Home:     model.Home{Lat: core.Latitude, Lon: core.Longitude},
+		TimeZone: model.TimeZoneName(core.TimeZone),
 	}
 	disabledDevice := map[string]bool{}
 	for _, d := range devices {

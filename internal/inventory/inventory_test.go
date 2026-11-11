@@ -36,7 +36,7 @@ func fake() *hatest.Fake {
 			{EntityID: "switch.heater", State: "off", Attributes: map[string]any{"friendly_name": "Heater"}},
 			{EntityID: "media_player.guest", State: "playing", Attributes: map[string]any{"friendly_name": "Guest speaker", "volume_level": 0.3}},
 		},
-		Core: ha.Config{Latitude: 41.88, Longitude: -87.63},
+		Core: ha.Config{Latitude: 41.88, Longitude: -87.63, TimeZone: "America/Chicago"},
 	}
 }
 
@@ -72,6 +72,9 @@ func TestBuild(t *testing.T) {
 	}
 	if inv.Home != (model.Home{Lat: 41.88, Lon: -87.63}) {
 		t.Errorf("home = %+v", inv.Home)
+	}
+	if inv.TimeZone != "America/Chicago" {
+		t.Errorf("time zone = %q", inv.TimeZone)
 	}
 	if len(inv.Entities) != 4 || len(inv.Devices) != 2 || len(inv.Areas) != 2 || len(inv.Labels) != 2 {
 		t.Errorf("sizes %d %d %d %d", len(inv.Entities), len(inv.Devices), len(inv.Areas), len(inv.Labels))
@@ -285,5 +288,26 @@ func TestCacheSetMaxAge(t *testing.T) {
 	c.SetMaxAge(0)
 	if c.maxAge != MaxAge {
 		t.Errorf("SetMaxAge(0) = %v", c.maxAge)
+	}
+}
+
+// An unknown time zone name is dropped, so no client gets a name it
+// can't use.
+func TestBuildTimeZone(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"Europe/Kyiv", "Europe/Kyiv"},
+		{"", ""},
+		{"Mars/Olympus_Mons", ""},
+		{"Local", ""},
+	} {
+		f := fake()
+		f.Core.TimeZone = tc.in
+		inv, err := Build(context.Background(), f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if inv.TimeZone != tc.want {
+			t.Errorf("%q: time zone = %q, want %q", tc.in, inv.TimeZone, tc.want)
+		}
 	}
 }

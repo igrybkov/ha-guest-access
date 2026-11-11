@@ -152,7 +152,7 @@ type Request struct {
 }
 
 // GuestRequest is a pending request as an approver device sees it. It has
-// no IP.
+// no IP. CreatedAt is in UTC, so it never carries HA's UTC offset.
 type GuestRequest struct {
 	ID        string    `json:"request_id"`
 	Code      string    `json:"code"`
@@ -500,7 +500,7 @@ func (m *Manager) PendingForDevice(w http.ResponseWriter, r *http.Request, link 
 	m.sweep(m.now())
 	out := []GuestRequest{}
 	for _, req := range m.pendingOf(link.ID) {
-		out = append(out, GuestRequest{ID: req.ID, Code: req.Code, Label: req.Label, Device: req.Device, CreatedAt: req.CreatedAt})
+		out = append(out, GuestRequest{ID: req.ID, Code: req.Code, Label: req.Label, Device: req.Device, CreatedAt: req.CreatedAt.UTC()})
 	}
 	m.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"requests": out})

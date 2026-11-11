@@ -136,33 +136,113 @@ export function searchOptions(options, query, limit = 30) {
 }
 
 // ---- Dates ----
+//
+// The admin page shows and reads every time as wall-clock time in HA's
+// time zone, not the browser's. Each helper takes the zone as an IANA
+// name. An empty or unknown name means the browser's zone.
 
 const pad = (n) => String(n).padStart(2, '0');
+const DAY = 864e5;
 
-// toLocalInput formats a Date for <input type=datetime-local>.
-export function toLocalInput(d) {
-  if (!d || Number.isNaN(d.getTime())) return '';
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+// browserZone is the zone this browser runs in.
+export function browserZone() {
+  return new Intl.DateTimeFormat().resolvedOptions().timeZone;
 }
 
-// fromLocalInput reads a datetime-local value as local time. "" → null.
-export function fromLocalInput(s) {
+// usableZone returns tz when this browser knows it, else the browser's
+// zone.
+export function usableZone(tz) {
+  if (!tz) return browserZone();
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: tz });
+    return tz;
+  } catch {
+    return browserZone();
+  }
+}
+
+const partsFormats = new Map();
+
+// wallParts returns the wall-clock time of instant ms in tz:
+// {y, mo, d, h, mi, s, dow}. mo is 1 to 12. dow is 0 (Sunday) to 6.
+export function wallParts(ms, tz) {
+  const zone = usableZone(tz);
+  let f = partsFormats.get(zone);
+  if (!f) {
+    // h23, so midnight is 00 and never 24.
+    f = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric',
+      hour: 'numeric', minute: 'numeric', second: 'numeric', weekday: 'short',
+    });
+    partsFormats.set(zone, f);
+  }
+  const p = {};
+  for (const { type, value } of f.formatToParts(new Date(ms))) p[type] = value;
+  return {
+    y: +p.year, mo: +p.month, d: +p.day, h: +p.hour, mi: +p.minute, s: +p.second,
+    dow: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(p.weekday),
+  };
+}
+
+// wallAsUTC reads wall-clock fields as if they were UTC. Day and month
+// overflow roll over, as with Date.UTC.
+const wallAsUTC = (w) => Date.UTC(w.y, w.mo - 1, w.d, w.h || 0, w.mi || 0, w.s || 0);
+
+// offsetAt is tz's offset from UTC at instant ms, in ms.
+const offsetAt = (ms, tz) => wallAsUTC(wallParts(ms, tz)) - Math.floor(ms / 1000) * 1000;
+
+// wallToUTC returns the instant (ms) of a wall-clock time in tz. Fields
+// are {y, mo, d, h, mi, s}; missing time fields are 0. Fields may
+// overflow (d: 32 is the next month's first day).
+//
+// Around a DST change a wall time can be missing or twice:
+//   - In a gap (spring forward), a nonexistent time moves forward by the
+//     gap: 02:30 on a day that jumps from 02:00 to 03:00 gives 03:30.
+//   - In an overlap (fall back), an ambiguous time takes the first
+//     occurrence, the one before the clocks go back.
+export function wallToUTC(w, tz) {
+  const guess = wallAsUTC(w);
+  // Real zones change offset at most once a day, so the offsets a day
+  // before and a day after cover both sides of any change.
+  const before = offsetAt(guess - DAY, tz);
+  const after = offsetAt(guess + DAY, tz);
+  const hits = [...new Set([before, after])]
+    .map((o) => guess - o)
+    .filter((t) => wallAsUTC(wallParts(t, tz)) === guess);
+  if (hits.length) return Math.min(...hits);
+  return guess - before;
+}
+
+// toLocalInput formats instant d (a Date) for <input type=datetime-local>
+// as wall-clock time in tz.
+export function toLocalInput(d, tz) {
+  if (!d || Number.isNaN(d.getTime())) return '';
+  const w = wallParts(d.getTime(), tz);
+  return `${String(w.y).padStart(4, '0')}-${pad(w.mo)}-${pad(w.d)}T${pad(w.h)}:${pad(w.mi)}`;
+}
+
+// fromLocalInput reads a datetime-local value as wall-clock time in tz.
+// "" → null.
+export function fromLocalInput(s, tz) {
   if (!s) return null;
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s);
   if (!m) return null;
-  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  return new Date(wallToUTC({ y: +m[1], mo: +m[2], d: +m[3], h: +m[4], mi: +m[5] }, tz));
 }
 
-const midnight = (d, addDays = 0) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + addDays);
+// daysInMonth is the number of days in month mo (1 to 12) of year y.
+const daysInMonth = (y, mo) => new Date(Date.UTC(y, mo, 0)).getUTCDate();
 
-// addMonth returns the same day and local time one month after d. When
-// the next month is shorter, it uses that month's last day: Jan 31
-// gives Feb 28, or Feb 29 in a leap year.
-export function addMonth(d) {
-  const y = d.getFullYear();
-  const m = d.getMonth() + 1; // Date rolls month 12 into January
-  const last = new Date(y, m + 1, 0).getDate();
-  return new Date(y, m, Math.min(d.getDate(), last), d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds());
+// addMonth returns the same day and wall-clock time in tz one month
+// after d. When the next month is shorter, it uses that month's last
+// day: Jan 31 gives Feb 28, or Feb 29 in a leap year.
+export function addMonth(d, tz) {
+  const ms = d.getTime();
+  const w = wallParts(ms, tz);
+  const y = w.mo === 12 ? w.y + 1 : w.y;
+  const mo = w.mo === 12 ? 1 : w.mo + 1;
+  const day = Math.min(w.d, daysInMonth(y, mo));
+  return new Date(wallToUTC({ ...w, y, mo, d: day }, tz) + (ms % 1000 + 1000) % 1000);
 }
 
 // PRESETS are the window shortcuts. from null means "from now".
@@ -175,24 +255,27 @@ export const PRESETS = [
 ];
 
 // preset returns {from, until} for a preset at now, or null for custom.
+// Days, weekdays and times of day are wall-clock time in tz.
 //   - today: now until midnight tonight.
 //   - weekend: Friday 17:00 until Monday 00:00. From Friday 17:00 to the
 //     end of Sunday it starts now.
-//   - week: now until the same time 7 days later.
+//   - week: now until the same time of day 7 days later.
 //   - month: now until the same day and time next month (addMonth).
-export function preset(name, now) {
+export function preset(name, now, tz) {
+  const ms = now.getTime();
+  const w = wallParts(ms, tz);
+  const at = (addDays, h = 0) => new Date(wallToUTC({ y: w.y, mo: w.mo, d: w.d + addDays, h }, tz));
   switch (name) {
     case 'month':
-      return { from: null, until: addMonth(now) };
+      return { from: null, until: addMonth(now, tz) };
     case 'today':
-      return { from: null, until: midnight(now, 1) };
+      return { from: null, until: at(1) };
     case 'week':
-      return { from: null, until: new Date(now.getTime() + 7 * 864e5) };
+      return { from: null, until: new Date(wallToUTC({ ...w, d: w.d + 7 }, tz) + (ms % 1000 + 1000) % 1000) };
     case 'weekend': {
-      const dow = now.getDay(); // 0 Sunday … 6 Saturday
-      const toMonday = dow === 0 ? 1 : 8 - dow;
-      const until = midnight(now, toMonday);
-      const friday = new Date(until.getFullYear(), until.getMonth(), until.getDate() - 3, 17);
+      const toMonday = w.dow === 0 ? 1 : 8 - w.dow;
+      const until = at(toMonday);
+      const friday = at(toMonday - 3, 17);
       return { from: now >= friday ? null : friday, until };
     }
     default:
@@ -200,18 +283,25 @@ export function preset(name, now) {
   }
 }
 
-// fmtTime shows a time as a short local date and time.
-export function fmtTime(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime()) || d.getFullYear() < 1900) return '';
-  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+// zoneNote says which zone the date inputs use. tz is HA's zone, or ""
+// when HA has not reported one.
+export function zoneNote(tz, browser = browserZone()) {
+  if (tz && usableZone(tz) === tz) return `Times are in ${tz} (HA).`;
+  return `Times are in ${browser} (this browser). HA has not reported a time zone.`;
 }
 
-// fmtWindow describes a link's window.
-export function fmtWindow(link) {
-  const from = fmtTime(link.valid_from);
-  const until = fmtTime(link.valid_until);
+// fmtTime shows a time as a short date and time in tz.
+export function fmtTime(iso, tz) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime()) || d.getUTCFullYear() < 1900) return '';
+  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: usableZone(tz) });
+}
+
+// fmtWindow describes a link's window in tz.
+export function fmtWindow(link, tz) {
+  const from = fmtTime(link.valid_from, tz);
+  const until = fmtTime(link.valid_until, tz);
   return from ? `${from} to ${until}` : `until ${until}`;
 }
 
@@ -315,7 +405,7 @@ export function linkForm(v = {}) {
   return {
     name: v.name || '',
     note: v.note || '',
-    valid_from: v.valid_from && new Date(v.valid_from).getFullYear() > 1 ? v.valid_from : null,
+    valid_from: v.valid_from && new Date(v.valid_from).getUTCFullYear() > 1 ? v.valid_from : null,
     valid_until: v.valid_until || null,
     templates: [...(v.templates || [])],
     extra: (v.extra || []).map((r) => ruleState(r, { forceAccess: true })),

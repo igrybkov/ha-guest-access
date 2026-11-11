@@ -1,6 +1,6 @@
 // Diagnostics screen: how the app saw recent guest requests. Peer and
 // headers come from whoever sent the request, so they go in as text only.
-import { h, fill, get, table, docsLink } from './dom.js';
+import { h, fill, get, table, docsLink, haZone } from './dom.js';
 import { paths, fmtTime } from './lib.js';
 
 function flags(e) {
@@ -35,7 +35,7 @@ export async function render(view) {
       h('p', { class: 'small' }, 'Never trust a peer that the internet can reach directly. ', docsLink())),
     reqs.length
       ? table(['Time', 'Route', 'Peer', 'Client', 'Headers', 'Flags'], reqs.map((e) => h('tr', {},
-        h('td', { class: 'small', text: fmtTime(e.at) }),
+        h('td', { class: 'small', text: fmtTime(e.at, haZone()) }),
         h('td', {}, h('code', { text: e.route })),
         h('td', {}, h('code', { text: e.peer })),
         h('td', {}, h('code', { text: e.client || '?' })),
