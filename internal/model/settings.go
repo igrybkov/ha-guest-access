@@ -61,6 +61,29 @@ func DefaultRateLimits() RateLimits {
 	}
 }
 
+// WithDefaults returns r with every zero field set to its default. Call it
+// after loading settings.yaml, so a file written before a limit existed
+// (or with the limit left out) gets the default instead of 0.
+func (r RateLimits) WithDefaults() RateLimits {
+	d := DefaultRateLimits()
+	for _, f := range []struct{ v, def *int }{
+		{&r.GuestPerMin, &d.GuestPerMin},
+		{&r.GuestBurst, &d.GuestBurst},
+		{&r.ActionsPerMin, &d.ActionsPerMin},
+		{&r.MissesPerHourPerIP, &d.MissesPerHourPerIP},
+		{&r.MissesPerHourGlobal, &d.MissesPerHourGlobal},
+		{&r.PasswordFailsPerIP, &d.PasswordFailsPerIP},
+		{&r.PasswordFailsPerLink, &d.PasswordFailsPerLink},
+		{&r.PasswordLockoutMin, &d.PasswordLockoutMin},
+		{&r.AdminPerMin, &d.AdminPerMin},
+	} {
+		if *f.v == 0 {
+			*f.v = *f.def
+		}
+	}
+	return r
+}
+
 func (r RateLimits) validate(p *problems, path string) {
 	for _, f := range []struct {
 		name string

@@ -482,3 +482,13 @@ func TestInventoryHelpers(t *testing.T) {
 		t.Errorf("DisplayName = %q", n)
 	}
 }
+
+func TestRateLimitsWithDefaults(t *testing.T) {
+	if got := (RateLimits{}).WithDefaults(); got != DefaultRateLimits() {
+		t.Errorf("zero WithDefaults = %+v", got)
+	}
+	got := RateLimits{GuestPerMin: 99, PasswordLockoutMin: -1}.WithDefaults()
+	if got.GuestPerMin != 99 || got.PasswordLockoutMin != -1 || got.AdminPerMin != 600 {
+		t.Errorf("WithDefaults = %+v; set values must stay, negatives are left for Validate", got)
+	}
+}
