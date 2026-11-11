@@ -98,7 +98,7 @@ func (a accessCheck) network(acc model.Access) bool {
 }
 
 // location checks the near-home part of acc. A local client counts as
-// near only while local access is on (brief decision 3); otherwise the
+// near only while local access is on; otherwise the
 // location cookie must hold a distance within the radius.
 func (a accessCheck) location(acc model.Access) bool {
 	if acc.NearHomeM <= 0 {

@@ -1,4 +1,4 @@
-// Guest page. A plain first version: the UI wave replaces it. It uses
+// Guest page. A plain first version, to be replaced by the full UI. It uses
 // textContent only, never innerHTML, and sends JSON with the page's own
 // origin, which the server checks.
 import { linkBase, actionLabel, cards } from './lib.js';

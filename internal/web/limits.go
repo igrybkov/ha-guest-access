@@ -34,7 +34,7 @@ type noGuard struct{}
 func (noGuard) Allow(string, netip.Addr, time.Time) (bool, time.Duration) { return true, 0 }
 func (noGuard) Fail(string, netip.Addr, time.Time) bool                   { return false }
 
-// limitSet holds every limiter of the app (brief item 17).
+// limitSet holds every limiter of the app. Every route has one.
 //
 //   - preauth: every guest request that is not from an authenticated
 //     guest, per client IP.
