@@ -10,3 +10,13 @@ guest:
   title: Welcome to our home
   welcome: Tap a card to use it.
   accent_color: "#1e88e5"
+rate_limits:
+  guest_per_min: 20
+  guest_burst: 15
+  actions_per_min: 10
+  misses_per_hour_per_ip: 10
+  misses_per_hour_global: 100
+  password_fails_per_ip: 5
+  password_fails_per_link: 30
+  password_lockout_min: 60
+  admin_per_min: 600

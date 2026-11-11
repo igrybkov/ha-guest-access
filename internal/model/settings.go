@@ -21,6 +21,65 @@ type Settings struct {
 	HomeRadiusDefaultM int                    `yaml:"home_radius_default_m" json:"home_radius_default_m"`
 	MusicAssistant     MusicAssistantSettings `yaml:"music_assistant" json:"music_assistant"`
 	Guest              GuestSettings          `yaml:"guest" json:"guest"`
+	RateLimits         RateLimits             `yaml:"rate_limits" json:"rate_limits"`
+}
+
+// RateLimits are the request limits of the app. Every value must be
+// positive. Minutes are used for durations so YAML and JSON agree.
+type RateLimits struct {
+	// GuestPerMin and GuestBurst limit every guest route per client IP.
+	GuestPerMin int `yaml:"guest_per_min" json:"guest_per_min"`
+	GuestBurst  int `yaml:"guest_burst" json:"guest_burst"`
+	// ActionsPerMin limits actions per link + client IP.
+	ActionsPerMin int `yaml:"actions_per_min" json:"actions_per_min"`
+	// MissesPerHourPerIP and MissesPerHourGlobal limit unknown slugs; over
+	// either, misses get 429 instead of 404.
+	MissesPerHourPerIP  int `yaml:"misses_per_hour_per_ip" json:"misses_per_hour_per_ip"`
+	MissesPerHourGlobal int `yaml:"misses_per_hour_global" json:"misses_per_hour_global"`
+	// PasswordFailsPerIP counts wrong passwords per link + client IP in 15
+	// minutes; PasswordFailsPerLink per link in one hour. Over either, the
+	// form is blocked for PasswordLockoutMin.
+	PasswordFailsPerIP   int `yaml:"password_fails_per_ip" json:"password_fails_per_ip"`
+	PasswordFailsPerLink int `yaml:"password_fails_per_link" json:"password_fails_per_link"`
+	PasswordLockoutMin   int `yaml:"password_lockout_min" json:"password_lockout_min"`
+	// AdminPerMin limits the admin API.
+	AdminPerMin int `yaml:"admin_per_min" json:"admin_per_min"`
+}
+
+// DefaultRateLimits returns the limits of a new install.
+func DefaultRateLimits() RateLimits {
+	return RateLimits{
+		GuestPerMin:          20,
+		GuestBurst:           15,
+		ActionsPerMin:        10,
+		MissesPerHourPerIP:   10,
+		MissesPerHourGlobal:  100,
+		PasswordFailsPerIP:   5,
+		PasswordFailsPerLink: 30,
+		PasswordLockoutMin:   60,
+		AdminPerMin:          600,
+	}
+}
+
+func (r RateLimits) validate(p *problems, path string) {
+	for _, f := range []struct {
+		name string
+		v    int
+	}{
+		{"guest_per_min", r.GuestPerMin},
+		{"guest_burst", r.GuestBurst},
+		{"actions_per_min", r.ActionsPerMin},
+		{"misses_per_hour_per_ip", r.MissesPerHourPerIP},
+		{"misses_per_hour_global", r.MissesPerHourGlobal},
+		{"password_fails_per_ip", r.PasswordFailsPerIP},
+		{"password_fails_per_link", r.PasswordFailsPerLink},
+		{"password_lockout_min", r.PasswordLockoutMin},
+		{"admin_per_min", r.AdminPerMin},
+	} {
+		if f.v <= 0 {
+			p.add(join(path, f.name), "must be positive")
+		}
+	}
 }
 
 // LocalAccessSettings turn on the "local only" network option.
@@ -60,6 +119,7 @@ func DefaultSettings() Settings {
 		TrustedProxies:     []string{},
 		HomeRadiusDefaultM: DefaultHomeRadiusM,
 		Guest:              GuestSettings{Title: "Welcome"},
+		RateLimits:         DefaultRateLimits(),
 	}
 }
 
@@ -87,6 +147,7 @@ func (s Settings) Validate() error {
 			p.add("music_assistant.url", "must be an http or https URL")
 		}
 	}
+	s.RateLimits.validate(&p, "rate_limits")
 	if c := s.Guest.AccentColor; c != "" && !colorRe.MatchString(c) {
 		p.add("guest.accent_color", "must look like #1e88e5")
 	}

@@ -352,6 +352,13 @@ func TestSettingsValidate(t *testing.T) {
 		{"MA no scheme", func(s *Settings) { s.MusicAssistant.URL = "ma:8095" }, []string{"music_assistant.url"}},
 		{"MA ftp", func(s *Settings) { s.MusicAssistant.URL = "ftp://ma" }, []string{"music_assistant.url"}},
 		{"color name", func(s *Settings) { s.Guest.AccentColor = "red" }, []string{"guest.accent_color"}},
+		{"zero guest rate", func(s *Settings) { s.RateLimits.GuestPerMin = 0 }, []string{"rate_limits.guest_per_min"}},
+		{"negative lockout", func(s *Settings) { s.RateLimits.PasswordLockoutMin = -1 }, []string{"rate_limits.password_lockout_min"}},
+		{"all rates zero", func(s *Settings) { s.RateLimits = RateLimits{} }, []string{
+			"rate_limits.guest_per_min", "rate_limits.guest_burst", "rate_limits.actions_per_min",
+			"rate_limits.misses_per_hour_per_ip", "rate_limits.misses_per_hour_global",
+			"rate_limits.password_fails_per_ip", "rate_limits.password_fails_per_link",
+			"rate_limits.password_lockout_min", "rate_limits.admin_per_min"}},
 		{"color css injection", func(s *Settings) { s.Guest.AccentColor = "#fff;}body{" }, []string{"guest.accent_color"}},
 	} {
 		s := DefaultSettings()
@@ -364,6 +371,10 @@ func TestDefaultSettings(t *testing.T) {
 	s := DefaultSettings()
 	if s.LocalAccess.Enabled {
 		t.Error("local access is on by default")
+	}
+	if s.RateLimits != (RateLimits{GuestPerMin: 20, GuestBurst: 15, ActionsPerMin: 10, MissesPerHourPerIP: 10, MissesPerHourGlobal: 100,
+		PasswordFailsPerIP: 5, PasswordFailsPerLink: 30, PasswordLockoutMin: 60, AdminPerMin: 600}) {
+		t.Errorf("default rate limits = %+v", s.RateLimits)
 	}
 	if len(s.TrustedProxies) != 0 {
 		t.Error("trusted proxies are not empty by default")
