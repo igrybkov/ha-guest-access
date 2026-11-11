@@ -90,3 +90,32 @@ func TestDiscreteKeepsOwnLimit(t *testing.T) {
 		t.Errorf("slider after discrete limit: %d", c)
 	}
 }
+
+// A refused act is never free: an unapproved device, or a POST with a
+// bad Origin, still uses the per link + IP limit and gets 429 past it.
+func TestRefusedActIsLimited(t *testing.T) {
+	h := newHarness(t)
+	l := h.approvalLink(model.Approval{Manual: true})
+	limited := 0
+	for range 45 {
+		if c := h.act(l, "light.guest_room", "light.turn_off", nil).Code; c == http.StatusTooManyRequests {
+			limited++
+		}
+	}
+	if limited != 5 {
+		t.Errorf("unapproved device: %d of 45 limited, want 5", limited)
+	}
+	h2 := newHarness(t)
+	l2 := h2.link("guest_room")
+	limited = 0
+	for range 45 {
+		rec := h2.g(req{method: "POST", path: "/g/" + l2.Slug + "/act", origin: "https://evil.example",
+			body: map[string]any{"entity_id": "light.guest_room", "action": "light.turn_off"}})
+		if rec.Code == http.StatusTooManyRequests {
+			limited++
+		}
+	}
+	if limited != 5 {
+		t.Errorf("bad Origin: %d of 45 limited, want 5", limited)
+	}
+}

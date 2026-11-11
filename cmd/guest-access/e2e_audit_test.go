@@ -99,7 +99,7 @@ func TestE2EAuditActDenials(t *testing.T) {
 		}
 		var denied []audit.Record
 		for _, rec := range a.auditRecords()[before:] {
-			if strings.HasSuffix(rec.Event, ".denied") {
+			if rec.Result == audit.ResultDenied {
 				denied = append(denied, rec)
 			}
 		}
@@ -172,5 +172,52 @@ func TestE2EAuditFileOff(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(a.dataDir, audit.FileName)); !os.IsNotExist(err) {
 		t.Errorf("audit file exists: %v", err)
+	}
+}
+
+// Denials outside /act: each gives exactly one denied record.
+func TestE2EAuditOtherDenials(t *testing.T) {
+	a := approvalApp(t)
+	locked := a.newLink(map[string]any{"templates": []string{"guest_room"}})
+	a.adminJSON("POST", "/api/links/"+locked.ID+"/passwords", map[string]any{"label": "Anna", "password": "pw"})
+	entry := a.newLink(map[string]any{"templates": []string{"entry"}})
+	manual := a.approvalLink(true, false)
+	b := a.browser(iPhoneUA)
+	for _, c := range []struct {
+		event, reason string
+		send          func()
+	}{
+		{"guest.password.fail", "wrong_password", func() {
+			a.do(call{method: "POST", url: a.guest + "/g/" + locked.Slug + "/password", body: map[string]any{"password": "nope"}})
+		}},
+		{"guest.near.denied", "accuracy_too_low", func() {
+			a.do(call{method: "POST", url: a.guest + "/g/" + entry.Slug + "/where", body: map[string]any{"lat": home.lat, "lon": home.lon, "accuracy": 1e6}})
+		}},
+		{"guest.slug.miss", "", func() { a.do(call{method: "GET", url: a.guest + "/g/not-a-real-link/state"}) }},
+		{"device.denied", "", func() {
+			b.do("POST", manual, "device/request", nil)
+			ev := a.lastRequestEvent()
+			a.ha.Emit("guest_access_device_decision", map[string]any{"request_id": ev["request_id"], "approve": false})
+			waitFor(t, "denial", func() bool {
+				for _, r := range a.auditRecords() {
+					if r.Event == "device.denied" {
+						return true
+					}
+				}
+				return false
+			})
+		}},
+	} {
+		before := len(a.auditRecords())
+		c.send()
+		var denied []audit.Record
+		for _, rec := range a.auditRecords()[before:] {
+			if rec.Result == audit.ResultDenied {
+				denied = append(denied, rec)
+			}
+		}
+		if len(denied) != 1 || denied[0].Event != c.event || denied[0].Reason != c.reason {
+			t.Errorf("%s: denied records %+v", c.event, denied)
+		}
 	}
 }

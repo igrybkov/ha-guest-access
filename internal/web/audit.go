@@ -13,6 +13,7 @@ import (
 	"github.com/igrybkov/ha-guest-access/internal/approval"
 	"github.com/igrybkov/ha-guest-access/internal/audit"
 	"github.com/igrybkov/ha-guest-access/internal/authz"
+	"github.com/igrybkov/ha-guest-access/internal/catalog"
 	"github.com/igrybkov/ha-guest-access/internal/links"
 )
 
@@ -43,6 +44,8 @@ const (
 	reasonLimitStreams    = "limit_streams"
 	reasonAccuracyTooLow  = "accuracy_too_low"
 	auditThrottlePeriod   = time.Minute
+	// sliderAuditPeriod spaces the allowed records of a slider drag.
+	sliderAuditPeriod     = 10 * time.Second
 	auditEventRateLimited = "guest.rate_limited"
 	auditEventSlugMiss    = "guest.slug.miss"
 )
@@ -102,6 +105,15 @@ func (s *Server) emitGuest(g *guestReq) {
 	r := g.audit.rec
 	if r.Event == auditEventRateLimited || r.Event == auditEventSlugMiss {
 		ok, skipped := s.auditThrottle.Allow(r.Event+"|"+g.ipKey(), g.now)
+		if !ok {
+			return
+		}
+		r.Count = skipped
+	}
+	if act, ok := catalog.Lookup(r.Action); ok && act.Continuous && r.Event == "guest.act.allowed" {
+		// One record per drag period, per link, client and entity. The
+		// next one counts the values left out.
+		ok, skipped := s.sliderThrottle.Allow(g.link.ID+"|"+g.ipKey()+"|"+r.EntityID, g.now)
 		if !ok {
 			return
 		}

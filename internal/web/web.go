@@ -133,8 +133,10 @@ type Server struct {
 	audit   *audit.Logger
 	// auditThrottle holds back records a client can cause in bulk.
 	auditThrottle *audit.Throttle
-	diag          *diagRing
-	assets        *assetSet
+	// sliderThrottle spaces the allowed records of slider drags.
+	sliderThrottle *audit.Throttle
+	diag           *diagRing
+	assets         *assetSet
 }
 
 // New returns a Server.
@@ -147,9 +149,10 @@ func New(d Deps) *Server {
 		streams: streamCounter{open: map[string]int{}},
 		audit:   d.Audit,
 
-		auditThrottle: audit.NewThrottle(auditThrottlePeriod),
-		diag:          newDiagRing(max(1, d.Options.DiagRequests)),
-		assets:        loadAssets(),
+		auditThrottle:  audit.NewThrottle(auditThrottlePeriod),
+		sliderThrottle: audit.NewThrottle(sliderAuditPeriod),
+		diag:           newDiagRing(max(1, d.Options.DiagRequests)),
+		assets:         loadAssets(),
 	}
 	if s.log == nil {
 		s.log = slog.Default()

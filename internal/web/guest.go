@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"net/http"
@@ -166,9 +167,14 @@ type guestKey struct{}
 //
 //  1. A rate limiter. Which one depends on steps 2 to 4, which are cheap
 //     (a map lookup and an HMAC): an authenticated guest on a kindGuest
-//     route uses the per link + IP limiter; every other request uses the
-//     pre-auth limiter per IP. A slug miss also counts against the miss
-//     limiters, per IP and across all IPs; over either, it gets 429.
+//     or kindDevice route uses the per link + IP limiter; every other
+//     request uses the pre-auth limiter per IP. A slug miss also counts
+//     against the miss limiters, per IP and across all IPs; over either,
+//     it gets 429. An authenticated act is the one exception: it takes
+//     its token after the body is read, from the continuous limiter
+//     (sliders, per link + IP + entity) or the per link + IP limiter.
+//     If steps 3 or 6 refuse it first, it takes a per link + IP token
+//     before the refusal is sent.
 //  2. The slug lookup. A valid slug always works, whatever the miss
 //     limiters say.
 //  3. POST shape: JSON content type and a same-origin Origin header.
@@ -284,10 +290,14 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 	g.link = link
 	active := link.Active(g.now)
 	authed := active && s.session(g)
+	// An authenticated act takes its token in guestAct, once it knows the
+	// action: continuous and discrete actions use different limiters.
+	// Until then, any early refusal takes a discrete token first
+	// (denyLimit), so a refused act is never free.
+	actLater := route.kind != kindOpen && authed && r.PathValue("route") == "act"
+	denyLimit := func() bool { return !actLater || g.allowAuthed() }
 	switch {
-	case route.kind != kindOpen && authed && r.PathValue("route") == "act":
-		// guestAct takes the token once it knows the action: continuous
-		// and discrete actions use different limiters.
+	case actLater:
 	case route.kind != kindOpen && authed:
 		if !g.allowAuthed() {
 			return
@@ -303,7 +313,7 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 	}
 
 	// Steps 3 to 6.
-	if route.post && !checkPost(g) {
+	if route.post && !checkPost(g, denyLimit) {
 		return
 	}
 	if !active {
@@ -317,11 +327,19 @@ func (s *Server) serveSlug(routes map[string]guestRoute, w http.ResponseWriter, 
 		return
 	}
 	if route.kind == kindGuest {
-		dev, ok := s.devices.Admit(w, r, link, g.client, g.label)
+		// Admit writes its own refusal. Hold it, so a refused act can
+		// take its token (and maybe answer 429) first.
+		held := &heldResponse{header: w.Header(), code: http.StatusOK}
+		dev, ok := s.devices.Admit(held, r, link, g.client, g.label)
 		if !ok {
+			if !denyLimit() {
+				return
+			}
 			g.deny(reasonDevice)
+			held.flush(w)
 			return
 		}
+		held.flush(w)
 		g.device = dev
 	}
 	route.handle(s, g)
@@ -375,18 +393,58 @@ func (s *Server) session(g *guestReq) bool {
 // checkPost refuses a POST that is not JSON or not from the page's own
 // origin. Browsers send Origin on every POST, so a missing one is
 // refused too.
-func checkPost(g *guestReq) bool {
+//
+// limit runs before a refusal is written; when it returns false it has
+// answered (429) itself.
+func checkPost(g *guestReq, limit func() bool) bool {
 	if !isJSON(g.r) {
+		if !limit() {
+			return false
+		}
 		g.deny(reasonContentType)
 		writeError(g.w, http.StatusUnsupportedMediaType, msgJSONOnly)
 		return false
 	}
 	if !sameOrigin(g.r) {
+		if !limit() {
+			return false
+		}
 		g.deny(reasonOrigin)
 		writeError(g.w, http.StatusForbidden, msgOrigin)
 		return false
 	}
 	return true
+}
+
+// heldResponse holds a response body and status until flush. Headers go
+// straight to the real writer.
+type heldResponse struct {
+	header http.Header
+	code   int
+	wrote  bool
+	body   bytes.Buffer
+}
+
+func (h *heldResponse) Header() http.Header { return h.header }
+
+func (h *heldResponse) WriteHeader(code int) {
+	if !h.wrote {
+		h.code, h.wrote = code, true
+	}
+}
+
+func (h *heldResponse) Write(p []byte) (int, error) {
+	h.WriteHeader(http.StatusOK)
+	return h.body.Write(p)
+}
+
+// flush writes what was held to w, if anything was.
+func (h *heldResponse) flush(w http.ResponseWriter) {
+	if !h.wrote {
+		return
+	}
+	w.WriteHeader(h.code)
+	_, _ = w.Write(h.body.Bytes())
 }
 
 // sameOrigin reports whether r's Origin header names r's own host.

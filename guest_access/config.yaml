@@ -148,4 +148,4 @@ schema:
     retry_after_s: int(1,3600)
   audit:
     enabled: bool
-    max_file_kib: int(64,1048576)
+    max_file_kib: int(64,65536)

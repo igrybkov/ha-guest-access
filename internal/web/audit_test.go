@@ -259,3 +259,28 @@ func TestAuditThrottlesMisses(t *testing.T) {
 		t.Errorf("misses = %+v", misses)
 	}
 }
+
+// A slider drag gives one allowed record per period per entity, not one
+// per value. The next record counts the values left out.
+func TestAuditThrottlesSliderDrags(t *testing.T) {
+	ah := newAuditHarness(t)
+	l := ah.link("guest_room")
+	for i := range 20 {
+		if c := ah.slider(l, "light.guest_room", 1+i); c != 200 {
+			t.Fatalf("value %d: %d", i, c)
+		}
+		ah.advance(100 * time.Millisecond)
+	}
+	ah.advance(10 * time.Second)
+	ah.slider(l, "light.guest_room", 50)
+	ah.act(l, "light.guest_room", "light.turn_off", nil)
+	var allowed []audit.Record
+	for _, r := range ah.records() {
+		if r.Event == "guest.act.allowed" {
+			allowed = append(allowed, r)
+		}
+	}
+	if len(allowed) != 3 || allowed[1].Count != 19 || allowed[2].Action != "light.turn_off" {
+		t.Errorf("allowed records = %+v", allowed)
+	}
+}

@@ -258,7 +258,7 @@ func (r rawOptions) options() (Options, error) {
 		{"streams.recheck_s", r.Streams.RecheckS, 1, 300, ""},
 		{"streams.heartbeat_s", r.Streams.HeartbeatS, 5, 600, ""},
 		{"streams.retry_after_s", r.Streams.RetryAfterS, 1, 3600, ""},
-		{"audit.max_file_kib", r.Audit.MaxFileKiB, 64, 1 << 20, ""},
+		{"audit.max_file_kib", r.Audit.MaxFileKiB, 64, 64 << 10, ""},
 	} {
 		if f.v < f.lo || f.v > f.hi {
 			msg := fmt.Sprintf("%s: must be between %d and %d", f.name, f.lo, f.hi)
