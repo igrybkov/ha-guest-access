@@ -569,6 +569,10 @@ const settingsSample = {
     ma_check_interval_min: 323, custom_slug_warn_len: 324, http_read_timeout_s: 325, max_header_kib: 326,
     stream_max_per_ip: 327, audit_max_denials_per_min: 328,
   },
+  tls: {
+    enabled: true, source: 'self-signed', fingerprint: 'AB:CD', not_after: '2027-11-11T12:00:00Z',
+    certfile: 'fullchain.pem', keyfile: 'privkey.pem', self_signed_days: 401,
+  },
 };
 
 test('settings sections show every number the server sends', () => {
@@ -599,6 +603,21 @@ test('settings sections: on/off, lists and missing values', () => {
   assert.equal(empty.get('Trusted proxies'), 'None');
   assert.equal(empty.get('Log file'), 'Off');
   assert.equal(empty.get('Custom slug length'), null);
+});
+
+test('settings: guest HTTPS rows', () => {
+  const on = new Map(settingsSections(settingsSample).flatMap((s) => s.rows));
+  assert.equal(on.get('HTTPS'), 'On');
+  assert.equal(on.get('Certificate'), 'Self-signed');
+  assert.equal(on.get('SHA-256 fingerprint'), 'AB:CD');
+  assert.match(on.get('Valid until'), /2027/);
+  const files = new Map(settingsSections({ tls: { ...settingsSample.tls, source: 'files' } }).flatMap((s) => s.rows));
+  assert.equal(files.get('Certificate'), 'Files in /ssl (fullchain.pem, privkey.pem)');
+  const off = new Map(settingsSections({ tls: { enabled: false, certfile: 'a.pem', keyfile: 'b.pem', self_signed_days: 365 } }).flatMap((s) => s.rows));
+  assert.equal(off.get('HTTPS'), 'Off');
+  assert.equal(off.get('Certificate file'), 'a.pem');
+  assert.equal(off.has('SHA-256 fingerprint'), false);
+  assert.equal(new Map(settingsSections({}).flatMap((s) => s.rows)).get('HTTPS'), 'Off');
 });
 
 test('settings: a refused Music Assistant token shows in the row and as a warning', () => {

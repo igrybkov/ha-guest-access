@@ -24,6 +24,7 @@ type Config struct {
 	LogLevel    string // debug | info | warn | error
 	DataDir     string // links, secrets, HMAC key, options.json; default /data
 	ConfigDir   string // templates.yaml; default /homeassistant/guest_access
+	SSLDir      string // certfile and keyfile; default /ssl
 	Listen      string // admin port; default :8099
 	GuestListen string // guest port; default :8888
 	HAURL       string // websocket URL
@@ -40,6 +41,7 @@ type Config struct {
 const (
 	defaultDataDir   = "/data"
 	defaultConfigDir = "/homeassistant/guest_access"
+	defaultSSLDir    = "/ssl"
 	// DefaultListen is the admin port. Ingress and the watchdog reach the
 	// app here. The healthcheck reads its port.
 	DefaultListen = ":8099"
@@ -49,7 +51,7 @@ const (
 )
 
 // Load reads env (HA_URL, HA_TOKEN, SUPERVISOR_TOKEN, DATA_DIR, CONFIG_DIR,
-// LISTEN, GUEST_LISTEN, LOG_LEVEL, DEV_ADMIN_ANY_PEER) and the app options
+// SSL_DIR, LISTEN, GUEST_LISTEN, LOG_LEVEL, DEV_ADMIN_ANY_PEER) and the app options
 // in <DataDir>/options.json. A missing options.json means all defaults, and
 // keys it leaves out keep theirs. Options that do not check out are an
 // error that names each bad key, so the app does not start half set up.
@@ -69,6 +71,7 @@ func load(getenv func(string) string, readFile func(string) ([]byte, error)) (Co
 	c := Config{
 		DataDir:     firstNonEmpty(getenv("DATA_DIR"), defaultDataDir),
 		ConfigDir:   firstNonEmpty(getenv("CONFIG_DIR"), defaultConfigDir),
+		SSLDir:      firstNonEmpty(getenv("SSL_DIR"), defaultSSLDir),
 		Listen:      firstNonEmpty(getenv("LISTEN"), DefaultListen),
 		GuestListen: firstNonEmpty(getenv("GUEST_LISTEN"), DefaultGuestListen),
 	}

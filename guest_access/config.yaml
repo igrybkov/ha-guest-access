@@ -20,6 +20,9 @@ panel_admin: true
 map:
   - type: homeassistant_config
     read_only: false
+  # Certificates for the optional HTTPS on the guest port (ssl option).
+  - type: ssl
+    read_only: true
 watchdog: http://[HOST]:[PORT:8099]/healthz
 # The guest port. The host port is not 8888 by default, so this app can run
 # next to the old Limited Guest Access add-on during the move.
@@ -31,6 +34,10 @@ ports_description:
 # the app. internal/config holds the same defaults; a test keeps them equal.
 options:
   log_level: info
+  ssl: false
+  certfile: fullchain.pem
+  keyfile: privkey.pem
+  ssl_self_signed_days: 365
   local_access:
     enabled: false
     networks:
@@ -107,6 +114,10 @@ options:
     max_denials_per_min: 120
 schema:
   log_level: list(debug|info|warn|error)
+  ssl: bool
+  certfile: str
+  keyfile: str
+  ssl_self_signed_days: int(1,3650)
   public_base_url: url?
   local_access:
     enabled: bool

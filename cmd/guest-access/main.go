@@ -24,6 +24,7 @@ import (
 	"github.com/igrybkov/ha-guest-access/internal/approval"
 	"github.com/igrybkov/ha-guest-access/internal/audit"
 	"github.com/igrybkov/ha-guest-access/internal/config"
+	"github.com/igrybkov/ha-guest-access/internal/guesttls"
 	"github.com/igrybkov/ha-guest-access/internal/ha"
 	"github.com/igrybkov/ha-guest-access/internal/inventory"
 	"github.com/igrybkov/ha-guest-access/internal/links"
@@ -192,6 +193,21 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		return fmt.Errorf("device decisions: %w", err)
 	}
 
+	// HTTPS on the guest port. With ssl on, the port serves TLS only, or
+	// the app does not start: it never falls back to plain HTTP.
+	var guestTLS *guesttls.Manager
+	if o.TLS.Enabled {
+		guestTLS, err = guesttls.New(guesttls.Options{
+			SSLDir: cfg.SSLDir, CertFile: o.TLS.CertFile, KeyFile: o.TLS.KeyFile,
+			DataDir: cfg.DataDir, Lifetime: o.TLS.SelfSignedLifetime, Now: opts.Now, Logger: log,
+		})
+		if err != nil {
+			closeAll()
+			return fmt.Errorf("guest TLS: %w", err)
+		}
+		defer guestTLS.Close()
+	}
+
 	srv := web.New(web.Deps{
 		Options:         o,
 		Templates:       templates,
@@ -203,13 +219,22 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		Audit:           auditLog,
 		NewMA:           opts.NewMA,
 		DevAdminAnyPeer: cfg.DevAdminAnyPeer,
+		TLSStatus:       tlsStatus(o.TLS, guestTLS),
 		Now:             opts.Now,
 		Version:         version,
 		Logger:          log,
 	})
-	servers := []*http.Server{newServer(ctx, srv.AdminHandler(), log), newServer(ctx, srv.GuestHandler(), log)}
+	adminSrv, guestSrv := newServer(ctx, srv.AdminHandler(), log), newServer(ctx, srv.GuestHandler(), log)
+	servers := []*http.Server{adminSrv, guestSrv}
 	for _, s := range servers {
 		setBounds(s, o)
+	}
+	// The admin port stays plain HTTP: Supervisor's ingress proxy talks
+	// HTTP to it.
+	serveGuest := func() error { return guestSrv.Serve(guestLn) }
+	if guestTLS != nil {
+		guestSrv.TLSConfig = guestTLS.TLSConfig()
+		serveGuest = func() error { return guestSrv.ServeTLS(guestLn, "", "") }
 	}
 
 	var wg sync.WaitGroup
@@ -220,12 +245,10 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		wg.Go(func() { notifier.Run(ctx) })
 	}
 	serveErr := make(chan error, len(servers))
-	for i, ln := range []net.Listener{adminLn, guestLn} {
-		s := servers[i]
-		go func() { serveErr <- s.Serve(ln) }()
-	}
+	go func() { serveErr <- adminSrv.Serve(adminLn) }()
+	go func() { serveErr <- serveGuest() }()
 	log.Info("guest-access started", "version", version, "listen", adminLn.Addr().String(),
-		"guest_listen", guestLn.Addr().String(), "supervisor", cfg.Supervisor,
+		"guest_listen", guestLn.Addr().String(), "guest_tls", guestTLS != nil, "supervisor", cfg.Supervisor,
 		"config_dir", cfg.ConfigDir, "data_dir", cfg.DataDir)
 
 	var runErr error
@@ -255,6 +278,20 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		log.Warn("background tasks did not stop in time")
 	}
 	return runErr
+}
+
+// tlsStatus returns the guest TLS state for the settings page. m is nil
+// when ssl is off.
+func tlsStatus(o config.TLSOptions, m *guesttls.Manager) func() web.TLSStatus {
+	return func() web.TLSStatus {
+		st := web.TLSStatus{Enabled: o.Enabled, CertFile: o.CertFile, KeyFile: o.KeyFile,
+			SelfSignedDays: int(o.SelfSignedLifetime / (24 * time.Hour))}
+		if m != nil {
+			s := m.Status()
+			st.Source, st.Fingerprint, st.NotAfter = string(s.Source), s.Fingerprint, s.NotAfter
+		}
+		return st
+	}
 }
 
 // newNotifier returns the HA notifier of device requests, or nil when

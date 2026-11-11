@@ -31,6 +31,8 @@ type settingsView struct {
 	// every time in it. "" means HA has not reported one, and the page
 	// uses the browser's zone.
 	TimeZone string `json:"time_zone"`
+	// TLS is the HTTPS state of the guest port.
+	TLS TLSStatus `json:"tls"`
 }
 
 // tunablesView holds the other app options, in plain units.
@@ -119,6 +121,7 @@ func newSettingsView(o config.Options, maRefused bool) settingsView {
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	v := newSettingsView(s.deps.Options, s.maRefused.Load())
+	v.TLS = s.tlsStatus()
 	// The settings still load when HA is away; the zone is then "".
 	ctx, cancel := context.WithTimeout(r.Context(), s.deps.Options.HACallTimeout)
 	defer cancel()

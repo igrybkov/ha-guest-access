@@ -31,7 +31,7 @@ func TestLoadSupervisor(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Config{
-		LogLevel: "debug", DataDir: "/data", ConfigDir: "/homeassistant/guest_access",
+		LogLevel: "debug", DataDir: "/data", ConfigDir: "/homeassistant/guest_access", SSLDir: "/ssl",
 		Listen: ":8099", GuestListen: ":8888",
 		HAURL: "ws://supervisor/core/websocket", HAToken: "tok", Supervisor: true,
 	}
@@ -55,14 +55,14 @@ func checkConfig(t *testing.T, c, want Config) {
 func TestLoadDevMode(t *testing.T) {
 	c, err := load(env(map[string]string{
 		"HA_URL": "https://hass.example/", "HA_TOKEN": "t",
-		"DATA_DIR": "/tmp/d", "CONFIG_DIR": "/tmp/c", "LISTEN": "127.0.0.1:9000", "GUEST_LISTEN": "127.0.0.1:9001",
+		"DATA_DIR": "/tmp/d", "CONFIG_DIR": "/tmp/c", "SSL_DIR": "/tmp/s", "LISTEN": "127.0.0.1:9000", "GUEST_LISTEN": "127.0.0.1:9001",
 		"DEV_ADMIN_ANY_PEER": "1",
 	}), files(map[string]string{"/tmp/d/options.json": `{"log_level":"warn"}`}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := Config{
-		LogLevel: "warn", DataDir: "/tmp/d", ConfigDir: "/tmp/c",
+		LogLevel: "warn", DataDir: "/tmp/d", ConfigDir: "/tmp/c", SSLDir: "/tmp/s",
 		Listen: "127.0.0.1:9000", GuestListen: "127.0.0.1:9001",
 		HAURL: "wss://hass.example/api/websocket", HAToken: "t", DevAdminAnyPeer: true,
 	}

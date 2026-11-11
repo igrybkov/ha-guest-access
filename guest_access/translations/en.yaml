@@ -4,6 +4,23 @@ configuration:
     description: >-
       How much the app writes to its log. At debug, the guest port logs the
       address and proxy headers of each request.
+  ssl:
+    name: HTTPS on the guest port
+    description: >-
+      Off by default. When on, the guest port speaks HTTPS only, so your
+      reverse proxy must use https to reach it. Without valid certfile and
+      keyfile, the app uses a self-signed certificate.
+  certfile:
+    name: Certificate file
+    description: A file in /ssl, such as fullchain.pem. Used only with HTTPS on.
+  keyfile:
+    name: Private key file
+    description: A file in /ssl, such as privkey.pem. Used only with HTTPS on.
+  ssl_self_signed_days:
+    name: Self-signed certificate lifetime
+    description: >-
+      Days a self-signed certificate is valid. The app makes a new one when
+      less than a third of this time is left.
   public_base_url:
     name: Public address
     description: >-

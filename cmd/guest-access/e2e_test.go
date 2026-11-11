@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -98,11 +99,17 @@ type appOpts struct {
 	// calls, so they change states and send state_changed.
 	fake *hatest.Fake
 	sim  bool
+	// sslDir is the ssl folder. "" = an empty temp dir.
+	sslDir string
 }
 
 // testClient sends no cookies of its own and does not pool connections,
-// so Shutdown never waits on an idle one.
-var testClient = &http.Client{Transport: &http.Transport{DisableKeepAlives: true}, Timeout: 30 * time.Second}
+// so Shutdown never waits on an idle one. It takes any certificate, for a
+// guest port with ssl on; the TLS tests check the certificate themselves.
+var testClient = &http.Client{Transport: &http.Transport{
+	DisableKeepAlives: true,
+	TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
+}, Timeout: 30 * time.Second}
 
 // t0 is the app clock's start.
 var t0 = time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
@@ -145,7 +152,11 @@ func startApp(t *testing.T, o appOpts) *app {
 	if o.devAnyPeer != nil {
 		anyPeer = *o.devAnyPeer
 	}
-	cfg := config.Config{LogLevel: "debug", ConfigDir: cfgDir, DataDir: dataDir, HAURL: srv.URL(), HAToken: testToken,
+	sslDir := o.sslDir
+	if sslDir == "" {
+		sslDir = t.TempDir()
+	}
+	cfg := config.Config{LogLevel: "debug", ConfigDir: cfgDir, DataDir: dataDir, SSLDir: sslDir, HAURL: srv.URL(), HAToken: testToken,
 		DevAdminAnyPeer: anyPeer, Options: opts}
 
 	adminLn, err := net.Listen("tcp", "127.0.0.1:0")
@@ -160,7 +171,11 @@ func startApp(t *testing.T, o appOpts) *app {
 	start := t0
 	now.Store(&start)
 	ctx, cancel := context.WithCancel(context.Background())
-	a := &app{t: t, admin: "http://" + adminLn.Addr().String(), guest: "http://" + guestLn.Addr().String(),
+	guestScheme := "http://"
+	if opts.TLS.Enabled {
+		guestScheme = "https://"
+	}
+	a := &app{t: t, admin: "http://" + adminLn.Addr().String(), guest: guestScheme + guestLn.Addr().String(),
 		ha: srv, fake: fake, failHA: failHA, now: now, done: make(chan error, 1), stop: cancel, dataDir: dataDir}
 	ro := options{
 		Logger: cmp.Or(o.logger, slog.New(slog.DiscardHandler)),
