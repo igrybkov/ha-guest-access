@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"slices"
@@ -90,7 +91,7 @@ type templatesView struct {
 	Error     string           `json:"error,omitempty"`
 }
 
-func (s *Server) listTemplates(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) listTemplates(w http.ResponseWriter, r *http.Request) {
 	ts, err := s.deps.Templates.Templates()
 	v := templatesView{Templates: ts.Templates}
 	if verr := asValidation(err); verr != nil {
@@ -98,7 +99,7 @@ func (s *Server) listTemplates(w http.ResponseWriter, _ *http.Request) {
 	} else if err != nil {
 		v.Error = err.Error()
 	}
-	if p := asValidation(s.policy.ValidateTemplates(ts, s.settings())); p != nil {
+	if p := asValidation(s.checkTemplates(r.Context(), ts)); p != nil {
 		v.Problems = append(v.Problems, p.Problems...)
 	}
 	writeJSON(w, http.StatusOK, v)
@@ -114,7 +115,7 @@ func (s *Server) createTemplate(w http.ResponseWriter, r *http.Request) {
 			return errTemplateDup
 		}
 		ts.Templates = append(ts.Templates, t)
-		return s.checkTemplate(*ts, t)
+		return s.checkTemplate(r.Context(), t)
 	})
 	if err != nil {
 		s.writeAdminErr(w, r, err)
@@ -142,7 +143,7 @@ func (s *Server) updateTemplate(w http.ResponseWriter, r *http.Request) {
 			return errNoTemplate
 		}
 		ts.Templates[i] = t
-		return s.checkTemplate(*ts, t)
+		return s.checkTemplate(r.Context(), t)
 	})
 	if err != nil {
 		s.writeAdminErr(w, r, err)
@@ -151,13 +152,13 @@ func (s *Server) updateTemplate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, t)
 }
 
-// checkTemplate validates t alone, so problems have paths in t, then
-// runs the policy over the whole list.
-func (s *Server) checkTemplate(ts model.Templates, t model.Template) error {
+// checkTemplate validates t alone: its shape, then the policy. Problem
+// paths point into t, and other templates never block its save.
+func (s *Server) checkTemplate(ctx context.Context, t model.Template) error {
 	if err := t.Validate(); err != nil {
 		return err
 	}
-	return s.policy.ValidateTemplates(model.Templates{Version: ts.Version, Templates: []model.Template{t}}, s.settings())
+	return s.checkTemplates(ctx, model.Templates{Templates: []model.Template{t}})
 }
 
 // deleteTemplate removes a template. Links that name it lose its rules;
@@ -251,10 +252,10 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 		ts = append(ts, *t)
 		link = model.Link{Name: "preview", TemplateIDs: []string{t.ID}}
 		v.Problems = append(v.Problems, problemsOf(t.Validate())...)
-		v.Problems = append(v.Problems, problemsOf(s.policy.ValidateTemplates(model.Templates{Templates: []model.Template{*t}}, s.settings()))...)
+		v.Problems = append(v.Problems, problemsOf(s.checkTemplates(r.Context(), model.Templates{Templates: []model.Template{*t}}))...)
 	} else {
 		link = *b.Link
-		v.Problems = append(v.Problems, problemsOf(s.policy.ValidateLink(link, model.Templates{Templates: ts}, s.settings()))...)
+		v.Problems = append(v.Problems, problemsOf(s.checkLinkPolicy(r.Context(), link, model.Templates{Templates: ts}))...)
 	}
 	// Templates that do not validate grant nothing, as on the guest side.
 	valid := slices.DeleteFunc(slices.Clone(ts), func(t model.Template) bool { return t.Validate() != nil })

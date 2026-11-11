@@ -1,6 +1,6 @@
-// Package policy holds the checks that need more than one file: a rule in
-// templates.yaml against settings.yaml and the action catalog, a link in
-// links.yaml against the templates. model's Validate methods check one
+// Package policy holds the checks that need more than one source: a rule
+// in templates.yaml against the app options and the action catalog, a link
+// in links.yaml against the templates. model's Validate methods check one
 // value's shape; the admin save paths call both.
 //
 // These checks guard saves only. A file that already breaks them still
@@ -83,7 +83,7 @@ func (c *checker) rule(r model.Rule, at string) {
 
 func (c *checker) access(a model.Access, at string) {
 	if a.Local() && !c.settings.LocalAccess.Enabled {
-		c.add(at+".network", "local only is off; turn it on in Settings first")
+		c.add(at+".network", "local only needs local access turned on in the app options")
 	}
 	if a.NearHomeM > 0 && !c.hasHome {
 		c.add(at+".near_home_m", "HA has no home location; set one in HA first")

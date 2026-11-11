@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -96,9 +97,9 @@ func (s *Server) writeLink(w http.ResponseWriter, r *http.Request, status int, l
 
 // checkLink runs the policy on a link draft. On create the draft has no
 // id or slug yet.
-func (s *Server) checkLink(l model.Link) error {
+func (s *Server) checkLink(ctx context.Context, l model.Link) error {
 	ts, _ := s.deps.Templates.Templates()
-	return s.policy.ValidateLink(l, ts, s.settings())
+	return s.checkLinkPolicy(ctx, l, ts)
 }
 
 // createLink takes a model.Link. Only the editable fields count (name,
@@ -109,7 +110,7 @@ func (s *Server) createLink(w http.ResponseWriter, r *http.Request) {
 	if !s.decodeAdmin(w, r, &draft) {
 		return
 	}
-	if err := s.checkLink(draft); err != nil {
+	if err := s.checkLink(r.Context(), draft); err != nil {
 		s.writeAdminErr(w, r, err)
 		return
 	}
@@ -127,7 +128,7 @@ func (s *Server) updateLink(w http.ResponseWriter, r *http.Request) {
 	if !s.decodeAdmin(w, r, &edit) {
 		return
 	}
-	if err := s.checkLink(edit); err != nil {
+	if err := s.checkLink(r.Context(), edit); err != nil {
 		s.writeAdminErr(w, r, err)
 		return
 	}

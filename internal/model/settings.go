@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// Settings is settings.yaml in the config dir. That dir is tracked in the
-// HA git repo, so it holds no secrets. The Music Assistant token lives in
-// Secrets, in /data.
+// Settings are the settings part of the app options (/data/options.json).
+// internal/config fills them in; nothing reads or writes them as a file.
+// The Music Assistant token is not here: it is in config.Options.
 type Settings struct {
 	Version     int                 `yaml:"version" json:"version"`
 	LocalAccess LocalAccessSettings `yaml:"local_access" json:"local_access"`
@@ -66,9 +66,8 @@ func DefaultRateLimits() RateLimits {
 	}
 }
 
-// WithDefaults returns r with every zero field set to its default. Call it
-// after loading settings.yaml, so a file written before a limit existed
-// (or with the limit left out) gets the default instead of 0.
+// WithDefaults returns r with every zero field set to its default, so a
+// value left out gets the default instead of 0.
 func (r RateLimits) WithDefaults() RateLimits {
 	d := DefaultRateLimits()
 	for _, f := range []struct{ v, def *int }{
@@ -125,7 +124,7 @@ type LocalAccessSettings struct {
 }
 
 // MusicAssistantSettings is where Music Assistant runs. With no URL, or no
-// token in Secrets, the app never calls it.
+// token in the app options, the app never calls it.
 type MusicAssistantSettings struct {
 	URL string `yaml:"url" json:"url"` // such as http://d5369777-music-assistant:8095
 }
@@ -212,17 +211,4 @@ func ParsePrefixes(list []string) ([]netip.Prefix, error) {
 		out = append(out, p)
 	}
 	return out, nil
-}
-
-// Secrets is secrets.yaml in /data. It never goes into the HA git repo.
-// The admin API never returns its values, only whether they are set.
-type Secrets struct {
-	Version             int    `yaml:"version" json:"-"`
-	MusicAssistantToken string `yaml:"music_assistant_token" json:"-"`
-}
-
-// MusicAssistantEnabled reports whether the app may call Music Assistant:
-// both the URL and the token are set.
-func MusicAssistantEnabled(s Settings, sec Secrets) bool {
-	return s.MusicAssistant.URL != "" && sec.MusicAssistantToken != ""
 }

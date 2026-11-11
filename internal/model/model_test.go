@@ -480,28 +480,6 @@ func TestParsePrefix(t *testing.T) {
 	}
 }
 
-func TestMusicAssistantEnabled(t *testing.T) {
-	s := DefaultSettings()
-	if MusicAssistantEnabled(s, Secrets{MusicAssistantToken: "t"}) {
-		t.Error("enabled without URL")
-	}
-	s.MusicAssistant.URL = "http://ma:8095"
-	if MusicAssistantEnabled(s, Secrets{}) {
-		t.Error("enabled without token")
-	}
-	if !MusicAssistantEnabled(s, Secrets{MusicAssistantToken: "t"}) {
-		t.Error("not enabled with both")
-	}
-}
-
-// The token never leaves the server through JSON.
-func TestSecretsNeverInJSON(t *testing.T) {
-	raw, err := json.Marshal(Secrets{Version: 1, MusicAssistantToken: "super-secret"})
-	if err != nil || strings.Contains(string(raw), "super-secret") {
-		t.Fatalf("Secrets JSON = %s, %v", raw, err)
-	}
-}
-
 func TestYAMLShape(t *testing.T) {
 	src := `
 version: 1

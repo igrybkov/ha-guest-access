@@ -1,71 +1,32 @@
 package web
 
 import (
-	"fmt"
+	"context"
 
-	"github.com/igrybkov/ha-guest-access/internal/catalog"
 	"github.com/igrybkov/ha-guest-access/internal/model"
+	"github.com/igrybkov/ha-guest-access/internal/policy"
 )
 
-// basicPolicy is the Policy used when Deps.Policy is nil. It is a stopgap
-// until the policy package is wired in. It checks:
-//
-//   - every action is in the catalog;
-//   - no rule needs network: local while local access is off (brief
-//     decision 2);
-//   - every template a link names exists.
-type basicPolicy struct{}
-
-func (basicPolicy) ValidateTemplates(ts model.Templates, st model.Settings) error {
-	var p []model.Problem
-	for i, t := range ts.Templates {
-		for j := range t.Rules {
-			p = append(p, ruleProblems(fmt.Sprintf("templates[%d].rules[%d]", i, j), t.Rules[j], t.RuleAccess(j), st)...)
-		}
-		if t.Access != nil && t.Access.Local() && !st.LocalAccess.Enabled {
-			p = append(p, localOff(fmt.Sprintf("templates[%d].access.network", i)))
-		}
+// hasHome reports whether HA has a home location, for the near_home_m
+// check. HA reports 0, 0 when none is set. While HA can't be reached it
+// says yes: a save is not blocked by an outage, and the guest side fails
+// closed on a near-home rule without a home anyway.
+func (s *Server) hasHome(ctx context.Context) bool {
+	inv, err := s.deps.Inventory.Inventory(ctx)
+	if err != nil {
+		return true
 	}
-	return problemsErr(p)
+	return inv.Home != (model.Home{})
 }
 
-func (basicPolicy) ValidateLink(l model.Link, ts model.Templates, st model.Settings) error {
-	var p []model.Problem
-	for i, id := range l.TemplateIDs {
-		if _, ok := ts.Find(id); !ok {
-			p = append(p, model.Problem{Path: fmt.Sprintf("templates[%d]", i), Message: fmt.Sprintf("template %q does not exist", id)})
-		}
-	}
-	for j, r := range l.Extra {
-		var acc model.Access
-		if r.Access != nil {
-			acc = *r.Access
-		}
-		p = append(p, ruleProblems(fmt.Sprintf("extra[%d]", j), r, acc, st)...)
-	}
-	return problemsErr(p)
+// checkTemplates runs the policy over ts. Callers pass only the template
+// being saved, so problem paths point into it and other templates that
+// broke a rule since (local access turned off, say) do not block it.
+func (s *Server) checkTemplates(ctx context.Context, ts model.Templates) error {
+	return policy.ValidateTemplates(ts, s.settings(), s.hasHome(ctx))
 }
 
-func ruleProblems(path string, r model.Rule, acc model.Access, st model.Settings) []model.Problem {
-	var p []model.Problem
-	for k, a := range r.Actions {
-		if _, ok := catalog.Lookup(a); !ok {
-			p = append(p, model.Problem{Path: fmt.Sprintf("%s.actions[%d]", path, k), Message: fmt.Sprintf("%q is not a known action", a)})
-		}
-	}
-	if acc.Local() && !st.LocalAccess.Enabled {
-		p = append(p, localOff(path+".access.network"))
-	}
-	return p
-}
-
-func localOff(path string) model.Problem {
-	return model.Problem{Path: path, Message: "local only needs local access turned on in the app options"}
-}
-
-func problemsErr(p []model.Problem) error {
-	if len(p) == 0 {
-		return nil
-	}
-	return &model.ValidationError{Problems: p}
+// checkLinkPolicy runs the policy over a link draft against ts.
+func (s *Server) checkLinkPolicy(ctx context.Context, l model.Link, ts model.Templates) error {
+	return policy.ValidateLink(l, ts, s.settings(), s.hasHome(ctx))
 }

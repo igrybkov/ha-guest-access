@@ -71,18 +71,6 @@ type Devices interface {
 
 var _ Devices = (*approval.Manager)(nil)
 
-// Policy holds the save checks that need more than one file: no
-// network: local while local access is off, actions not in the catalog,
-// templates a link names that do not exist. Errors should be
-// *model.ValidationError, so the admin UI can mark fields.
-//
-// ValidateLink gets drafts too: on create, the link has no id and no slug
-// yet. It must not require them; Link.Validate in the store checks shape.
-type Policy interface {
-	ValidateTemplates(model.Templates, model.Settings) error
-	ValidateLink(model.Link, model.Templates, model.Settings) error
-}
-
 // Deps are the collaborators of the server.
 type Deps struct {
 	// Options are the app options: settings and every tunable value. They
@@ -94,7 +82,6 @@ type Deps struct {
 	HA        HA
 	Signer    *access.Signer
 
-	Policy Policy // nil = a basic policy (see basicPolicy)
 	// Devices runs device approval. nil = an approval.Manager built from
 	// these deps; it then gets no decision events from HA.
 	Devices Devices
@@ -132,7 +119,6 @@ const (
 type Server struct {
 	deps    Deps
 	log     *slog.Logger
-	policy  Policy
 	devices Devices
 	newMA   func(url, token string, timeout time.Duration) (ma.Client, error)
 
@@ -150,7 +136,6 @@ func New(d Deps) *Server {
 	s := &Server{
 		deps:    d,
 		log:     d.Logger,
-		policy:  d.Policy,
 		devices: d.Devices,
 		newMA:   d.NewMA,
 		streams: streamCounter{open: map[string]int{}},
@@ -159,9 +144,6 @@ func New(d Deps) *Server {
 	}
 	if s.log == nil {
 		s.log = slog.Default()
-	}
-	if s.policy == nil {
-		s.policy = basicPolicy{}
 	}
 	if s.newMA == nil {
 		s.newMA = ma.NewWithTimeout
