@@ -16,6 +16,11 @@ type Link struct {
 	ID   string `yaml:"id" json:"id"`
 	Name string `yaml:"name" json:"name"`
 	Note string `yaml:"note,omitempty" json:"note,omitempty"`
+	// GuestTitle is the guest page title once the guest is in. Empty
+	// means Name. GuestWelcome is the line under it. Empty means the
+	// global guest.welcome. Both are plain text.
+	GuestTitle   string `yaml:"guest_title,omitempty" json:"guest_title,omitempty"`
+	GuestWelcome string `yaml:"guest_welcome,omitempty" json:"guest_welcome,omitempty"`
 	// Slug is the secret part of the guest URL. It is kept so the admin UI
 	// can show the URL again. Lookups go by its hash (access.HashSlug).
 	Slug      string    `yaml:"slug" json:"slug"`
@@ -89,6 +94,14 @@ func (a Approval) On() bool { return a.Manual || a.SelfService }
 // Claim reports whether the first device approves itself.
 func (a Approval) Claim() bool { return a.SelfService && !a.Manual }
 
+// MaxGuestTitleLen and MaxGuestWelcomeLen cap Link.GuestTitle and
+// Link.GuestWelcome, in bytes. They are shape limits, not options: a
+// lower cap must never make a saved link fail.
+const (
+	MaxGuestTitleLen   = 120
+	MaxGuestWelcomeLen = 1000
+)
+
 // MaxDeviceTextLen caps LinkDevice.Label and LinkDevice.Device, in bytes.
 const MaxDeviceTextLen = 64
 
@@ -135,6 +148,18 @@ func validApprovedBy(s string) bool {
 	}
 	id, ok := strings.CutPrefix(s, ApprovedByDevicePrefix)
 	return ok && idRe.MatchString(id)
+}
+
+// validateGuestText checks GuestTitle and GuestWelcome. The welcome may
+// hold line breaks; the guest page shows them.
+func (l Link) validateGuestText(p *problems, path string) {
+	if len(l.GuestTitle) > MaxGuestTitleLen || hasControl(l.GuestTitle) {
+		p.add(join(path, "guest_title"), "must be at most %d bytes with no control characters", MaxGuestTitleLen)
+	}
+	w := strings.NewReplacer("\r\n", "", "\n", "").Replace(l.GuestWelcome)
+	if len(l.GuestWelcome) > MaxGuestWelcomeLen || hasControl(w) {
+		p.add(join(path, "guest_welcome"), "must be at most %d bytes with no control characters but line breaks", MaxGuestWelcomeLen)
+	}
 }
 
 // hasControl reports whether s holds a control character.
@@ -246,6 +271,7 @@ func (l Link) validate(p *problems, path string) {
 		r.validate(p, fmt.Sprintf("%s[%d]", join(path, "extra"), i))
 	}
 	validateEntityOrder(p, join(path, "entity_order"), l.EntityOrder)
+	l.validateGuestText(p, path)
 	pwIDs := map[string]bool{}
 	for i, pw := range l.Passwords {
 		at := fmt.Sprintf("%s[%d]", join(path, "passwords"), i)

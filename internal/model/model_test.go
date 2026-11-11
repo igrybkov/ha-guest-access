@@ -225,6 +225,21 @@ func TestLinkValidate(t *testing.T) {
 		{"entity order", with(func(l *Link) { l.EntityOrder = []string{"switch.heater", "light.gone"} }), nil},
 		{"entity order bad shape", with(func(l *Link) { l.EntityOrder = []string{"heater"} }), []string{"entity_order[0]"}},
 		{"entity order twice", with(func(l *Link) { l.EntityOrder = []string{"switch.heater", "switch.heater"} }), []string{"entity_order[1]"}},
+		{"guest text", with(func(l *Link) {
+			l.GuestTitle = "Anna's weekend"
+			l.GuestWelcome = "Hi Anna!\nThe code is on the fridge.\r\nEnjoy."
+		}), nil},
+		{"guest text at the cap", with(func(l *Link) {
+			l.GuestTitle = strings.Repeat("a", MaxGuestTitleLen)
+			l.GuestWelcome = strings.Repeat("a", MaxGuestWelcomeLen)
+		}), nil},
+		{"guest title too long", with(func(l *Link) { l.GuestTitle = strings.Repeat("a", MaxGuestTitleLen+1) }), []string{"guest_title"}},
+		{"guest title line break", with(func(l *Link) { l.GuestTitle = "a\nb" }), []string{"guest_title"}},
+		{"guest title control", with(func(l *Link) { l.GuestTitle = "a\x00b" }), []string{"guest_title"}},
+		{"guest welcome too long", with(func(l *Link) { l.GuestWelcome = strings.Repeat("a", MaxGuestWelcomeLen+1) }), []string{"guest_welcome"}},
+		{"guest welcome control", with(func(l *Link) { l.GuestWelcome = "a\x1bb" }), []string{"guest_welcome"}},
+		{"guest welcome lone CR", with(func(l *Link) { l.GuestWelcome = "a\rb" }), []string{"guest_welcome"}},
+		{"guest welcome tab", with(func(l *Link) { l.GuestWelcome = "a\tb" }), []string{"guest_welcome"}},
 		{"no id", with(func(l *Link) { l.ID = "" }), []string{"id"}},
 		{"blank name", with(func(l *Link) { l.Name = "" }), []string{"name"}},
 		{"short slug", with(func(l *Link) { l.Slug = "short" }), []string{"slug"}},
@@ -570,6 +585,35 @@ func TestEntityOrderRoundTrip(t *testing.T) {
 		}
 		if got := ls2.Links[0].EntityOrder; fmt.Sprint(got) != fmt.Sprint(order) || ls2.Links[1].EntityOrder != nil {
 			t.Errorf("%s links: %v", tc.name, ls2.Links)
+		}
+	}
+}
+
+func TestGuestTextRoundTrip(t *testing.T) {
+	ls := Links{Version: 1, Links: []Link{{ID: "l1", GuestTitle: "Hi", GuestWelcome: "a\nb"}, {ID: "l2"}}}
+	for _, tc := range []struct {
+		name      string
+		marshal   func(any) ([]byte, error)
+		unmarshal func([]byte, any) error
+	}{
+		{"yaml", yaml.Marshal, yaml.Unmarshal},
+		{"json", json.Marshal, json.Unmarshal},
+	} {
+		b, err := tc.marshal(ls)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{"guest_title", "guest_welcome"} {
+			if n := strings.Count(string(b), key); n != 1 {
+				t.Errorf("%s: %s %d times in %s", tc.name, key, n, b)
+			}
+		}
+		var ls2 Links
+		if err := tc.unmarshal(b, &ls2); err != nil {
+			t.Fatal(err)
+		}
+		if l := ls2.Links[0]; l.GuestTitle != "Hi" || l.GuestWelcome != "a\nb" {
+			t.Errorf("%s: %+v", tc.name, l)
 		}
 	}
 }

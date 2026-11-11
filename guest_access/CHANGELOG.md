@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Guest page: once a guest is in, the title is the link's name, not the
+  global `guest.title`. A link can set its own `guest_title` and
+  `guest_welcome` in the link editor. The password, device approval and
+  "not active" screens never show them, so the URL alone does not tell
+  the link's name.
 - Admin: set the order of entities on the guest page. The template editor
   and the link editor (for the extra rules' group) list the entities with
   up and down buttons, saved as `entity_order`. Entities not placed now

@@ -268,6 +268,17 @@ A link is a URL, a validity window and a set of templates plus optional extra ru
 
 The guest page shows the templates' groups in the link's template order. The extra rules get one more group at the end. It holds only the entities that no template of the link grants. The link's own `entity_order` sets the order of that group, in the same way as on a template.
 
+### Title and welcome
+
+Once a guest is in, the guest page shows the link's name as its title. You can set two optional texts on the link:
+
+- **Title for the guest** (`guest_title`): shows in place of the name. At most 120 bytes, one line.
+- **Welcome message** (`guest_welcome`): shows in place of the global `guest.welcome`. At most 1000 bytes. Line breaks show.
+
+Both are plain text. An empty one falls back to the name or the global welcome.
+
+"In" means the guest passed the password and device approval, if the link has them. The password form, the device approval screen and the "link not active" screen never show the link's name, title or welcome. Someone with only the URL does not learn them.
+
 ### The window
 
 - `valid_until` is required. Every link ends.
@@ -605,7 +616,7 @@ Set these in the app's Configuration tab. Saving restarts the app. Each row show
 | `home_radius_default_m` | `300` | The near-home radius, in meters, that the template editor suggests. |
 | `music_assistant.timeout_ms` | `2000` | How long to wait for Music Assistant, in milliseconds. |
 | `music_assistant.check_interval_min` | `60` | Minutes between checks that Music Assistant takes the token. The app also checks once at start. `0` checks at start only. |
-| `guest.title` | `Welcome` | Title of the guest page. Plain text. |
+| `guest.title` | `Welcome` | Title of the guest page. Plain text. Once a guest is in, a link shows its own title or name. See **Title and welcome**. |
 | `guest.slider_interval_ms` | `300` | Least milliseconds between two values the page sends while a slider moves. The final value always goes. |
 | `guest.not_found_title` | `This link doesn't work` | Heading of the page a browser gets for the bare address, an unknown path or a link that does not exist. Plain text. The status stays 404. |
 | `guest.not_found_message` | `Ask the person who sent it for a new one.` | Text under that heading. Plain text. |
@@ -664,7 +675,7 @@ These options have no default. They are empty until you set them:
 | **`public_base_url`** | The address guests use, such as `https://guests.example.com`. Link URLs and QR codes start with it. |
 | **`music_assistant.url`** | Address of Music Assistant. Empty turns the party off. |
 | **`music_assistant.token`** | A long-lived Music Assistant token. A password field. The app never shows it again. |
-| **`guest.welcome`** | A line of plain text under the title. |
+| **`guest.welcome`** | A line of plain text under the title. A link's own welcome replaces it once a guest is in. |
 | **`guest.accent_color`** | A color for the guest page, such as `#1e88e5`. |
 | **`guest.not_found_redirect`** | A full `http` or `https` URL, such as `https://www.example.com/`. A browser that opens the bare address, an unknown path or a link that does not exist goes there (302) instead of the not-found page. Scripts still get a JSON 404. A value that is not a full URL, or that holds a user name or password, is not used: the app logs a warning and shows the page. |
 

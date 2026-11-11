@@ -254,6 +254,36 @@ func TestEntityOrderIsEditable(t *testing.T) {
 	}
 }
 
+// The guest title and welcome are admin fields: create and update keep
+// them, and they reach the file.
+func TestGuestTextIsEditable(t *testing.T) {
+	dir := t.TempDir()
+	s := newStore(t, dir)
+	d := draft()
+	d.GuestTitle, d.GuestWelcome = "Anna's weekend", "Hi Anna"
+	l := mustCreate(t, s, d, "")
+	if l.GuestTitle != "Anna's weekend" || l.GuestWelcome != "Hi Anna" {
+		t.Errorf("create: %q %q", l.GuestTitle, l.GuestWelcome)
+	}
+	edit := draft()
+	edit.GuestTitle = "Welcome, Anna"
+	got, err := s.Update(l.ID, edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GuestTitle != "Welcome, Anna" || got.GuestWelcome != "" {
+		t.Errorf("update: %q %q", got.GuestTitle, got.GuestWelcome)
+	}
+	if again, err := newStore(t, dir).Get(l.ID); err != nil || again.GuestTitle != "Welcome, Anna" || again.GuestWelcome != "" {
+		t.Errorf("reload: %+v %v", again, err)
+	}
+	bad := draft()
+	bad.GuestTitle = "a\nb"
+	if _, err := s.Update(l.ID, bad); err == nil {
+		t.Error("saved a title with a line break")
+	}
+}
+
 func TestRevoke(t *testing.T) {
 	s := newStore(t, t.TempDir())
 	l := mustCreate(t, s, draft(), "")

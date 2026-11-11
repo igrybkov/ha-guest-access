@@ -248,7 +248,7 @@ test('fmtTime and fmtWindow show times in the zone', () => {
 
 const TEMPLATE_KEYS = ['id', 'name', 'icon', 'access', 'rules', 'party', 'entity_order'];
 const RULE_KEYS = ['select', 'exclude', 'actions', 'access', 'variables'];
-const LINK_EDIT_KEYS = ['name', 'note', 'valid_from', 'valid_until', 'templates', 'extra', 'entity_order', 'one_time', 'approval', 'slug'];
+const LINK_EDIT_KEYS = ['name', 'note', 'guest_title', 'guest_welcome', 'valid_from', 'valid_until', 'templates', 'extra', 'entity_order', 'one_time', 'approval', 'slug'];
 const only = (obj, keys) => Object.keys(obj).forEach((k) => assert.ok(keys.includes(k), `unexpected key ${k}`));
 
 test('buildTemplate sends only model fields, and drops empty parts', () => {
@@ -316,6 +316,21 @@ test('buildLink from a LinkView sends only editable fields', () => {
   assert.deepEqual(body.approval, { manual: false, self_service: true });
   assert.equal(body.one_time, true);
   assert.equal(body.note, 'Anna');
+});
+
+test('buildLink carries the guest title and welcome', () => {
+  const f = linkForm({ ...linkView, guest_title: "Anna's weekend", guest_welcome: 'Hi Anna!\nEnjoy.' });
+  assert.equal(f.guest_title, "Anna's weekend");
+  const body = buildLink({ ...f, guest_title: '  Welcome, Anna  ' });
+  only(body, LINK_EDIT_KEYS);
+  assert.equal(body.guest_title, 'Welcome, Anna');
+  assert.equal(body.guest_welcome, 'Hi Anna!\nEnjoy.');
+  const blank = buildLink({ ...f, guest_title: '   ', guest_welcome: '\n ' });
+  assert.equal('guest_title' in blank, false, 'blank title falls back to the name');
+  assert.equal('guest_welcome' in blank, false, 'blank welcome falls back to the global one');
+  const empty = linkForm({});
+  assert.equal(empty.guest_title, '');
+  assert.equal(empty.guest_welcome, '');
 });
 
 test('extra rules always carry their own access', () => {

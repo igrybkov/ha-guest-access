@@ -111,6 +111,13 @@ async function editor(view, id) {
   const note = h('textarea', { rows: 2, placeholder: 'Only you see this.' });
   note.value = f.note;
   note.addEventListener('input', () => { f.note = note.value; });
+  // Guest page text. Empty falls back to the name and the global welcome.
+  const guestTitle = h('input', { value: f.guest_title, placeholder: f.name });
+  name.addEventListener('input', () => { guestTitle.placeholder = name.value; });
+  guestTitle.addEventListener('input', () => { f.guest_title = guestTitle.value; });
+  const guestWelcome = h('textarea', { rows: 2, placeholder: settings().guest?.welcome || '' });
+  guestWelcome.value = f.guest_welcome;
+  guestWelcome.addEventListener('input', () => { f.guest_welcome = guestWelcome.value; });
 
   // Window with presets. The inputs hold wall-clock time in HA's zone.
   const tz = haZone();
@@ -292,7 +299,9 @@ async function editor(view, id) {
   slots.top,
   h('div', { class: 'cols' },
     h('div', { class: 'stack' },
-      h('div', {}, field('Name', name, 'Guests see it on their page.'), slots.slot('name')),
+      h('div', {}, field('Name', name, 'Guests see this name after they open the link.'), slots.slot('name')),
+      h('div', {}, field('Title for the guest', guestTitle, 'Optional. Shows in place of the name.'), slots.slot('guest_title')),
+      h('div', {}, field('Welcome message', guestWelcome, 'Optional. Shows in place of the global welcome.'), slots.slot('guest_welcome')),
       h('div', {}, field('Note', note), slots.slot('note')),
       h('fieldset', {}, h('legend', { text: 'When it works' }),
         presetBtns,

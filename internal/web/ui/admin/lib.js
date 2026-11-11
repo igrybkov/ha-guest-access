@@ -395,6 +395,8 @@ export function buildLink(f, { create = false } = {}) {
     approval: { manual: !!f.approval?.manual, self_service: !!f.approval?.self_service },
   };
   if (f.note && f.note.trim()) l.note = f.note.trim();
+  if (f.guest_title && f.guest_title.trim()) l.guest_title = f.guest_title.trim();
+  if (f.guest_welcome && f.guest_welcome.trim()) l.guest_welcome = f.guest_welcome.trim();
   if (f.valid_from) l.valid_from = new Date(f.valid_from).toISOString();
   if (f.entity_order?.length) l.entity_order = [...f.entity_order];
   if (!l.valid_until) delete l.valid_until;
@@ -407,6 +409,8 @@ export function linkForm(v = {}) {
   return {
     name: v.name || '',
     note: v.note || '',
+    guest_title: v.guest_title || '',
+    guest_welcome: v.guest_welcome || '',
     valid_from: v.valid_from && new Date(v.valid_from).getUTCFullYear() > 1 ? v.valid_from : null,
     valid_until: v.valid_until || null,
     templates: [...(v.templates || [])],

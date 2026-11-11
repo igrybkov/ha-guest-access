@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"math"
@@ -256,7 +257,7 @@ func (s *Server) plan(ctx context.Context, g *guestReq) (guestPlan, error) {
 	p := guestPlan{
 		view: stateView{
 			Link:     guestLink{ValidUntil: g.link.ValidUntil.UTC(), OneTime: g.link.OneTime},
-			Guest:    g.st.Guest,
+			Guest:    guestBranding(g.st.Guest, g.link),
 			Groups:   []groupView{},
 			Entities: map[string]*entityView{},
 			States:   map[string]model.State{},
@@ -337,6 +338,18 @@ func (s *Server) plan(ctx context.Context, g *guestReq) (guestPlan, error) {
 	p.view.Party = s.partyAllowed(g, ts, acc)
 	p.view.CanApprove = g.link.Approval.SelfService && g.device != ""
 	return p, nil
+}
+
+// guestBranding is the page text of a guest who is in: the link's own
+// title, else its name, and its own welcome, else the global one. Only
+// /state and /events use it, and they run after the password and device
+// checks. So a request with only the URL never sees the link name.
+func guestBranding(gs model.GuestSettings, l model.Link) model.GuestSettings {
+	gs.Title = cmp.Or(strings.TrimSpace(l.GuestTitle), strings.TrimSpace(l.Name))
+	if w := strings.TrimSpace(l.GuestWelcome); w != "" {
+		gs.Welcome = w
+	}
+	return gs
 }
 
 // partyAllowed reports whether the guest page shows the party button:

@@ -197,6 +197,8 @@ func at(ls *model.Links, id string) (*model.Link, error) {
 func setEditable(dst *model.Link, src model.Link) {
 	dst.Name = src.Name
 	dst.Note = src.Note
+	dst.GuestTitle = src.GuestTitle
+	dst.GuestWelcome = src.GuestWelcome
 	dst.ValidFrom = src.ValidFrom
 	dst.ValidUntil = src.ValidUntil
 	dst.TemplateIDs = slices.Clone(src.TemplateIDs)
@@ -206,10 +208,11 @@ func setEditable(dst *model.Link, src model.Link) {
 	dst.Approval = src.Approval
 }
 
-// Create adds a link with the editable fields of draft (name, note,
-// window, templates, extra rules, entity order, one time, approval). It sets the id, the slug and
-// CreatedAt. An empty customSlug gets a random slug; otherwise customSlug
-// must pass ValidCustomSlug and be unused.
+// Create adds a link with the editable fields of draft (name, note, guest
+// title and welcome, window, templates, extra rules, entity order, one
+// time, approval). It sets the id, the slug and CreatedAt. An empty
+// customSlug gets a random slug; otherwise customSlug must pass
+// ValidCustomSlug and be unused.
 func (s *Store) Create(draft model.Link, customSlug string) (model.Link, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
