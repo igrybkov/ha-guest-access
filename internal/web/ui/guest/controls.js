@@ -6,7 +6,7 @@ import { el, icon } from './dom.js';
 import {
   actionLabel, confirmLabel, stateLabel, splitActions, pickControl, findAction,
   toggleFor, lockActions, alarmActions, scriptView, mediaInfo, sliderBounds, clamp,
-  brightnessPct, supportsColorTemp, confirmTap, CONFIRM_MS, sliderSender,
+  brightnessPct, supportsColorTemp, fanBounds, confirmTap, CONFIRM_MS, sliderSender,
   coverView, coverStateText, coverConfirmText, COVER_CONFIRM_MS,
 } from './lib.js';
 
@@ -334,11 +334,13 @@ const DRAW = {
     const canToggle = !!(findAction(actions, 'fan.turn_on') || findAction(actions, 'fan.turn_off'));
     if (canToggle) parts.push(row(toggle(card, 'fan', actions, st)));
     const sp = findAction(actions, 'fan.set_percentage');
-    const b = sp && !sp.used && sliderBounds((sp.fields || {}).percentage, {});
+    const attrs = (st && st.attributes) || {};
+    const b = sp && !sp.used && fanBounds(sliderBounds((sp.fields || {}).percentage, {}), attrs);
     if (b && (!canToggle || (st && st.state === 'on'))) {
-      const attrs = (st && st.attributes) || {};
+      // A step such as 33.33 gives fractions. The server takes whole
+      // percents, and HA picks the nearest speed.
       parts.push(slider(card, 'speed', 'Speed', b, clamp(attrs.percentage, b), pct,
-        (v) => card.send('fan.set_percentage', { percentage: v })));
+        (v) => card.send('fan.set_percentage', { percentage: Math.round(v) })));
     }
     return parts;
   },

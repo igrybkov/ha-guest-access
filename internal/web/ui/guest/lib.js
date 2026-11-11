@@ -337,6 +337,14 @@ export function sliderBounds(field, attrs) {
   return { min, max, step };
 }
 
+// fanBounds uses the fan's percentage_step as the slider step, so a fan
+// with 4 speeds moves in 25% steps. A missing or odd step keeps b.
+export function fanBounds(b, attrs) {
+  const step = attrs && attrs.percentage_step;
+  if (!b || !finite(step) || step <= 0 || step > b.max - b.min) return b;
+  return { ...b, step };
+}
+
 // clamp keeps x in [b.min, b.max]. A missing x gives b.min.
 export function clamp(x, b) {
   if (!finite(x)) return b.min;

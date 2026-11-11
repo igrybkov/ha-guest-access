@@ -137,7 +137,7 @@ var attributes = map[string][]string{
 	"alarm_control_panel": common,
 	"light": append(slices.Clone(common), "brightness", "color_mode", "supported_color_modes",
 		"color_temp_kelvin", "min_color_temp_kelvin", "max_color_temp_kelvin"),
-	"fan":          append(slices.Clone(common), "percentage"),
+	"fan":          append(slices.Clone(common), "percentage", "percentage_step"),
 	"media_player": append(slices.Clone(common), "volume_level", "is_volume_muted", "media_title", "media_artist"),
 	"switch":       common,
 	"script":       common,

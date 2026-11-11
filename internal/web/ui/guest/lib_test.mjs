@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   linkBase, actionLabel, stateLabel, cards, splitActions, pickControl, toggleFor, lockActions,
-  alarmActions, scriptView, mediaInfo, sliderBounds, clamp, brightnessPct, supportsColorTemp,
+  alarmActions, scriptView, mediaInfo, sliderBounds, fanBounds, clamp, brightnessPct, supportsColorTemp,
   parseColor, textOn, parseRetryAfter, formatWait, tryAgainText, errorText, mergeState,
   formatUntil, confirmTap, confirmExpired, CONFIRM_MS, deviceNext, shouldPoll, geoErrorText,
   whereErrorText, sliderSender, sliderInterval, SLIDER_MS,
@@ -133,6 +133,15 @@ test('mediaInfo', () => {
   assert.deepEqual(mediaInfo(undefined), { playing: false, title: '', artist: '', volume: null, muted: false });
   assert.equal(mediaInfo({ state: 'paused', attributes: { volume_level: 7, media_title: 5 } }).volume, 100);
   assert.equal(mediaInfo({ state: 'paused', attributes: { media_title: 5 } }).title, '');
+});
+
+test('fanBounds takes the fan step and ignores odd ones', () => {
+  const b = { min: 0, max: 100, step: 1 };
+  assert.deepEqual(fanBounds(b, { percentage_step: 25 }), { min: 0, max: 100, step: 25 });
+  assert.equal(fanBounds(b, { percentage_step: 100 / 3 }).step, 100 / 3);
+  for (const s of [undefined, null, 0, -5, 150, NaN, '25']) assert.deepEqual(fanBounds(b, { percentage_step: s }), b, String(s));
+  assert.deepEqual(fanBounds(b, null), b);
+  assert.equal(fanBounds(null, { percentage_step: 25 }), null);
 });
 
 test('sliderBounds narrows by attributes and refuses crossed bounds', () => {

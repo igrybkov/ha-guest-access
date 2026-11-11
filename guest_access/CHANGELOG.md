@@ -5,7 +5,9 @@
 - Admin: ticked templates on a link can be moved up and down. The guest
   page shows its groups in that order.
 - Guest: a fan's speed slider shows only while the fan is on, like a
-  light's brightness. A fan with no on/off grant keeps it.
+  light's brightness. A fan with no on/off grant keeps it. The slider
+  moves in the fan's own steps (`percentage_step`), for example 25% for
+  a fan with 4 speeds.
 - Covers: open, close, stop and position, plus the same for tilt. The
   guest card shows the state and the position, with sliders for position
   and tilt. A garage, gate or door asks for a second tap to open, and a
