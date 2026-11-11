@@ -13,7 +13,9 @@ guest:
 rate_limits:
   guest_per_min: 20
   guest_burst: 15
-  actions_per_min: 10
+  actions_per_min: 120
+  actions_burst: 40
+  max_streams_per_link: 10
   misses_per_hour_per_ip: 10
   misses_per_hour_global: 100
   password_fails_per_ip: 5

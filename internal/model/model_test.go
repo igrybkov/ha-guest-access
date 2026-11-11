@@ -356,6 +356,7 @@ func TestSettingsValidate(t *testing.T) {
 		{"negative lockout", func(s *Settings) { s.RateLimits.PasswordLockoutMin = -1 }, []string{"rate_limits.password_lockout_min"}},
 		{"all rates zero", func(s *Settings) { s.RateLimits = RateLimits{} }, []string{
 			"rate_limits.guest_per_min", "rate_limits.guest_burst", "rate_limits.actions_per_min",
+			"rate_limits.actions_burst", "rate_limits.max_streams_per_link",
 			"rate_limits.misses_per_hour_per_ip", "rate_limits.misses_per_hour_global",
 			"rate_limits.password_fails_per_ip", "rate_limits.password_fails_per_link",
 			"rate_limits.password_lockout_min", "rate_limits.admin_per_min"}},
@@ -372,7 +373,7 @@ func TestDefaultSettings(t *testing.T) {
 	if s.LocalAccess.Enabled {
 		t.Error("local access is on by default")
 	}
-	if s.RateLimits != (RateLimits{GuestPerMin: 20, GuestBurst: 15, ActionsPerMin: 10, MissesPerHourPerIP: 10, MissesPerHourGlobal: 100,
+	if s.RateLimits != (RateLimits{GuestPerMin: 20, GuestBurst: 15, ActionsPerMin: 120, ActionsBurst: 40, MaxStreamsPerLink: 10, MissesPerHourPerIP: 10, MissesPerHourGlobal: 100,
 		PasswordFailsPerIP: 5, PasswordFailsPerLink: 30, PasswordLockoutMin: 60, AdminPerMin: 600}) {
 		t.Errorf("default rate limits = %+v", s.RateLimits)
 	}

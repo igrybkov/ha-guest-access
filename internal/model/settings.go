@@ -30,8 +30,11 @@ type RateLimits struct {
 	// GuestPerMin and GuestBurst limit every guest route per client IP.
 	GuestPerMin int `yaml:"guest_per_min" json:"guest_per_min"`
 	GuestBurst  int `yaml:"guest_burst" json:"guest_burst"`
-	// ActionsPerMin limits actions per link + client IP.
+	// ActionsPerMin and ActionsBurst limit actions per link + client IP.
 	ActionsPerMin int `yaml:"actions_per_min" json:"actions_per_min"`
+	ActionsBurst  int `yaml:"actions_burst" json:"actions_burst"`
+	// MaxStreamsPerLink caps open SSE state streams per link.
+	MaxStreamsPerLink int `yaml:"max_streams_per_link" json:"max_streams_per_link"`
 	// MissesPerHourPerIP and MissesPerHourGlobal limit unknown slugs; over
 	// either, misses get 429 instead of 404.
 	MissesPerHourPerIP  int `yaml:"misses_per_hour_per_ip" json:"misses_per_hour_per_ip"`
@@ -51,7 +54,9 @@ func DefaultRateLimits() RateLimits {
 	return RateLimits{
 		GuestPerMin:          20,
 		GuestBurst:           15,
-		ActionsPerMin:        10,
+		ActionsPerMin:        120,
+		ActionsBurst:         40,
+		MaxStreamsPerLink:    10,
 		MissesPerHourPerIP:   10,
 		MissesPerHourGlobal:  100,
 		PasswordFailsPerIP:   5,
@@ -70,6 +75,8 @@ func (r RateLimits) WithDefaults() RateLimits {
 		{&r.GuestPerMin, &d.GuestPerMin},
 		{&r.GuestBurst, &d.GuestBurst},
 		{&r.ActionsPerMin, &d.ActionsPerMin},
+		{&r.ActionsBurst, &d.ActionsBurst},
+		{&r.MaxStreamsPerLink, &d.MaxStreamsPerLink},
 		{&r.MissesPerHourPerIP, &d.MissesPerHourPerIP},
 		{&r.MissesPerHourGlobal, &d.MissesPerHourGlobal},
 		{&r.PasswordFailsPerIP, &d.PasswordFailsPerIP},
@@ -92,6 +99,8 @@ func (r RateLimits) validate(p *problems, path string) {
 		{"guest_per_min", r.GuestPerMin},
 		{"guest_burst", r.GuestBurst},
 		{"actions_per_min", r.ActionsPerMin},
+		{"actions_burst", r.ActionsBurst},
+		{"max_streams_per_link", r.MaxStreamsPerLink},
 		{"misses_per_hour_per_ip", r.MissesPerHourPerIP},
 		{"misses_per_hour_global", r.MissesPerHourGlobal},
 		{"password_fails_per_ip", r.PasswordFailsPerIP},
