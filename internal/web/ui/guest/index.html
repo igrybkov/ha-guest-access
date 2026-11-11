@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Guest access</title>
+<link rel="stylesheet" href="{{ASSETS}}/guest.css">
+<script type="module" src="{{ASSETS}}/guest.js"></script>
+</head>
+<body>
+<main id="app">
+  <h1 id="title">Welcome</h1>
+  <p id="welcome"></p>
+  <p id="status" role="status">Loading…</p>
+  <form id="password" hidden>
+    <label for="pw">Password</label>
+    <input id="pw" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Open</button>
+  </form>
+  <div id="groups"></div>
+  <p id="party" hidden><a id="party-link" target="_blank" rel="noopener noreferrer">Join the party</a></p>
+</main>
+</body>
+</html>

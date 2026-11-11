@@ -1,14 +1,12 @@
 // Command guest-access is a Home Assistant app that serves links guests use
 // to control a few things at home.
 //
-// This is the skeleton. It answers health checks on the admin port. At log
-// level debug it logs how requests reach the guest port, so the network
-// rules can be set from real data.
+// main only parses flags and loads config; run wires the components so the
+// end-to-end test can start the whole app.
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,31 +15,29 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/igrybkov/ha-guest-access/internal/access"
+	"github.com/igrybkov/ha-guest-access/internal/config"
+	"github.com/igrybkov/ha-guest-access/internal/ha"
+	"github.com/igrybkov/ha-guest-access/internal/inventory"
+	"github.com/igrybkov/ha-guest-access/internal/links"
+	"github.com/igrybkov/ha-guest-access/internal/ma"
+	"github.com/igrybkov/ha-guest-access/internal/migrate"
+	"github.com/igrybkov/ha-guest-access/internal/web"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
 const (
-	// defaultListen is the admin port. Supervisor ingress and the watchdog
-	// reach the app here.
-	defaultListen = ":8099"
-	// defaultGuestListen is the guest port. Supervisor maps it to a host port.
-	defaultGuestListen = ":8888"
 	// shutdownTimeout bounds the stop after SIGTERM. The binary is PID 1
 	// under Supervisor (init: false), and Docker kills it after 10s anyway.
 	shutdownTimeout = 10 * time.Second
 	healthTimeout   = 3 * time.Second
 )
-
-// forwardHeaders are the headers a proxy may set to name the real client.
-// The guest port logs them at debug; the network rules will trust them only
-// from known proxies.
-var forwardHeaders = []string{"Forwarded", "X-Forwarded-For", "X-Real-Ip", "Cf-Connecting-Ip", "Cf-Ipcountry"}
 
 func main() {
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -52,84 +48,121 @@ func main() {
 		return
 	}
 	if *healthcheck {
-		if err := checkHealth(env("LISTEN", defaultListen)); err != nil {
+		// Before config.Load: a health probe must not need HA_URL/HA_TOKEN.
+		if err := checkHealth(os.Getenv("LISTEN")); err != nil {
 			fmt.Fprintln(os.Stderr, "unhealthy:", err)
 			os.Exit(1)
 		}
 		return
 	}
 
-	level, err := logLevel(env("DATA_DIR", "/data"))
+	cfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "options:", err)
+		slog.Error("config", "err", err)
 		os.Exit(1)
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.SlogLevel()}))
 	slog.SetDefault(logger)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
-	if err := run(ctx, env("LISTEN", defaultListen), env("GUEST_LISTEN", defaultGuestListen), logger); err != nil {
+	adminLn, err := net.Listen("tcp", cfg.Listen)
+	if err != nil {
+		logger.Error("listen", "addr", cfg.Listen, "err", err)
+		os.Exit(1)
+	}
+	guestLn, err := net.Listen("tcp", cfg.GuestListen)
+	if err != nil {
+		adminLn.Close()
+		logger.Error("listen", "addr", cfg.GuestListen, "err", err)
+		os.Exit(1)
+	}
+	if err := run(ctx, cfg, adminLn, guestLn, options{Logger: logger}); err != nil {
 		logger.Error("stopped", "err", err)
 		os.Exit(1)
 	}
 }
 
-func env(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
+// options are the parts of run that tests replace. Zero values mean the
+// production defaults.
+type options struct {
+	Logger      *slog.Logger
+	Now         func() time.Time
+	NewMA       func(url, token string, timeout time.Duration) (ma.Client, error)
+	StreamCheck time.Duration
 }
 
-// logLevel reads LOG_LEVEL, then log_level in <dataDir>/options.json, which
-// Supervisor writes from the app options. A missing file means info.
-func logLevel(dataDir string) (slog.Level, error) {
-	name := os.Getenv("LOG_LEVEL")
-	if name == "" {
-		raw, err := os.ReadFile(filepath.Join(dataDir, "options.json"))
-		switch {
-		case errors.Is(err, os.ErrNotExist):
-		case err != nil:
-			return 0, err
-		default:
-			var opts struct {
-				LogLevel string `json:"log_level"`
-			}
-			if err := json.Unmarshal(raw, &opts); err != nil {
-				return 0, fmt.Errorf("options.json: %w", err)
-			}
-			name = opts.LogLevel
-		}
+// run wires the app, serves the admin port on adminLn and the guest port
+// on guestLn, and blocks until ctx is done or a server fails. HA being
+// unreachable is not an error: the websocket client keeps reconnecting,
+// and the pages still load. On return everything is stopped and both
+// listeners are closed.
+func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, opts options) error {
+	log := opts.Logger
+	if log == nil {
+		log = slog.Default()
 	}
-	switch strings.ToLower(name) {
-	case "debug":
-		return slog.LevelDebug, nil
-	case "", "info":
-		return slog.LevelInfo, nil
-	case "warn":
-		return slog.LevelWarn, nil
-	case "error":
-		return slog.LevelError, nil
-	}
-	return 0, fmt.Errorf("log level %q is not one of debug, info, warn, error", name)
-}
+	closeAll := func() { adminLn.Close(); guestLn.Close() }
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-// run serves the admin and guest ports until ctx is done or a server fails.
-func run(ctx context.Context, listen, guestListen string, log *slog.Logger) error {
-	servers := []*http.Server{
-		newServer(listen, adminHandler(), log),
-		newServer(guestListen, guestHandler(log), log),
+	o := cfg.Options
+	if !o.LimitsEnabled {
+		log.Warn("rate limits are off (rate_limits.enabled: false); nothing limits guesses at links or passwords")
 	}
+
+	// A bad key stops startup. It is never made again: that would end
+	// every signed cookie, and may hide a bad restore.
+	key, err := config.LoadOrCreateKey(cfg.DataDir)
+	if err != nil {
+		closeAll()
+		return fmt.Errorf("hmac key: %w", err)
+	}
+
+	// Storage. Missing files read as empty and are created on the first
+	// save. Older schemas are migrated in memory; see package migrate.
+	templates := config.NewTemplatesStore(migrate.OpenConfig(cfg.ConfigDir, log))
+	linkStore := links.New(migrate.OpenData(cfg.DataDir, log), links.Options{
+		Logger: log,
+		ValidCustomSlug: func(s string) error {
+			return access.ValidCustomSlugLen(s, o.CustomSlugMinLen, o.CustomSlugMaxLen)
+		},
+	})
+
+	client := ha.New(ha.Options{URL: cfg.HAURL, Token: cfg.HAToken, Logger: log})
+	inv := inventory.New(client, log)
+	inv.SetMaxAge(o.InventoryMaxAge)
+	if err := inv.Run(ctx); err != nil { // returns once subscribed
+		closeAll()
+		return fmt.Errorf("inventory: %w", err)
+	}
+
+	srv := web.New(web.Deps{
+		Options:         o,
+		Templates:       templates,
+		Links:           linkStore,
+		Inventory:       inv,
+		HA:              client,
+		Signer:          access.NewSigner(key),
+		NewMA:           opts.NewMA,
+		DevAdminAnyPeer: cfg.DevAdminAnyPeer,
+		Now:             opts.Now,
+		StreamCheck:     opts.StreamCheck,
+		Version:         version,
+		Logger:          log,
+	})
+	servers := []*http.Server{newServer(ctx, srv.AdminHandler(), log), newServer(ctx, srv.GuestHandler(), log)}
+
+	var wg sync.WaitGroup
+	wg.Go(func() { _ = client.Run(ctx) }) // returns only when ctx is done
 	serveErr := make(chan error, len(servers))
-	for _, s := range servers {
-		ln, err := net.Listen("tcp", s.Addr)
-		if err != nil {
-			return fmt.Errorf("listen %s: %w", s.Addr, err)
-		}
+	for i, ln := range []net.Listener{adminLn, guestLn} {
+		s := servers[i]
 		go func() { serveErr <- s.Serve(ln) }()
 	}
-	log.Info("guest-access started", "version", version, "listen", listen, "guest_listen", guestListen)
+	log.Info("guest-access started", "version", version, "listen", adminLn.Addr().String(),
+		"guest_listen", guestLn.Addr().String(), "supervisor", cfg.Supervisor,
+		"config_dir", cfg.ConfigDir, "data_dir", cfg.DataDir)
 
 	var runErr error
 	select {
@@ -138,61 +171,46 @@ func run(ctx context.Context, listen, guestListen string, log *slog.Logger) erro
 	case runErr = <-serveErr:
 		runErr = fmt.Errorf("http server: %w", runErr)
 	}
-	sctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-	defer cancel()
+
+	// Cancel first: it stops the HA client, and ends open event streams
+	// and requests that wait on HA, so Shutdown does not wait for them.
+	cancel()
+	sctx, scancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer scancel()
 	for _, s := range servers {
 		if err := s.Shutdown(sctx); err != nil {
-			log.Warn("http shutdown", "addr", s.Addr, "err", err)
+			log.Warn("http shutdown", "err", err)
 			_ = s.Close()
 		}
+	}
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-sctx.Done():
+		log.Warn("background tasks did not stop in time")
 	}
 	return runErr
 }
 
-func newServer(addr string, h http.Handler, log *slog.Logger) *http.Server {
+func newServer(ctx context.Context, h http.Handler, log *slog.Logger) *http.Server {
 	return &http.Server{
-		Addr:              addr,
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       2 * time.Minute,
-		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
+		// No WriteTimeout: event streams stay open.
+		IdleTimeout: 2 * time.Minute,
+		BaseContext: func(net.Listener) context.Context { return ctx },
+		ErrorLog:    slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
 }
 
-// adminHandler serves the admin port. For now that is the health check.
-func adminHandler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("ok\n"))
-	})
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = fmt.Fprintf(w, "Guest Access %s: not ready yet.\n", version)
-	})
-	return mux
-}
-
-// guestHandler serves the guest port. It has no admin routes. For now it
-// logs at debug where each request came from and answers 503.
-func guestHandler(log *slog.Logger) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attrs := []any{"peer", r.RemoteAddr, "host", r.Host}
-		for _, h := range forwardHeaders {
-			if v := r.Header.Get(h); v != "" {
-				attrs = append(attrs, h, v)
-			}
-		}
-		log.Debug("guest request", attrs...)
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Referrer-Policy", "no-referrer")
-		http.Error(w, "Not ready yet.", http.StatusServiceUnavailable)
-	})
-}
-
-// checkHealth GETs /healthz on the loopback port of listen. Only the port is
-// used: the server may listen on all interfaces, but the probe runs inside
-// the container.
+// checkHealth GETs /healthz on the loopback port of listen (LISTEN, default
+// config.DefaultListen). Only the port is used: the server may listen on all
+// interfaces, but the probe runs inside the container.
 func checkHealth(listen string) error {
+	if listen == "" {
+		listen = config.DefaultListen
+	}
 	_, port, err := net.SplitHostPort(listen)
 	if err != nil {
 		return fmt.Errorf("LISTEN %q: %w", listen, err)
