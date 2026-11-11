@@ -54,16 +54,23 @@ func TestMatch(t *testing.T) {
 
 // A backtracking matcher takes exponential time on these. Ours must not.
 func TestMatchIsFast(t *testing.T) {
-	long := strings.Repeat("a", 200_000)
-	patterns := []string{
-		"*a*a*a*a*a*a*a*a*a*a*a*a*b",
-		strings.Repeat("*a", 200) + "*b",
-		strings.Repeat("a*", 500) + "b",
+	as := strings.Repeat("a", 200_000)
+	tests := []struct {
+		pattern, s string
+		want       bool
+	}{
+		// These fail at the suffix check.
+		{"*a*a*a*a*a*a*a*a*a*a*a*a*b", as, false},
+		{strings.Repeat("a*", 500) + "b", as, false},
+		// These get past prefix and suffix and run the segment loop.
+		{strings.Repeat("*a", 200) + "*b*", as, false},
+		{"*a*a*a*a*a*a*c*b", as + "b", false},
+		{strings.Repeat("*a", 200) + "*", as, true},
 	}
 	start := time.Now()
-	for _, p := range patterns {
-		if Match(p, long) {
-			t.Fatalf("Match(%.20q...) = true", p)
+	for _, tt := range tests {
+		if got := Match(tt.pattern, tt.s); got != tt.want {
+			t.Fatalf("Match(%.20q...) = %v", tt.pattern, got)
 		}
 	}
 	// The budget is loose for -race and slow CI. Exponential would take
