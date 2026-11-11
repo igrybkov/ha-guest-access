@@ -5,7 +5,7 @@ import {
   wildcardOnly, patternProblem, selectorProblems, matchPattern, pickedEntities, actionChoices, searchOptions,
   preset, toLocalInput, fromLocalInput, buildTemplate, buildLink, buildRule, ruleState, linkForm, cleanAccess,
   parseVarValue, slugifyID, normalizeTemplatePath, parentPath, fieldFor, groupProblems,
-  approvalMode, splitTemplates, templateRows, moveItem, linkBadges, rotateWarning, grantSummary,
+  approvalMode, splitTemplates, templateRows, moveItem, effectiveOrder, grantedEntities, ownRuleEntities, linkBadges, rotateWarning, grantSummary,
   auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections, settingsWarnings, addMonth, PRESETS,
   linkProblems, removePasswordPrompt, wallToUTC, wallParts, usableZone, browserZone, zoneNote, fmtTime, fmtWindow,
   PENDING_ROUTE, wantsPending, haRoutePath, pollMs, ago, pendingRows, pendingBadge,
@@ -246,9 +246,9 @@ test('fmtTime and fmtWindow show times in the zone', () => {
 
 // ---- Builders ----
 
-const TEMPLATE_KEYS = ['id', 'name', 'icon', 'access', 'rules', 'party'];
+const TEMPLATE_KEYS = ['id', 'name', 'icon', 'access', 'rules', 'party', 'entity_order'];
 const RULE_KEYS = ['select', 'exclude', 'actions', 'access', 'variables'];
-const LINK_EDIT_KEYS = ['name', 'note', 'valid_from', 'valid_until', 'templates', 'extra', 'one_time', 'approval', 'slug'];
+const LINK_EDIT_KEYS = ['name', 'note', 'valid_from', 'valid_until', 'templates', 'extra', 'entity_order', 'one_time', 'approval', 'slug'];
 const only = (obj, keys) => Object.keys(obj).forEach((k) => assert.ok(keys.includes(k), `unexpected key ${k}`));
 
 test('buildTemplate sends only model fields, and drops empty parts', () => {
@@ -412,6 +412,55 @@ test('moveItem swaps neighbours and ignores moves past the ends', () => {
   assert.deepEqual(moveItem(['a', 'b', 'c'], 0, -1), ['a', 'b', 'c']);
   assert.deepEqual(moveItem(['a', 'b', 'c'], 2, 1), ['a', 'b', 'c']);
   assert.deepEqual(moveItem([], 0, 1), []);
+});
+
+// The same cases as TestSortGroup in internal/web, so both sides agree.
+test('effectiveOrder lists ordered ids first, then by name, then by id', () => {
+  const ents = [
+    { entity_id: 'switch.z', name: 'Zulu' },
+    { entity_id: 'light.b', name: 'beta' },
+    { entity_id: 'fan.x', name: 'Xray' },
+    { entity_id: 'light.a', name: 'Beta' },
+    { entity_id: 'light.c', name: 'alpha' },
+  ];
+  const ids = (order) => effectiveOrder(order, ents).map((e) => e.entity_id);
+  assert.deepEqual(ids(undefined), ['light.c', 'light.a', 'light.b', 'fan.x', 'switch.z']);
+  assert.deepEqual(ids(['switch.z', 'light.b']), ['switch.z', 'light.b', 'light.c', 'light.a', 'fan.x']);
+  assert.deepEqual(ids(['x.gone', 'fan.x', 'fan.x', 'light.a']), ['fan.x', 'light.a', 'light.c', 'light.b', 'switch.z']);
+  assert.deepEqual(effectiveOrder(['a.b'], []), []);
+  assert.equal(ents[0].entity_id, 'switch.z', 'the input is not sorted in place');
+  // A missing name sorts as the id.
+  assert.deepEqual(effectiveOrder([], [{ entity_id: 'light.m' }, { entity_id: 'light.k', name: 'Lamp' }]).map((e) => e.entity_id),
+    ['light.k', 'light.m']);
+});
+
+test('grantedEntities and ownRuleEntities read preview grants', () => {
+  const grants = [
+    { entity_id: 'light.a', name: 'A', action: 'light.turn_on', sources: [{ template: '', rule: 0 }] },
+    { entity_id: 'light.a', name: 'A', action: 'light.turn_off', sources: [{ template: 'guest', rule: 0 }] },
+    { entity_id: 'switch.b', name: 'B', action: 'switch.turn_on', sources: [{ template: '', rule: 1 }] },
+    { entity_id: 'lock.c', name: '', action: 'lock.lock', sources: [{ template: 'entry', rule: 0 }, { template: '', rule: 0 }] },
+    { entity_id: 'fan.d', name: 'D', action: 'fan.turn_on', sources: [{ template: '', rule: 0 }, { template: '', rule: 1 }] },
+  ];
+  assert.deepEqual(grantedEntities(grants), [
+    { entity_id: 'light.a', name: 'A' }, { entity_id: 'switch.b', name: 'B' },
+    { entity_id: 'lock.c', name: 'lock.c' }, { entity_id: 'fan.d', name: 'D' },
+  ]);
+  // light.a and lock.c have a template source, so they land in a
+  // template's group.
+  assert.deepEqual(ownRuleEntities(grants).map((e) => e.entity_id), ['switch.b', 'fan.d']);
+  assert.deepEqual(ownRuleEntities(undefined), []);
+});
+
+test('entity_order goes through the form and the builders', () => {
+  const body = buildLink(linkForm({ ...linkView, entity_order: ['lock.front', 'light.x'] }));
+  only(body, LINK_EDIT_KEYS);
+  assert.deepEqual(body.entity_order, ['lock.front', 'light.x']);
+  assert.equal('entity_order' in buildLink(linkForm(linkView)), false, 'empty is left out');
+  const t = buildTemplate({ id: 'm', name: 'M', rules: [], entity_order: ['light.a'] });
+  only(t, TEMPLATE_KEYS);
+  assert.deepEqual(t.entity_order, ['light.a']);
+  assert.equal('entity_order' in buildTemplate({ id: 'm', name: 'M', rules: [], entity_order: [] }), false);
 });
 
 test('grantSummary groups by entity', () => {

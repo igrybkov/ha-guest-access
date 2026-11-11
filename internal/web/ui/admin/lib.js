@@ -378,6 +378,7 @@ export function buildTemplate(f) {
   const acc = cleanAccess(f.access);
   if (acc && Object.keys(acc).length) t.access = acc;
   if (f.party) t.party = true;
+  if (f.entity_order?.length) t.entity_order = [...f.entity_order];
   return t;
 }
 
@@ -395,6 +396,7 @@ export function buildLink(f, { create = false } = {}) {
   };
   if (f.note && f.note.trim()) l.note = f.note.trim();
   if (f.valid_from) l.valid_from = new Date(f.valid_from).toISOString();
+  if (f.entity_order?.length) l.entity_order = [...f.entity_order];
   if (!l.valid_until) delete l.valid_until;
   if (create && f.customSlug && f.slug) l.slug = f.slug;
   return l;
@@ -409,6 +411,7 @@ export function linkForm(v = {}) {
     valid_until: v.valid_until || null,
     templates: [...(v.templates || [])],
     extra: (v.extra || []).map((r) => ruleState(r, { forceAccess: true })),
+    entity_order: [...(v.entity_order || [])],
     one_time: !!v.one_time,
     approval: { manual: !!v.approval?.manual, self_service: !!v.approval?.self_service },
     customSlug: false,
@@ -440,6 +443,44 @@ export function moveItem(ids, i, delta) {
   if (i < 0 || i >= ids.length || j < 0 || j >= ids.length) return ids;
   [ids[i], ids[j]] = [ids[j], ids[i]];
   return ids;
+}
+
+// ---- Entity order ----
+
+// effectiveOrder mirrors the guest page order of one group. entities is
+// [{entity_id, name}]. Ids in order come first, in that order; ids that
+// are not in entities are skipped. The rest follow by name, case
+// insensitive, then by id. Plain < compares as Go does, not by locale.
+export function effectiveOrder(order, entities) {
+  const rank = new Map();
+  (order || []).forEach((id, i) => { if (!rank.has(id)) rank.set(id, i); });
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const name = (e) => (e.name || e.entity_id).toLowerCase();
+  return [...entities].sort((a, b) => {
+    const ra = rank.get(a.entity_id);
+    const rb = rank.get(b.entity_id);
+    if (ra != null && rb != null) return ra - rb;
+    if (ra != null) return -1;
+    if (rb != null) return 1;
+    return cmp(name(a), name(b)) || cmp(a.entity_id, b.entity_id);
+  });
+}
+
+// grantedEntities lists each entity of the preview grants once:
+// [{entity_id, name}].
+export function grantedEntities(grants) {
+  return grantSummary(grants).map(({ entity_id, name }) => ({ entity_id, name }));
+}
+
+// ownRuleEntities lists the entities the guest page shows in the group of
+// the link's own rules: those that no template of the link grants. A
+// source with an empty template is a link's extra rule.
+export function ownRuleEntities(grants) {
+  const viaTemplate = new Set();
+  for (const g of grants || []) {
+    if ((g.sources || []).some((s) => s.template)) viaTemplate.add(g.entity_id);
+  }
+  return grantedEntities(grants).filter((e) => !viaTemplate.has(e.entity_id));
 }
 
 // approvalMode names a link's approval setting.

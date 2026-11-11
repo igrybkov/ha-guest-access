@@ -27,6 +27,9 @@ type Link struct {
 	TemplateIDs []string  `yaml:"templates,omitempty" json:"templates,omitempty"`
 	// Extra are rules for this link only. Each carries its own access.
 	Extra []Rule `yaml:"extra,omitempty" json:"extra,omitempty"`
+	// EntityOrder orders the guest page group of the extra rules, as
+	// Template.EntityOrder does for a template's group.
+	EntityOrder []string `yaml:"entity_order,omitempty" json:"entity_order,omitempty"`
 	// OneTime makes every (entity, action) pair of the link usable once.
 	OneTime bool `yaml:"one_time,omitempty" json:"one_time,omitempty"`
 	// Passwords lock the link. With none, the slug alone is enough. With
@@ -242,6 +245,7 @@ func (l Link) validate(p *problems, path string) {
 	for i, r := range l.Extra {
 		r.validate(p, fmt.Sprintf("%s[%d]", join(path, "extra"), i))
 	}
+	validateEntityOrder(p, join(path, "entity_order"), l.EntityOrder)
 	pwIDs := map[string]bool{}
 	for i, pw := range l.Passwords {
 		at := fmt.Sprintf("%s[%d]", join(path, "passwords"), i)

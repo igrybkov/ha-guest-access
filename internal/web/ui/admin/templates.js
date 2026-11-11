@@ -4,8 +4,8 @@ import {
   h, fill, get, post, put, del, toast, run, ask, field, check, back, debounce,
   localEnabled, maEnabled, APIError,
 } from './dom.js';
-import { paths, buildTemplate, buildRule, slugifyID, normalizeTemplatePath } from './lib.js';
-import { Slots, ruleEditor, loadInventory, accessEditor, localOffNote } from './rules.js';
+import { paths, buildTemplate, buildRule, slugifyID, normalizeTemplatePath, grantedEntities } from './lib.js';
+import { Slots, ruleEditor, loadInventory, accessEditor, localOffNote, orderEditor } from './rules.js';
 
 export async function render(view, rest) {
   const data = await get(paths.templates);
@@ -44,8 +44,10 @@ async function editor(view, tpl, all) {
     icon: src.icon || '',
     access: { network: src.access?.network || 'any', near_home_m: src.access?.near_home_m || 0 },
     party: !!src.party,
+    entity_order: [...(src.entity_order || [])],
   };
   const slots = new Slots();
+  const order = orderEditor(f, 'Nothing yet. Entities this template grants show here.');
   let idTouched = !isNew;
 
   const name = h('input', { value: f.name, required: true });
@@ -89,6 +91,7 @@ async function editor(view, tpl, all) {
       if (my !== seq) return;
       const byRule = new Map(res.rules.filter((r) => r.template === probe.id).map((r) => [r.rule, r.entities]));
       editors.forEach((e, i) => e.setResolved(byRule.get(i) ?? []));
+      order.set(grantedEntities(res.grants));
       const probs = [...res.problems.filter((p) => !(t.id === '' && p.path === 'id'))];
       slots.show(probs, normalizeTemplatePath);
       fill(warnings, ...res.warnings.map((w) => h('li', { text: w.rule >= 0 ? `Rule ${w.rule + 1}: ${w.message}` : w.message })));
@@ -138,6 +141,9 @@ async function editor(view, tpl, all) {
     schedule();
   } })),
   warnings,
+  h('fieldset', {}, h('legend', { text: 'Order on the guest page' }),
+    h('p', { class: 'muted small', text: 'Guests see the entities in this order. Until you move one, they go by name.' }),
+    order.el, slots.slot('entity_order')),
   h('div', { class: 'actions sticky' },
     save,
     !isNew && h('button', { type: 'button', class: 'danger', text: 'Delete', onclick: async (ev) => {

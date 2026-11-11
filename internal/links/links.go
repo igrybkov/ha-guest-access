@@ -201,12 +201,13 @@ func setEditable(dst *model.Link, src model.Link) {
 	dst.ValidUntil = src.ValidUntil
 	dst.TemplateIDs = slices.Clone(src.TemplateIDs)
 	dst.Extra = slices.Clone(src.Extra)
+	dst.EntityOrder = slices.Clone(src.EntityOrder)
 	dst.OneTime = src.OneTime
 	dst.Approval = src.Approval
 }
 
 // Create adds a link with the editable fields of draft (name, note,
-// window, templates, extra rules, one time, approval). It sets the id, the slug and
+// window, templates, extra rules, entity order, one time, approval). It sets the id, the slug and
 // CreatedAt. An empty customSlug gets a random slug; otherwise customSlug
 // must pass ValidCustomSlug and be unused.
 func (s *Store) Create(draft model.Link, customSlug string) (model.Link, error) {

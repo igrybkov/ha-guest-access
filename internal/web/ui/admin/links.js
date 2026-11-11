@@ -6,9 +6,9 @@ import {
 import {
   paths, PRESETS, preset, toLocalInput, fromLocalInput, zoneNote, fmtTime, fmtWindow, buildLink, linkForm,
   approvalMode, splitTemplates, templateRows, moveItem, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
-  linkProblems, brokenLinkNote, removePasswordPrompt,
+  linkProblems, brokenLinkNote, removePasswordPrompt, ownRuleEntities,
 } from './lib.js';
-import { Slots, ruleEditor, loadInventory } from './rules.js';
+import { Slots, ruleEditor, loadInventory, orderEditor } from './rules.js';
 
 export async function render(view, rest) {
   if (rest[0] === 'new') return editor(view, null);
@@ -198,6 +198,10 @@ async function editor(view, id) {
   }
   const rulesFromState = () => buildLink({ ...f, extra: current() }).extra;
 
+  // Order of the group the guest page shows for the extra rules. It lists
+  // only entities that no ticked template grants.
+  const order = orderEditor(f, 'Entities that only the extra rules grant show here.');
+
   // Options.
   const oneTime = h('input', { type: 'checkbox', checked: f.one_time });
   oneTime.addEventListener('change', () => { f.one_time = oneTime.checked; });
@@ -237,6 +241,7 @@ async function editor(view, id) {
       if (my !== seq) return;
       const byRule = new Map(res.rules.filter((r) => !r.template).map((r) => [r.rule, r.entities]));
       editors.forEach((e, i) => e.setResolved(byRule.get(i) ?? []));
+      order.set(ownRuleEntities(res.grants));
       const groups = grantSummary(res.grants);
       fill(grantsBox, 
         groups.length
@@ -303,6 +308,9 @@ async function editor(view, id) {
         drawRules([...rulesFromState(), { select: {}, actions: [] }]);
         schedule();
       } })),
+      h('fieldset', {}, h('legend', { text: 'Order of extra rule entities' }),
+        h('p', { class: 'muted small', text: 'Guests see them in this group, in this order. Until you move one, they go by name.' }),
+        order.el, slots.slot('entity_order')),
       h('fieldset', {}, h('legend', { text: 'Options' }),
         check('One-time', oneTime, 'Each action on each entity works once.'),
         isNew && check('Custom slug', customSlug, 'Random by default.'),

@@ -216,6 +216,10 @@ type Template struct {
 	// Party shows the Music Assistant party link on the guest page. It does
 	// nothing while Music Assistant is not set up.
 	Party bool `yaml:"party,omitempty" json:"party,omitempty"`
+	// EntityOrder lists entity ids in the order the guest page shows them
+	// in this template's group. Entities not listed follow, by name. An id
+	// that no longer resolves is skipped.
+	EntityOrder []string `yaml:"entity_order,omitempty" json:"entity_order,omitempty"`
 }
 
 // Validate checks the template's shape.
@@ -240,6 +244,27 @@ func (t Template) validate(p *problems, path string) {
 	}
 	for i, r := range t.Rules {
 		r.validate(p, fmt.Sprintf("%s[%d]", join(path, "rules"), i))
+	}
+	validateEntityOrder(p, join(path, "entity_order"), t.EntityOrder)
+}
+
+// entityIDRe is the shape of an HA entity id: "domain.object_id". The
+// object id may start with a digit.
+var entityIDRe = regexp.MustCompile(`^[a-z0-9_]+\.[a-z0-9_]+$`)
+
+// validateEntityOrder checks that each entry looks like an entity id and
+// is listed once. It never checks that the entity exists.
+func validateEntityOrder(p *problems, path string, ids []string) {
+	seen := map[string]bool{}
+	for i, id := range ids {
+		at := fmt.Sprintf("%s[%d]", path, i)
+		switch {
+		case !entityIDRe.MatchString(id):
+			p.add(at, "%q is not an entity id like light.kitchen", id)
+		case seen[id]:
+			p.add(at, "%q is listed twice", id)
+		}
+		seen[id] = true
 	}
 }
 

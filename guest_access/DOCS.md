@@ -40,6 +40,8 @@ A template has a name, an icon, a list of rules and an optional default `access`
 
 You edit templates in the **Templates** screen. They are stored in `templates.yaml` in the config folder, so you can edit that file by hand or keep it in git. The app picks up a change to the file.
 
+The guest page shows one group per template. Inside a group, entities go by name. To set your own order, use the arrows under **Order on the guest page** in the template editor. This saves an `entity_order` list of entity ids. Entities you have not placed follow by name. An id that no longer matches an entity is ignored.
+
 ### Select and exclude
 
 `select` and `exclude` take four lists. The lists combine as a union.
@@ -263,6 +265,8 @@ templates:
 ## Links
 
 A link is a URL, a validity window and a set of templates plus optional extra rules.
+
+The guest page shows the templates' groups in the link's template order. The extra rules get one more group at the end. It holds only the entities that no template of the link grants. The link's own `entity_order` sets the order of that group, in the same way as on a template.
 
 ### The window
 

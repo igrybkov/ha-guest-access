@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Admin: set the order of entities on the guest page. The template editor
+  and the link editor (for the extra rules' group) list the entities with
+  up and down buttons, saved as `entity_order`. Entities not placed now
+  go by name, not by entity id.
 - Admin: ticked templates on a link can be moved up and down. The guest
   page shows its groups in that order.
 - Guest: a fan's speed slider shows only while the fan is on, like a
