@@ -29,6 +29,7 @@ import (
 	"github.com/igrybkov/ha-guest-access/internal/links"
 	"github.com/igrybkov/ha-guest-access/internal/ma"
 	"github.com/igrybkov/ha-guest-access/internal/migrate"
+	"github.com/igrybkov/ha-guest-access/internal/supervisor"
 	"github.com/igrybkov/ha-guest-access/internal/web"
 )
 
@@ -168,6 +169,7 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 	// Device approval. Decisions from HA come in as events; the
 	// subscription survives reconnects.
 	signer := access.NewSigner(key)
+	notifier := newNotifier(cfg, client, log)
 	devices := approval.New(approval.Options{
 		Links:         linkStore,
 		FireEvent:     client.FireEvent,
@@ -183,6 +185,7 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		EventTimeout:  o.HAEventTimeout,
 		Audit:         auditLog,
 		IPv6Prefix:    o.Settings.RateLimits.IPv6Prefix,
+		Notifier:      notifier,
 	})
 	if err := devices.Run(ctx, client.SubscribeEvents); err != nil { // returns once subscribed
 		closeAll()
@@ -212,6 +215,10 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 	var wg sync.WaitGroup
 	wg.Go(func() { _ = client.Run(ctx) }) // returns only when ctx is done
 	wg.Go(func() { srv.RunMACheck(ctx) }) // returns at once without Music Assistant
+	wg.Go(func() { devices.RunExpiry(ctx) })
+	if notifier != nil {
+		wg.Go(func() { notifier.Run(ctx) })
+	}
 	serveErr := make(chan error, len(servers))
 	for i, ln := range []net.Listener{adminLn, guestLn} {
 		s := servers[i]
@@ -248,6 +255,39 @@ func run(ctx context.Context, cfg config.Config, adminLn, guestLn net.Listener, 
 		log.Warn("background tasks did not stop in time")
 	}
 	return runErr
+}
+
+// newNotifier returns the HA notifier of device requests, or nil when
+// approval.persistent_notification is off. Under Supervisor the
+// notification links to the admin page's pending panel. The app's slug
+// comes from Supervisor at the first notification; outside Supervisor
+// there is no link.
+func newNotifier(cfg config.Config, client ha.Client, log *slog.Logger) *approval.Notifier {
+	o := cfg.Options
+	if !o.Approval.PersistentNotification {
+		return nil
+	}
+	var panelLink func(context.Context) (string, error)
+	if cfg.Supervisor {
+		// Under Supervisor, HAToken is SUPERVISOR_TOKEN.
+		sup := supervisor.Client{URL: supervisor.DefaultURL, Token: cfg.HAToken}
+		panelLink = func(ctx context.Context) (string, error) {
+			info, err := sup.SelfInfo(ctx)
+			if err != nil {
+				return "", err
+			}
+			return supervisor.PanelPath(info.Slug, web.PendingRoute), nil
+		}
+	}
+	return approval.NewNotifier(approval.NotifierOptions{
+		CallService: func(ctx context.Context, domain, service string, data map[string]any) error {
+			_, err := client.CallService(ctx, domain, service, data, nil, false)
+			return err
+		},
+		PanelLink: panelLink,
+		Timeout:   o.HAEventTimeout,
+		Logger:    log,
+	})
 }
 
 // newServer returns a server for h with the request bounds of the

@@ -137,6 +137,8 @@ type Options struct {
 	// client's prefix (see access.KeyAddr). Zero means
 	// access.DefaultIPv6Prefix.
 	IPv6Prefix int
+	// Notifier shows waiting requests in HA. nil shows nothing.
+	Notifier *Notifier
 }
 
 // Request is a pending device request, as the admin API shows it.
@@ -197,6 +199,9 @@ type Manager struct {
 	// keeps asking past the caps gets one record per period per link,
 	// reason and client, which counts the ones left out.
 	refused *audit.Throttle
+
+	// wake tells RunExpiry that a new request may expire first.
+	wake chan struct{}
 }
 
 // refusedAuditPeriod is the throttle period of refused device requests.
@@ -242,6 +247,7 @@ func New(o Options) *Manager {
 		bySecret: map[string]*request{},
 		events:   map[string][]time.Time{},
 		refused:  audit.NewThrottle(refusedAuditPeriod),
+		wake:     make(chan struct{}, 1),
 	}
 }
 
@@ -432,6 +438,11 @@ func (m *Manager) newRequest(link model.Link, label, device string, c access.Cli
 	}
 	m.byID[req.ID], m.bySecret[req.secret] = req, req
 	m.events[linkID] = append(m.events[linkID], now)
+	m.opts.Notifier.created(req.Request, link.Name)
+	select {
+	case m.wake <- struct{}{}:
+	default:
+	}
 	return req, 0, nil
 }
 
@@ -615,6 +626,7 @@ func (m *Manager) ResetDevices(linkID string) error {
 	}
 	for _, req := range m.byID {
 		if req.LinkID == linkID {
+			m.endPending(req)
 			m.drop(req)
 		}
 	}
@@ -665,6 +677,7 @@ func (m *Manager) decide(requestID string, approve bool, by, onlyLink string) er
 		return ErrUnknownRequest
 	}
 	if !approve {
+		m.endPending(req)
 		req.state, req.ExpiresAt = stateDenied, now.Add(m.opts.PendingTTL)
 		m.log.Info("device denied", "link", req.LinkID, "request", req.ID, "by", by)
 		m.recordDecision("device.denied", audit.ResultDenied, req, by, "")
@@ -676,6 +689,7 @@ func (m *Manager) decide(requestID string, approve bool, by, onlyLink string) er
 	if err != nil {
 		return err
 	}
+	m.endPending(req)
 	req.state, req.deviceID, req.ExpiresAt = stateApproved, d.ID, now.Add(m.opts.PendingTTL)
 	m.log.Info("device approved", "link", req.LinkID, "request", req.ID, "device", d.ID, "by", by)
 	m.recordDecision("device.approved", audit.ResultAllowed, req, by, d.ID)
@@ -792,6 +806,7 @@ func (m *Manager) newCode(linkID string) string {
 func (m *Manager) sweep(now time.Time) {
 	for _, req := range m.byID {
 		if !now.Before(req.ExpiresAt) {
+			m.endPending(req)
 			m.drop(req)
 		}
 	}
@@ -806,6 +821,56 @@ func (m *Manager) sweep(now time.Time) {
 			m.events[id] = append([]time.Time(nil), ev[i:]...)
 		}
 	}
+}
+
+// endPending dismisses the HA notification of req when req still waits
+// for a decision. Call it before req leaves the pending state. A decided
+// request had its notification dismissed at the decision. It requires
+// m.mu.
+func (m *Manager) endPending(req *request) {
+	if req.state == statePending {
+		m.opts.Notifier.ended(req.Request)
+	}
+}
+
+// RunExpiry drops each request when it expires, until ctx is done. The
+// other methods also drop expired requests, but only when they run; this
+// makes an expiry dismiss its HA notification on time. It waits for the
+// first expiry, so it needs no polling interval.
+func (m *Manager) RunExpiry(ctx context.Context) {
+	t := time.NewTimer(0)
+	defer t.Stop()
+	for {
+		m.mu.Lock()
+		now := m.now()
+		m.sweep(now)
+		next, ok := m.firstExpiry()
+		m.mu.Unlock()
+		var fire <-chan time.Time
+		if ok {
+			t.Reset(next.Sub(now))
+			fire = t.C
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-fire:
+		case <-m.wake:
+			t.Stop()
+		}
+	}
+}
+
+// firstExpiry returns the earliest ExpiresAt of all requests. It requires
+// m.mu.
+func (m *Manager) firstExpiry() (time.Time, bool) {
+	var first time.Time
+	for _, req := range m.byID {
+		if first.IsZero() || req.ExpiresAt.Before(first) {
+			first = req.ExpiresAt
+		}
+	}
+	return first, !first.IsZero()
 }
 
 // drop forgets a request. It requires m.mu.

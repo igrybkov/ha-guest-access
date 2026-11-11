@@ -16,9 +16,11 @@
     <a href="#/audit" data-screen="audit">Activity</a>
     <a href="#/diagnostics" data-screen="diagnostics">Diagnostics</a>
     <a href="#/settings" data-screen="settings">Settings</a>
+    <a href="#/pending" id="pending-nav" class="pending-nav" hidden>Waiting <span id="pending-count" class="count" aria-label="devices waiting"></span></a>
   </nav>
 </header>
 <div id="banner" class="banner" role="alert" hidden></div>
+<section id="pending" class="pending card" aria-labelledby="pending-title" hidden></section>
 <main id="view"></main>
 <dialog id="confirm" aria-label="Confirm"></dialog>
 <div id="toasts" aria-live="polite"></div>

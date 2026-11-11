@@ -68,6 +68,11 @@ type approvalTuning struct {
 	MaxDevices       int   `json:"max_devices"`
 	EventsPerHour    int   `json:"events_per_hour"`
 	TouchThrottleMin int64 `json:"touch_throttle_min"`
+	// PersistentNotification says whether HA gets a notification per
+	// waiting request. AdminPollS is how often the admin page checks for
+	// waiting requests.
+	PersistentNotification bool  `json:"persistent_notification"`
+	AdminPollS             int64 `json:"admin_poll_s"`
 }
 
 func newSettingsView(o config.Options, maRefused bool) settingsView {
@@ -91,11 +96,13 @@ func newSettingsView(o config.Options, maRefused bool) settingsView {
 		DiagRequests:             o.DiagRequests,
 		InventoryMaxAgeS:         int64(o.InventoryMaxAge.Seconds()),
 		Approval: approvalTuning{
-			PendingTTLMin:    int64(o.Approval.PendingTTL.Minutes()),
-			MaxPending:       o.Approval.MaxPending,
-			MaxDevices:       o.Approval.MaxDevices,
-			EventsPerHour:    o.Approval.EventsPerHour,
-			TouchThrottleMin: int64(o.Approval.TouchThrottle.Minutes()),
+			PendingTTLMin:          int64(o.Approval.PendingTTL.Minutes()),
+			MaxPending:             o.Approval.MaxPending,
+			MaxDevices:             o.Approval.MaxDevices,
+			EventsPerHour:          o.Approval.EventsPerHour,
+			TouchThrottleMin:       int64(o.Approval.TouchThrottle.Minutes()),
+			PersistentNotification: o.Approval.PersistentNotification,
+			AdminPollS:             int64(o.Approval.AdminPoll.Seconds()),
 		},
 		HACallTimeoutS:        int64(o.HACallTimeout.Seconds()),
 		HAEventTimeoutS:       int64(o.HAEventTimeout.Seconds()),

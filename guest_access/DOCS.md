@@ -357,9 +357,26 @@ Each request shows the code, the password label, a short summary of the device (
 
 ### Where you approve
 
-- In the app: the link's **Devices** section lists waiting requests. Press **Approve** or **Deny**.
+- In the app: the **Waiting to be admitted** panel at the top of every page lists the waiting requests of all links. Press **Approve** or **Deny**. The link's **Devices** section lists that link's requests too.
+- From an HA notification: each request shows in HA's notifications, with a link that opens the app on the panel.
 - From your phone: use the blueprint below.
 - In self-service, from an approved device: its page shows the waiting requests.
+
+### The waiting panel
+
+The panel shows the link, the guest's password label, the device, the code and how long ago the guest asked. It refreshes on its own every `approval.admin_poll_s` seconds while the app's tab is open and visible. It stops while the tab is hidden, and refreshes at once when you come back. With nothing waiting, the panel hides. The **Waiting** item in the menu shows the count.
+
+To open the app on the panel, go to `/app/<app slug>/pending` in HA 2026.2 or later. The notification link does this for you. Outside HA, add `#/pending` to the app's address.
+
+### The HA notification
+
+For each request that waits, the app creates an HA persistent notification. It shows up under HA's notifications (the bell). The title is "Someone wants in:" and the link name. The text has the guest's password label (if any), the device and the code, and a link to the waiting panel. The notification goes away by itself when the request is approved, denied (from the app, from HA or from a guest device) or expires.
+
+- Turn it off with `approval.persistent_notification: false`.
+- In claim mode, the first device gets in at once, so it gets no notification.
+- The app reads its slug from Supervisor to build the link. If that fails, the notification has no link. Open the app from the sidebar.
+- The guest's text is shown as plain text. Markdown in a password label, such as a link, does not work.
+- A failed HA call is logged. It never stops the request. `ha.event_timeout_s` caps each call.
 
 ### The blueprint
 
@@ -622,6 +639,8 @@ Set these in the app's Configuration tab. Saving restarts the app. Each row show
 | `approval.max_devices` | `10` | Approved devices per link. |
 | `approval.events_per_hour` | `5` | Device request events per link per hour. |
 | `approval.touch_throttle_min` | `5` | Least minutes between "last seen" updates of a device. |
+| `approval.persistent_notification` | `true` | Show an HA notification for each device that waits. It goes away when the request ends. |
+| `approval.admin_poll_s` | `5` | Seconds between checks for waiting devices while the app's page is open and visible. |
 | `ha.call_timeout_s` | `10` | Seconds to wait for HA to run a guest action. |
 | `ha.event_timeout_s` | `5` | Seconds to wait for HA to take an event the app sends. |
 | `streams.recheck_s` | `5` | Seconds between checks that an open page may still see its link. A revoke ends the page's updates within this time. |
@@ -702,7 +721,7 @@ The chain sends `X-Forwarded-For`, and the app reads only that header and `X-For
 
 Each file has a `version`. A newer app reads older files and converts them in memory. It writes nothing until something changes. An app that finds a file from a newer version refuses to write it.
 
-Pending device requests live in memory only. They are lost on a restart.
+Pending device requests live in memory only. They are lost on a restart. Their HA notifications stay; dismiss them in HA.
 
 ## Troubleshooting
 
@@ -725,7 +744,7 @@ Pending device requests live in memory only. They are lost on a restart.
 
 **Near home never passes.** The page must use HTTPS. The browser must allow location. The accuracy must be within `location.max_accuracy_m`. HA must have a home location.
 
-**A new device waits forever.** The request expires after `approval.pending_ttl_min` minutes. If your phone got no notification, check the blueprint automation, or approve in the app. The guest can ask again.
+**A new device waits forever.** The request expires after `approval.pending_ttl_min` minutes. If your phone got no notification, check the blueprint automation, or approve in the app or from the HA notification. The guest can ask again.
 
 **The party button is missing.** Check that `music_assistant.url` and `.token` are set, that the template has `party: true`, that the rule's access passes, and that party guest access is on in MA. Read the app log for "music assistant party url".
 

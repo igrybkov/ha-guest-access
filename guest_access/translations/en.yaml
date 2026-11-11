@@ -190,6 +190,12 @@ configuration:
       touch_throttle_min:
         name: Last seen updates
         description: Least minutes between "last seen" updates of a device.
+      persistent_notification:
+        name: HA notification per request
+        description: Show a notification in Home Assistant for each device that waits, with a link to approve it in the app.
+      admin_poll_s:
+        name: Waiting list refresh
+        description: Seconds between checks for waiting devices while the app page is open.
   ha:
     name: Home Assistant calls
     fields:
