@@ -5,8 +5,13 @@ home. Each link is built from templates such as "House entry" or "Music
 control". The app checks every action against the link, the network the
 request comes from and, if you want, how close the guest is to home.
 
-It replaces the Limited Guest Access add-on with a single Go binary. The
-first version is in progress.
+The first version is in progress.
+
+## Credits
+
+The idea comes from
+[Limited Guest Access](https://github.com/TekniskSupport/homeassistant-addons/tree/master/limited-guest-access)
+by TekniskSupport. This app is a rewrite in Go with a few changes of my own.
 
 ## Install
 
