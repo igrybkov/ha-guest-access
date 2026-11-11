@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
@@ -92,6 +94,28 @@ type Options struct {
 	// NotFound is what a browser gets on the guest port for an unknown
 	// path or link.
 	NotFound NotFoundOptions
+	// TLS sets HTTPS on the guest port. Off by default.
+	TLS TLSOptions
+}
+
+// TLSOptions set HTTPS on the guest port.
+type TLSOptions struct {
+	// Enabled makes the guest port serve TLS only.
+	Enabled bool
+	// CertFile and KeyFile are file names in the ssl folder. They are
+	// checked with SSLFileOK when Enabled is set.
+	CertFile string
+	KeyFile  string
+	// SelfSignedLifetime is how long a self-signed certificate is valid.
+	// The app makes one when the files are missing or broken.
+	SelfSignedLifetime time.Duration
+}
+
+// SSLFileOK reports whether name is a path inside the ssl folder: not
+// empty, not absolute, not the folder itself, without ".." that leaves
+// the folder, and without a NUL byte.
+func SSLFileOK(name string) bool {
+	return filepath.IsLocal(name) && filepath.Clean(name) != "." && !strings.ContainsRune(name, 0)
 }
 
 // NotFoundOptions set the answer a browser gets on the guest port for
@@ -139,6 +163,10 @@ type ApprovalOptions struct {
 // accent_color and not_found_redirect) are left out when not set.
 type rawOptions struct {
 	LogLevel           string                    `json:"log_level"`
+	SSL                bool                      `json:"ssl"`
+	CertFile           string                    `json:"certfile"`
+	KeyFile            string                    `json:"keyfile"`
+	SSLSelfSignedDays  int                       `json:"ssl_self_signed_days"`
 	PublicBaseURL      string                    `json:"public_base_url"`
 	LocalAccess        model.LocalAccessSettings `json:"local_access"`
 	TrustedProxies     []string                  `json:"trusted_proxies"`
@@ -213,6 +241,9 @@ func defaultRaw() rawOptions {
 	var r rawOptions
 	d := model.DefaultSettings()
 	r.LogLevel = "info"
+	r.CertFile = "fullchain.pem"
+	r.KeyFile = "privkey.pem"
+	r.SSLSelfSignedDays = 365
 	r.LocalAccess = d.LocalAccess
 	r.TrustedProxies = []string{}
 	r.HomeRadiusDefaultM = d.HomeRadiusDefaultM
@@ -342,6 +373,7 @@ func (r rawOptions) options() (Options, error) {
 		{"streams.max_per_ip", r.Streams.MaxPerIP, 1, 1000, ""},
 		{"audit.max_file_kib", r.Audit.MaxFileKiB, 64, 64 << 10, ""},
 		{"audit.max_denials_per_min", r.Audit.MaxDenialsPerMin, 1, 100_000, ""},
+		{"ssl_self_signed_days", r.SSLSelfSignedDays, 1, 3650, ""},
 	} {
 		if f.v < f.lo || f.v > f.hi {
 			msg := fmt.Sprintf("%s: must be between %d and %d", f.name, f.lo, f.hi)
@@ -349,6 +381,15 @@ func (r rawOptions) options() (Options, error) {
 				msg += " (" + f.comment + ")"
 			}
 			errs = append(errs, errors.New(msg))
+		}
+	}
+	// The file names count only with ssl on, so a stray value does not
+	// stop an app that does not use them.
+	if r.SSL {
+		for _, f := range []struct{ name, v string }{{"certfile", r.CertFile}, {"keyfile", r.KeyFile}} {
+			if !SSLFileOK(f.v) {
+				errs = append(errs, fmt.Errorf("%s: must be a file name in /ssl, such as fullchain.pem, not %q", f.name, f.v))
+			}
 		}
 	}
 	if err := errors.Join(errs...); err != nil {
@@ -398,6 +439,12 @@ func (r rawOptions) options() (Options, error) {
 			Redirect: r.Guest.NotFoundRedirect,
 			Title:    r.Guest.NotFoundTitle,
 			Message:  r.Guest.NotFoundMessage,
+		},
+		TLS: TLSOptions{
+			Enabled:            r.SSL,
+			CertFile:           r.CertFile,
+			KeyFile:            r.KeyFile,
+			SelfSignedLifetime: time.Duration(r.SSLSelfSignedDays) * 24 * time.Hour,
 		},
 	}, nil
 }

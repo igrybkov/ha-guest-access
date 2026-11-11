@@ -599,6 +599,10 @@ Set these in the app's Configuration tab. Saving restarts the app. Each row show
 | Option | Default | Meaning |
 |---|---|---|
 | `log_level` | `info` | `debug`, `info`, `warn` or `error`. At `debug`, the guest port logs the address and proxy headers of each request. |
+| `ssl` | `false` | Serve HTTPS only on the guest port. See **HTTPS between the proxy and the app**. |
+| `certfile` | `fullchain.pem` | Certificate file for `ssl`, in `/ssl`. A path inside `/ssl` such as `live/cert.pem` works. A path that leaves `/ssl` is an error. |
+| `keyfile` | `privkey.pem` | Private key file for `ssl`, in `/ssl`. Same rules as `certfile`. |
+| `ssl_self_signed_days` | `365` | Days a self-signed certificate is valid. The app makes a new one when less than a third of this time is left. 1 to 3650. |
 | `local_access.enabled` | `false` | Allow rules with `network: local`. See **Local only**. |
 | `local_access.networks` | `[10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 fc00::/7]` | Address ranges (CIDR) that count as home. |
 | `trusted_proxies` | `[]` | Proxies whose `X-Forwarded-For` the app believes, as IPs or CIDRs. Add your reverse proxy and your tunnel. |
@@ -686,6 +690,32 @@ Never expose the admin port. Only expose the guest port.
 
 The app's live-update stream asks for no proxy buffering by itself. You do not need to change NPM for it.
 
+With `ssl` on, set the scheme in step 2 to `https`. See below.
+
+### HTTPS between the proxy and the app
+
+By default the proxy talks plain HTTP to the guest port. That is fine when the proxy runs on the HA host. When the proxy runs on another machine, guest traffic crosses your network unencrypted on that last hop. Session cookies are in it. Turn on `ssl` to encrypt it.
+
+1. In the app's Configuration tab, turn on `ssl`. Saving restarts the app.
+2. In the proxy, set the scheme for the guest port to `https`. In NPM, that is the **Scheme** field of the proxy host.
+3. Open a link through the proxy. Check **Diagnostics**: with a trusted proxy that sends `X-Forwarded-Proto`, **HTTPS** follows what the guest used.
+
+With `ssl` on, the guest port speaks HTTPS only. A proxy still set to `http` gets an error. The admin port does not change: the HA sidebar reaches it as before.
+
+Which certificate the app uses:
+
+- **Files in `/ssl`.** When `certfile` and `keyfile` exist and load, the app uses them. These are the files the Let's Encrypt app and others write. The app checks the files at each new connection and loads a renewed pair without a restart. If a new pair does not load, the app logs an error and keeps the last good one.
+- **Self-signed.** When the files are missing, the app makes its own certificate in `/data` and uses it. When the files exist but do not load (wrong key, bad file, only one of the two), the app logs an error and also uses its own certificate. It never falls back to plain HTTP. The certificate is ECDSA P-256 with the name `guest-access`, valid for `ssl_self_signed_days`. The app keeps it across restarts and makes a new one when less than a third of its time is left. The log shows its SHA-256 fingerprint at each start, and the **Settings** page shows it too. If files show up in `/ssl` later, the app switches to them at the next connection.
+
+Proxies differ in how they treat a self-signed certificate:
+
+- **nginx and NPM** do not check the backend's certificate by default. They connect, and the link is encrypted, but the proxy does not know who it talks to. Someone who can sit between the proxy and the app could pose as the app.
+- **Caddy, Traefik, HAProxy and cloudflared** check it by default. They refuse the self-signed certificate, and guests get a proxy error, until you make the proxy trust a copy of it or turn the check off.
+
+To have both encryption and a checked identity, make the proxy trust the app's certificate. The app keeps it as `guest_tls.crt` in its own data folder. You can also fetch it from the guest port with `openssl s_client -connect <HA host>:8898 </dev/null | openssl x509 > guest-access.pem`. Check its fingerprint (`openssl x509 -in guest-access.pem -noout -fingerprint -sha256`) against the log or the **Settings** page. Tell the proxy to expect the server name `guest-access`. In nginx, that is `proxy_ssl_verify on`, `proxy_ssl_trusted_certificate` with the copy, and `proxy_ssl_name guest-access`. A new self-signed certificate has a new fingerprint, so update the copy when the app renews it. A certificate in `/ssl` that your proxy already trusts avoids all this.
+
+HTTPS here matters most when the proxy runs on another machine. When the proxy runs on the HA host, the hop stays on that host.
+
 ### cloudflared plus NPM
 
 When traffic goes Cloudflare, cloudflared, NPM, app:
@@ -695,6 +725,8 @@ When traffic goes Cloudflare, cloudflared, NPM, app:
 3. Open **Diagnostics** after a test request. **Untrusted forwarding** must be gone and **Client** must show the guest's address.
 
 The chain sends `X-Forwarded-For`, and the app reads only that header and `X-Forwarded-Proto`. It ignores `Forwarded`, `X-Real-IP` and `CF-Connecting-IP`.
+
+If you point the tunnel straight at the app with `ssl` on, cloudflared checks the app's certificate. A self-signed one fails that check. See **HTTPS between the proxy and the app**.
 
 ## Security notes
 

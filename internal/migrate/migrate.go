@@ -33,6 +33,12 @@ const (
 	// KeyFile holds the HMAC key for the location cookie, as raw bytes in
 	// the data dir. It is not part of the data set: it has no schema.
 	KeyFile = "hmac.key"
+	// SelfSignedCertFile and SelfSignedKeyFile hold the self-signed
+	// certificate of the guest port, as PEM in the data dir. The app makes
+	// them when ssl is on and the files in /ssl are missing or broken. They
+	// have no schema.
+	SelfSignedCertFile = "guest_tls.crt"
+	SelfSignedKeyFile  = "guest_tls.key"
 )
 
 // ConfigCurrent is the schema version of the config set this build reads

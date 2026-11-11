@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Guest port: optional HTTPS, so a reverse proxy can talk HTTPS to the
+  app. Turn on `ssl`. The app uses `certfile` and `keyfile` from `/ssl`
+  (mapped read-only) and loads a renewed pair without a restart. When
+  they are missing or broken, it uses a self-signed certificate it keeps
+  in `/data`, valid for `ssl_self_signed_days`, and logs its SHA-256
+  fingerprint. It never falls back to plain HTTP. Off by default; with
+  it off nothing changes. The Settings page shows the certificate in use.
 - Admin: set the order of entities on the guest page. The template editor
   and the link editor (for the extra rules' group) list the entities with
   up and down buttons, saved as `entity_order`. Entities not placed now

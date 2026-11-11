@@ -753,7 +753,23 @@ export function settingsSections(s) {
       ['Header limit (KiB)', t.max_header_kib],
       ['Diagnostics kept', t.diagnostics_requests],
     ] },
+    { id: 'tls', title: 'HTTPS on the guest port', rows: tlsRows(s.tls, s.time_zone) },
   ];
+}
+
+// tlsRows shows the guest port's HTTPS state: the ssl options, and while
+// it is on, which certificate is in use.
+function tlsRows(tls, tz) {
+  const x = tls || {};
+  const rows = [['HTTPS', x.enabled ? 'On' : 'Off']];
+  if (x.enabled) {
+    const src = { files: `Files in /ssl (${x.certfile}, ${x.keyfile})`, 'self-signed': 'Self-signed' }[x.source];
+    rows.push(['Certificate', src || x.source], ['SHA-256 fingerprint', x.fingerprint], ['Valid until', fmtTime(x.not_after, tz)]);
+  } else {
+    rows.push(['Certificate file', x.certfile], ['Key file', x.keyfile]);
+  }
+  rows.push(['Self-signed lifetime (days)', x.self_signed_days]);
+  return rows;
 }
 
 // ---- Waiting to be admitted ----

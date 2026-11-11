@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -183,6 +184,7 @@ type req struct {
 	ctype        string // default application/json for bodies
 	headers      map[string]string
 	cookies      []*http.Cookie
+	tls          bool // the request came over TLS to the app itself
 }
 
 func (h *harness) do(handler http.Handler, r req) *httptest.ResponseRecorder {
@@ -198,6 +200,9 @@ func (h *harness) do(handler http.Handler, r req) *httptest.ResponseRecorder {
 	}
 	hr := httptest.NewRequest(r.method, "http://guest.test"+r.path, body)
 	hr.RemoteAddr = r.peer
+	if r.tls {
+		hr.TLS = &tls.ConnectionState{Version: tls.VersionTLS13, HandshakeComplete: true}
+	}
 	if hr.RemoteAddr == "" {
 		hr.RemoteAddr = "203.0.113.10:5000"
 	}

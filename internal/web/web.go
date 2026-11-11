@@ -100,6 +100,10 @@ type Deps struct {
 	// DevAdminAnyPeer lets any peer reach the admin port (make run-dev).
 	DevAdminAnyPeer bool
 
+	// TLSStatus reports the guest port's HTTPS state for the settings
+	// page. nil = HTTPS is off.
+	TLSStatus func() TLSStatus
+
 	// Now is the clock. nil = time.Now.
 	Now func() time.Time
 

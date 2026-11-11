@@ -267,6 +267,26 @@ func TestClientFrom(t *testing.T) {
 			want:    Client{IP: netip.MustParseAddr(npm), ViaProxy: true, Unresolved: true},
 		},
 		{
+			name: "direct TLS: an untrusted peer can't forge proto http",
+			peer: "203.0.113.9:5555", tls: true,
+			headers: map[string][]string{"X-Forwarded-Proto": {"http"}},
+			want:    Client{IP: netip.MustParseAddr("203.0.113.9"), HTTPS: true},
+		},
+		{
+			name: "TLS from a trusted proxy without proto: TLS decides",
+			peer: npm + ":443", tls: true,
+			trusted: trusted,
+			headers: map[string][]string{"X-Forwarded-For": {"203.0.113.9"}},
+			want:    Client{IP: netip.MustParseAddr("203.0.113.9"), HTTPS: true, ViaProxy: true},
+		},
+		{
+			name: "TLS from a trusted proxy with proto https",
+			peer: npm + ":443", tls: true,
+			trusted: trusted,
+			headers: map[string][]string{"X-Forwarded-For": {"203.0.113.9"}, "X-Forwarded-Proto": {"https"}},
+			want:    Client{IP: netip.MustParseAddr("203.0.113.9"), HTTPS: true, ViaProxy: true},
+		},
+		{
 			name:    "CF-Connecting-IP ignored even from a trusted peer",
 			peer:    npm + ":443",
 			trusted: trusted,

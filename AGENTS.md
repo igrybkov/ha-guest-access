@@ -67,6 +67,7 @@ Rate limiting can be turned off with `rate_limits.enabled: false`. It is not rec
 - `inventory`: builds the inventory snapshot and streams state changes.
 - `links`: the link store. One-time use is consumed under its lock before the HA call, and refunded only when HA answered with an error (`ha.Refused`). A timeout or a lost connection keeps the use.
 - `ma`: the optional Music Assistant client. The app must work fully without it.
+- `guesttls`: the guest port's certificate when `ssl` is on. Files in `/ssl` (read through `os.Root`, reloaded when they change), else a self-signed pair in `/data`. Never plain HTTP while `ssl` is on. The admin port is always plain HTTP for ingress.
 - `config`: env and app options (`/data/options.json`). Every setting comes from the options. There is no settings file.
 - `store` and `migrate`: see Storage.
 
@@ -80,7 +81,7 @@ Each token is base64url of version, purpose byte, expiry, an optional ID and an 
 
 Storage:
 - `/homeassistant/guest_access` (config set): `templates.yaml` only. Tracked in the user's HA git repo.
-- `/data` (data set): `links.yaml`, `hmac.key`, and `audit.jsonl` with its older `audit.jsonl.1`. Never in git. Runtime state (sessions, devices, use counts, links, keys) lives here or in memory, never in the config folder.
+- `/data` (data set): `links.yaml`, `hmac.key`, `audit.jsonl` with its older `audit.jsonl.1`, and the self-signed `guest_tls.crt` and `guest_tls.key` when `ssl` needs them. Never in git. Runtime state (sessions, devices, use counts, links, keys) lives here or in memory, never in the config folder.
 - `store` writes atomically, reloads on file change and migrates in memory on read. Nothing is written until something changes.
 - `migrate` owns each set's schema version. To change a file format, add a step that works on YAML nodes only (never app types), bump the set's `Current`, and add `testdata/<set>/v<N>/`. Steps stay forever. File names are never removed.
 

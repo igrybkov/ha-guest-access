@@ -110,6 +110,12 @@ func WriteFileAtomic(path string, data []byte) error {
 	return writeFileAtomic(path, data, 0o644)
 }
 
+// WriteSecretFileAtomic is WriteFileAtomic with mode 0600, for files in
+// /data that only the app may read.
+func WriteSecretFileAtomic(path string, data []byte) error {
+	return writeFileAtomic(path, data, 0o600)
+}
+
 // writeFileAtomic is WriteFileAtomic with a file mode. The temp file is
 // created 0600 by os.CreateTemp, so the data is never readable by others
 // before the chmod.
