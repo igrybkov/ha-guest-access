@@ -3,13 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>Guest Access</title>
 <link rel="stylesheet" href="admin.css">
+<script type="module" src="app.js"></script>
 </head>
 <body>
-<main>
-  <h1>Guest Access</h1>
-  <p>The admin screens come in a later version. The API is ready under <code>api/</code>.</p>
-</main>
+<header class="top">
+  <nav id="nav" aria-label="Screens">
+    <a href="#/links" data-screen="links">Links</a>
+    <a href="#/templates" data-screen="templates">Templates</a>
+    <a href="#/audit" data-screen="audit">Activity</a>
+    <a href="#/diagnostics" data-screen="diagnostics">Diagnostics</a>
+    <a href="#/settings" data-screen="settings">Settings</a>
+  </nav>
+</header>
+<div id="banner" class="banner" role="alert" hidden></div>
+<main id="view"></main>
+<dialog id="confirm" aria-label="Confirm"></dialog>
+<div id="toasts" aria-live="polite"></div>
 </body>
 </html>
