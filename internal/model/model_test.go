@@ -562,3 +562,19 @@ func TestHomeSet(t *testing.T) {
 		}
 	}
 }
+
+func TestTimeZoneName(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"America/Chicago", "America/Chicago"},
+		{"Europe/Kyiv", "Europe/Kyiv"},
+		{"UTC", "UTC"},
+		{"", ""},      // LoadLocation reads "" as UTC
+		{"Local", ""}, // LoadLocation reads "Local" as this machine's zone
+		{"Not/AZone", ""},
+		{"../../etc/passwd", ""},
+	} {
+		if got := TimeZoneName(tc.in); got != tc.want {
+			t.Errorf("TimeZoneName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

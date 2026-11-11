@@ -1,6 +1,6 @@
 // Activity screen: the audit log, newest first. Most fields come from
 // guests, so everything goes in as text only.
-import { h, fill, get, table, select } from './dom.js';
+import { h, fill, get, table, select, haZone } from './dom.js';
 import { paths, fmtTime, AUDIT_GROUPS, auditQuery, auditKeep, auditWho, auditWhat, auditResult, isDenied, auditOffText } from './lib.js';
 
 const PAGE = 50;
@@ -36,7 +36,7 @@ export async function render(view, rest, params) {
     const recs = all.filter((r) => auditKeep(state.group, r));
     fill(body, recs.length
       ? table(['Time', 'Event', 'Link', 'Who', 'What', 'Result', 'Client IP'], recs.map((r) => h('tr', { class: isDenied(r) ? 'denied' : '' },
-        h('td', { class: 'small nowrap', text: fmtTime(r.time) }),
+        h('td', { class: 'small nowrap', text: fmtTime(r.time, haZone()) }),
         h('td', {}, h('code', { text: r.event || '' })),
         h('td', { class: 'small', text: r.link_name || r.link_id || '' }),
         h('td', { class: 'small', text: auditWho(r) }),

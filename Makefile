@@ -20,10 +20,12 @@ test:
 	go test -race ./...
 
 # Any node with --test (18+) works; the CI runner's preinstalled node is
-# enough.
+# enough. The tests run in two machine time zones, to prove that the
+# date helpers depend only on the zone they are given.
 UI_TESTS := $(wildcard internal/web/ui/*_test.mjs internal/web/ui/*/*_test.mjs)
 test-ui:
-	$(if $(UI_TESTS),node --test $(UI_TESTS),@echo "no UI tests yet")
+	$(if $(UI_TESTS),TZ=UTC node --test $(UI_TESTS),@echo "no UI tests yet")
+	$(if $(UI_TESTS),TZ=Asia/Tokyo node --test $(UI_TESTS))
 
 # The demo build tag adds cmd/guest-access/demo.go; vet and lint check
 # it too.

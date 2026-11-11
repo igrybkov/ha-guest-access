@@ -203,6 +203,8 @@ type (
 		// device of the link.
 		CanApprove bool `json:"can_approve"`
 	}
+	// guestLink holds no time zone: HA's zone hints at where the home
+	// is. Times are in UTC.
 	guestLink struct {
 		ValidUntil time.Time `json:"valid_until"`
 		OneTime    bool      `json:"one_time"`
@@ -252,7 +254,7 @@ func (s *Server) plan(ctx context.Context, g *guestReq) (guestPlan, error) {
 
 	p := guestPlan{
 		view: stateView{
-			Link:     guestLink{ValidUntil: g.link.ValidUntil, OneTime: g.link.OneTime},
+			Link:     guestLink{ValidUntil: g.link.ValidUntil.UTC(), OneTime: g.link.OneTime},
 			Guest:    g.st.Guest,
 			Groups:   []groupView{},
 			Entities: map[string]*entityView{},
@@ -544,7 +546,7 @@ func (s *Server) guestWhere(g *guestReq) {
 	dist, acc := int(math.Ceil(d)), int(math.Round(*b.Accuracy))
 	rec := g.note("guest.near.ok", audit.ResultOK, "")
 	rec.DistanceM, rec.AccuracyM = &dist, &acc
-	writeJSON(g.w, http.StatusOK, map[string]any{"ok": true, "expires_at": exp})
+	writeJSON(g.w, http.StatusOK, map[string]any{"ok": true, "expires_at": exp.UTC()})
 }
 
 func finiteIn(x, lo, hi float64) bool {

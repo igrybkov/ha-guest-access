@@ -1,10 +1,10 @@
 // Links screen: the list and the editor. After a save the editor also
 // shows the URL and QR code, passwords, devices and recent activity.
 import {
-  h, fill, get, post, put, del, toast, run, ask, field, check, back, debounce, table, copyText, settings, APIError,
+  h, fill, get, post, put, del, toast, run, ask, field, check, back, debounce, table, copyText, settings, haZone, APIError,
 } from './dom.js';
 import {
-  paths, PRESETS, preset, toLocalInput, fromLocalInput, fmtTime, fmtWindow, buildLink, linkForm,
+  paths, PRESETS, preset, toLocalInput, fromLocalInput, zoneNote, fmtTime, fmtWindow, buildLink, linkForm,
   approvalMode, splitTemplates, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
   linkProblems, brokenLinkNote, removePasswordPrompt,
 } from './lib.js';
@@ -71,12 +71,12 @@ async function list(view) {
       linkProblems(l).length > 0 && h('div', { class: 'error small', text: 'Does not validate: guests get not found' }),
       l.slug_warning && h('div', { class: 'warning small', text: 'Short custom URL' }),
       (l.warnings || []).length > 0 && h('div', { class: 'error small', text: `${l.warnings.length} warning${l.warnings.length > 1 ? 's' : ''}` })),
-    h('td', { class: 'small', text: fmtWindow(l) }),
+    h('td', { class: 'small', text: fmtWindow(l, haZone()) }),
     h('td', { class: 'small' },
       (l.templates || []).map((id) => names.get(id) || id).join(', '),
       (l.extra || []).length > 0 && h('div', { class: 'muted', text: `+ ${l.extra.length} extra rule${l.extra.length > 1 ? 's' : ''}` })),
     h('td', { class: 'num', text: String(l.use_count || 0) }),
-    h('td', { class: 'small', text: l.last_used_at ? fmtTime(l.last_used_at) : 'Never' }),
+    h('td', { class: 'small', text: l.last_used_at ? fmtTime(l.last_used_at, haZone()) : 'Never' }),
     h('td', {}, linkActions(l, reload, { open: false }))));
   fill(view, 
     h('div', { class: 'toolbar' }, h('h1', { text: 'Links' }),
@@ -112,9 +112,10 @@ async function editor(view, id) {
   note.value = f.note;
   note.addEventListener('input', () => { f.note = note.value; });
 
-  // Window with presets.
-  const from = h('input', { type: 'datetime-local', value: f.valid_from ? toLocalInput(new Date(f.valid_from)) : '' });
-  const until = h('input', { type: 'datetime-local', value: f.valid_until ? toLocalInput(new Date(f.valid_until)) : '' });
+  // Window with presets. The inputs hold wall-clock time in HA's zone.
+  const tz = haZone();
+  const from = h('input', { type: 'datetime-local', value: f.valid_from ? toLocalInput(new Date(f.valid_from), tz) : '' });
+  const until = h('input', { type: 'datetime-local', value: f.valid_until ? toLocalInput(new Date(f.valid_until), tz) : '' });
   const presetBtns = h('div', { class: 'chips', role: 'group', 'aria-label': 'Window presets' });
   let picked = 'custom';
   const markPreset = () => {
@@ -122,12 +123,12 @@ async function editor(view, id) {
   };
   const applyPreset = (p) => {
     picked = p;
-    const w = preset(p, new Date());
+    const w = preset(p, new Date(), tz);
     if (w) {
       f.valid_from = w.from ? w.from.toISOString() : null;
       f.valid_until = w.until.toISOString();
-      from.value = w.from ? toLocalInput(w.from) : '';
-      until.value = toLocalInput(w.until);
+      from.value = w.from ? toLocalInput(w.from, tz) : '';
+      until.value = toLocalInput(w.until, tz);
       schedule();
     }
     markPreset();
@@ -136,8 +137,8 @@ async function editor(view, id) {
   const readWindow = () => {
     picked = 'custom';
     markPreset();
-    const a = fromLocalInput(from.value);
-    const b = fromLocalInput(until.value);
+    const a = fromLocalInput(from.value, tz);
+    const b = fromLocalInput(until.value, tz);
     f.valid_from = a ? a.toISOString() : null;
     f.valid_until = b ? b.toISOString() : null;
     schedule();
@@ -268,6 +269,7 @@ async function editor(view, id) {
       h('div', {}, field('Note', note), slots.slot('note')),
       h('fieldset', {}, h('legend', { text: 'When it works' }),
         presetBtns,
+        h('p', { class: 'muted small', text: zoneNote(tz) }),
         h('div', { class: 'grid2' },
           h('div', {}, field('From', from, 'Empty means now.'), slots.slot('valid_from')),
           h('div', {}, field('Until', until), slots.slot('valid_until')))),
@@ -340,7 +342,7 @@ function passwordsSection(l, reload) {
     h('p', { class: 'muted small', text: 'With a password, guests must enter it first. The exact text counts: spaces and case too. You can\'t see a password again after you add it.' }),
     pws.length
       ? h('ul', { class: 'list plain' }, pws.map((p) => h('li', { class: 'row' },
-        h('span', { class: 'grow' }, h('span', { text: p.label }), ' ', h('span', { class: 'muted small', text: `added ${fmtTime(p.created_at)}` })),
+        h('span', { class: 'grow' }, h('span', { text: p.label }), ' ', h('span', { class: 'muted small', text: `added ${fmtTime(p.created_at, haZone())}` })),
         h('button', { type: 'button', class: 'danger', text: 'Remove', onclick: async (ev) => {
           const btn = ev.currentTarget;
           const q = removePasswordPrompt(l, p);
@@ -368,9 +370,9 @@ function devicesSection(l, reload) {
     devices.length
       ? table(['Device', 'Approved', 'By', 'Last seen', ''], devices.map((d) => h('tr', {},
         h('td', {}, h('div', { text: d.label || d.device || d.id }), d.label && h('div', { class: 'muted small', text: d.device })),
-        h('td', { class: 'small', text: fmtTime(d.approved_at) }),
+        h('td', { class: 'small', text: fmtTime(d.approved_at, haZone()) }),
         h('td', { class: 'small', text: d.approved_by || '' }),
-        h('td', { class: 'small', text: d.last_seen_at ? fmtTime(d.last_seen_at) : 'Never' }),
+        h('td', { class: 'small', text: d.last_seen_at ? fmtTime(d.last_seen_at, haZone()) : 'Never' }),
         h('td', {}, h('button', { type: 'button', class: 'danger', text: 'Revoke', onclick: async (ev) => {
           const btn = ev.currentTarget;
           if (!(await ask('Revoke this device?', 'It loses access at once.', { ok: 'Revoke', danger: true }))) return;
@@ -405,7 +407,7 @@ function drawPending(reqs, box, reload) {
     h('td', {}, h('code', { class: 'code', text: r.code })),
     h('td', { text: r.label || '' }),
     h('td', { class: 'small', text: r.device || '' }),
-    h('td', { class: 'small', text: fmtTime(r.created_at) }),
+    h('td', { class: 'small', text: fmtTime(r.created_at, haZone()) }),
     h('td', {}, h('div', { class: 'actions' },
       h('button', { type: 'button', class: 'primary', text: 'Approve', onclick: decide(r, true) }),
       h('button', { type: 'button', class: 'danger', text: 'Deny', onclick: decide(r, false) })))))));
@@ -421,7 +423,7 @@ function activitySection(l) {
     const recs = res.records || [];
     fill(box, recs.length
       ? h('ul', { class: 'plain-list small' }, recs.map((r) => h('li', {},
-        h('span', { class: 'muted', text: fmtTime(r.time) }), ' ',
+        h('span', { class: 'muted', text: fmtTime(r.time, haZone()) }), ' ',
         h('code', { text: r.event }), ' ',
         h('span', { text: [auditWho(r), auditWhat(r), auditResult(r)].filter(Boolean).join(' · ') }))))
       : h('p', { class: 'muted', text: 'No activity yet.' }));

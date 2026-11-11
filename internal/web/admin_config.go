@@ -27,6 +27,10 @@ type settingsView struct {
 		Refused bool `json:"refused"`
 	} `json:"ma_token"`
 	Tunables tunablesView `json:"tunables"`
+	// TimeZone is HA's IANA time zone. The admin page shows and reads
+	// every time in it. "" means HA has not reported one, and the page
+	// uses the browser's zone.
+	TimeZone string `json:"time_zone"`
 }
 
 // tunablesView holds the other app options, in plain units.
@@ -106,8 +110,15 @@ func newSettingsView(o config.Options, maRefused bool) settingsView {
 	return v
 }
 
-func (s *Server) getSettings(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, newSettingsView(s.deps.Options, s.maRefused.Load()))
+func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	v := newSettingsView(s.deps.Options, s.maRefused.Load())
+	// The settings still load when HA is away; the zone is then "".
+	ctx, cancel := context.WithTimeout(r.Context(), s.deps.Options.HACallTimeout)
+	defer cancel()
+	if inv, err := s.deps.Inventory.Inventory(ctx); err == nil {
+		v.TimeZone = inv.TimeZone
+	}
+	writeJSON(w, http.StatusOK, v)
 }
 
 // templatesView is GET /api/templates. Problems lists what does not

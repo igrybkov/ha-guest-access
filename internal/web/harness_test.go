@@ -62,7 +62,7 @@ func fakeHA() *hatest.Fake {
 			{EntityID: "switch.office", State: "off"},
 			{EntityID: "media_player.living_room", State: "idle"},
 		},
-		Core: ha.Config{Latitude: home.Lat, Longitude: home.Lon},
+		Core: ha.Config{Latitude: home.Lat, Longitude: home.Lon, TimeZone: "America/Chicago"},
 	}
 }
 

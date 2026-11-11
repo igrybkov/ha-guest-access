@@ -7,7 +7,7 @@ import {
   parseVarValue, slugifyID, normalizeTemplatePath, parentPath, fieldFor, groupProblems,
   approvalMode, splitTemplates, linkBadges, rotateWarning, grantSummary,
   auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections, settingsWarnings, addMonth, PRESETS,
-  linkProblems, removePasswordPrompt,
+  linkProblems, removePasswordPrompt, wallToUTC, wallParts, usableZone, browserZone, zoneNote, fmtTime, fmtWindow,
 } from './lib.js';
 
 // ---- Patterns ----
@@ -99,58 +99,148 @@ test('search matches id or name, exact id first', () => {
   assert.equal(searchOptions(opts, '', 2).length, 2);
 });
 
-// ---- Date presets ----
-// Dates are built and read with local getters, so the tests pass in any
-// time zone.
+// ---- Dates in HA's zone ----
+// Every helper gets the zone explicitly, and the tests check exact UTC
+// instants, so they pass in any machine zone. make test-ui runs them
+// with TZ=UTC and TZ=Asia/Tokyo.
 
-const at = (y, m, d, hh = 0, mm = 0) => new Date(y, m - 1, d, hh, mm);
-const parts = (d) => [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()];
+const CHI = 'America/Chicago';
+const KYIV = 'Europe/Kyiv';
+const iso = (d) => d.toISOString();
+const utc = (s) => new Date(s);
 
-test('today: now until midnight tonight', () => {
-  const w = preset('today', at(2026, 11, 11, 14, 30));
+test('wallToUTC on ordinary days', () => {
+  assert.equal(iso(new Date(wallToUTC({ y: 2026, mo: 7, d: 4, h: 12 }, CHI))), '2026-07-04T17:00:00.000Z');
+  assert.equal(iso(new Date(wallToUTC({ y: 2026, mo: 11, d: 11, h: 12 }, CHI))), '2026-11-11T18:00:00.000Z');
+  assert.equal(iso(new Date(wallToUTC({ y: 2026, mo: 7, d: 4, h: 12 }, KYIV))), '2026-07-04T09:00:00.000Z');
+  assert.equal(iso(new Date(wallToUTC({ y: 2026, mo: 11, d: 11, h: 12 }, KYIV))), '2026-11-11T10:00:00.000Z');
+  // Fields may overflow, as with Date.UTC.
+  assert.equal(iso(new Date(wallToUTC({ y: 2026, mo: 11, d: 31 }, CHI))), '2026-12-01T06:00:00.000Z');
+});
+
+test('wallToUTC: a time in the spring-forward gap moves forward', () => {
+  // Chicago skips 02:00 to 03:00 on 8 March 2026. 02:30 becomes 03:30 CDT.
+  assert.equal(iso(new Date(wallToUTC({ y: 2026, mo: 3, d: 8, h: 2, mi: 30 }, CHI))), '2026-03-08T08:30:00.000Z');
+  // Kyiv skips 03:00 to 04:00 on 29 March 2026. 03:30 becomes 04:30 EEST.
+  assert.equal(iso(new Date(wallToUTC({ y: 2026, mo: 3, d: 29, h: 3, mi: 30 }, KYIV))), '2026-03-29T01:30:00.000Z');
+  // The edges of the gap.
+  assert.equal(iso(new Date(wallToUTC({ y: 2026, mo: 3, d: 8, h: 1, mi: 59 }, CHI))), '2026-03-08T07:59:00.000Z');
+  assert.equal(iso(new Date(wallToUTC({ y: 2026, mo: 3, d: 8, h: 3 }, CHI))), '2026-03-08T08:00:00.000Z');
+});
+
+test('wallToUTC: a time in the fall-back overlap takes the first occurrence', () => {
+  // Chicago shows 01:00 to 02:00 twice on 1 November 2026: CDT, then CST.
+  assert.equal(iso(new Date(wallToUTC({ y: 2026, mo: 11, d: 1, h: 1, mi: 30 }, CHI))), '2026-11-01T06:30:00.000Z');
+  // Kyiv shows 03:00 to 04:00 twice on 25 October 2026: EEST, then EET.
+  assert.equal(iso(new Date(wallToUTC({ y: 2026, mo: 10, d: 25, h: 3, mi: 30 }, KYIV))), '2026-10-25T00:30:00.000Z');
+  // Just after the overlap there is one answer.
+  assert.equal(iso(new Date(wallToUTC({ y: 2026, mo: 11, d: 1, h: 2 }, CHI))), '2026-11-01T08:00:00.000Z');
+});
+
+test('wallParts reads the wall clock and weekday in a zone', () => {
+  const t = Date.parse('2026-11-14T00:00:00Z');
+  assert.deepEqual(wallParts(t, CHI), { y: 2026, mo: 11, d: 13, h: 18, mi: 0, s: 0, dow: 5 });
+  assert.deepEqual(wallParts(t, KYIV), { y: 2026, mo: 11, d: 14, h: 2, mi: 0, s: 0, dow: 6 });
+  // Midnight is hour 0, never 24.
+  assert.equal(wallParts(Date.parse('2026-11-12T06:00:00Z'), CHI).h, 0);
+});
+
+test('datetime-local values are wall-clock time in the zone', () => {
+  const d = utc('2026-11-14T00:00:00Z');
+  assert.equal(toLocalInput(d, CHI), '2026-11-13T18:00');
+  assert.equal(toLocalInput(d, KYIV), '2026-11-14T02:00');
+  assert.equal(iso(fromLocalInput('2026-11-13T18:00', CHI)), '2026-11-14T00:00:00.000Z');
+  assert.equal(iso(fromLocalInput('2026-11-14T02:00', KYIV)), '2026-11-14T00:00:00.000Z');
+  assert.equal(iso(fromLocalInput('2026-03-08T02:30', CHI)), '2026-03-08T08:30:00.000Z', 'gap');
+  assert.equal(iso(fromLocalInput('2026-11-01T01:30', CHI)), '2026-11-01T06:30:00.000Z', 'overlap');
+  assert.equal(fromLocalInput('', CHI), null);
+  assert.equal(fromLocalInput('nope', CHI), null);
+  assert.equal(toLocalInput(new Date('x'), CHI), '');
+});
+
+test('today: now until midnight tonight in the zone', () => {
+  const w = preset('today', utc('2026-11-11T20:30:00Z'), CHI); // 14:30 CST
   assert.equal(w.from, null);
-  assert.deepEqual(parts(w.until), [2026, 11, 12, 0, 0]);
+  assert.equal(iso(w.until), '2026-11-12T06:00:00.000Z');
+  // 23:30 UTC is already tomorrow in Kyiv.
+  assert.equal(iso(preset('today', utc('2026-11-11T23:30:00Z'), KYIV).until), '2026-11-12T22:00:00.000Z');
 });
 
-test('1 week: now until the same time 7 days later', () => {
-  const w = preset('week', at(2026, 11, 11, 14, 30));
+test('1 week keeps the time of day in the zone across a DST change', () => {
+  const w = preset('week', utc('2026-11-11T20:30:00Z'), CHI);
   assert.equal(w.from, null);
-  assert.equal(w.until.getDate(), 18);
-  assert.equal(w.until.getMonth() + 1, 11);
+  assert.equal(iso(w.until), '2026-11-18T20:30:00.000Z');
+  // 14:30 CDT on 28 October gives 14:30 CST on 4 November: 7 days and 1 hour.
+  assert.equal(iso(preset('week', utc('2026-10-28T19:30:00Z'), CHI).until), '2026-11-04T20:30:00.000Z');
 });
 
-test('weekend on a weekday: Friday 17:00 to Monday 00:00', () => {
-  const w = preset('weekend', at(2026, 11, 11, 9)); // Wednesday
-  assert.deepEqual(parts(w.from), [2026, 11, 13, 17, 0]);
-  assert.deepEqual(parts(w.until), [2026, 11, 16, 0, 0]);
+test('weekend on a weekday: Friday 17:00 to Monday 00:00 in the zone', () => {
+  const w = preset('weekend', utc('2026-11-11T15:00:00Z'), CHI); // Wednesday 09:00 CST
+  assert.equal(iso(w.from), '2026-11-13T23:00:00.000Z');
+  assert.equal(iso(w.until), '2026-11-16T06:00:00.000Z');
+  const k = preset('weekend', utc('2026-11-11T07:00:00Z'), KYIV); // Wednesday 09:00 EET
+  assert.equal(iso(k.from), '2026-11-13T15:00:00.000Z');
+  assert.equal(iso(k.until), '2026-11-15T22:00:00.000Z');
 });
 
-test('weekend on Friday morning, Friday evening, Saturday and Sunday', () => {
-  assert.deepEqual(parts(preset('weekend', at(2026, 11, 13, 9)).from), [2026, 11, 13, 17, 0]);
-  for (const now of [at(2026, 11, 13, 18), at(2026, 11, 14, 12), at(2026, 11, 15, 23, 59)]) {
-    const w = preset('weekend', now);
-    assert.equal(w.from, null, now.toString());
-    assert.deepEqual(parts(w.until), [2026, 11, 16, 0, 0]);
+test('weekend on Friday evening in the zone, while UTC and Tokyo already have Saturday', () => {
+  // Friday 18:00 CST is Saturday 00:00 UTC and Saturday 09:00 in Tokyo.
+  const w = preset('weekend', utc('2026-11-14T00:00:00Z'), CHI);
+  assert.equal(w.from, null);
+  assert.equal(iso(w.until), '2026-11-16T06:00:00.000Z');
+  // Friday 09:00 CST: the weekend has not started.
+  assert.equal(iso(preset('weekend', utc('2026-11-13T15:00:00Z'), CHI).from), '2026-11-13T23:00:00.000Z');
+  // Saturday and the last minute of Sunday start now.
+  for (const now of ['2026-11-14T18:00:00Z', '2026-11-16T05:59:00Z']) {
+    const x = preset('weekend', utc(now), CHI);
+    assert.equal(x.from, null, now);
+    assert.equal(iso(x.until), '2026-11-16T06:00:00.000Z', now);
   }
+  // Friday 18:00 in Kyiv is still Friday 10:00 in Chicago.
+  const k = preset('weekend', utc('2026-11-13T16:00:00Z'), KYIV);
+  assert.equal(k.from, null);
+  assert.equal(iso(k.until), '2026-11-15T22:00:00.000Z');
 });
 
 test('weekend crosses a month end', () => {
-  const w = preset('weekend', at(2026, 1, 28, 10)); // Wednesday
-  assert.deepEqual(parts(w.from), [2026, 1, 30, 17, 0]);
-  assert.deepEqual(parts(w.until), [2026, 2, 2, 0, 0]);
+  const w = preset('weekend', utc('2026-01-28T16:00:00Z'), CHI); // Wednesday 10:00 CST
+  assert.equal(iso(w.from), '2026-01-30T23:00:00.000Z');
+  assert.equal(iso(w.until), '2026-02-02T06:00:00.000Z');
 });
 
 test('custom is no preset', () => {
-  assert.equal(preset('custom', new Date()), null);
+  assert.equal(preset('custom', new Date(), CHI), null);
 });
 
-test('datetime-local round trip', () => {
-  const d = at(2026, 3, 5, 7, 9);
-  assert.equal(toLocalInput(d), '2026-03-05T07:09');
-  assert.deepEqual(parts(fromLocalInput('2026-03-05T07:09')), [2026, 3, 5, 7, 9]);
-  assert.equal(fromLocalInput(''), null);
-  assert.equal(fromLocalInput('nope'), null);
-  assert.equal(toLocalInput(new Date('x')), '');
+test('an empty or unknown zone falls back to the browser zone', () => {
+  const now = utc('2026-11-14T00:00:00Z');
+  const here = browserZone();
+  assert.ok(here);
+  assert.equal(usableZone(''), here);
+  assert.equal(usableZone('Mars/Olympus_Mons'), here);
+  assert.equal(usableZone(CHI), CHI);
+  for (const p of ['today', 'weekend', 'week', 'month']) {
+    assert.deepEqual(preset(p, now, ''), preset(p, now, here), p);
+  }
+  assert.equal(toLocalInput(now, ''), toLocalInput(now, here));
+  assert.equal(iso(fromLocalInput('2026-11-13T18:00', '')), iso(fromLocalInput('2026-11-13T18:00', here)));
+  assert.equal(fmtTime('2026-11-14T00:00:00Z', ''), fmtTime('2026-11-14T00:00:00Z', here));
+});
+
+test('zoneNote names HA\'s zone, or says the browser zone is used', () => {
+  assert.equal(zoneNote(CHI, 'Asia/Tokyo'), 'Times are in America/Chicago (HA).');
+  assert.equal(zoneNote('', 'Asia/Tokyo'), 'Times are in Asia/Tokyo (this browser). HA has not reported a time zone.');
+  assert.match(zoneNote('Mars/Olympus_Mons', 'Asia/Tokyo'), /Asia\/Tokyo \(this browser\)/);
+});
+
+test('fmtTime and fmtWindow show times in the zone', () => {
+  const t = '2026-11-14T00:00:00Z';
+  const opts = { dateStyle: 'medium', timeStyle: 'short' };
+  assert.equal(fmtTime(t, CHI), new Date(t).toLocaleString(undefined, { ...opts, timeZone: CHI }));
+  assert.notEqual(fmtTime(t, CHI), fmtTime(t, KYIV));
+  assert.equal(fmtTime('', CHI), '');
+  assert.equal(fmtTime('0001-01-01T00:00:00Z', CHI), '');
+  assert.equal(fmtWindow({ valid_until: t }, CHI), `until ${fmtTime(t, CHI)}`);
 });
 
 // ---- Builders ----
@@ -450,27 +540,31 @@ test('link badges count waiting devices', () => {
 
 // ---- Month preset ----
 
-test('1 month: same day and time next month', () => {
-  const got = addMonth(new Date(2026, 4, 12, 15, 30));
-  assert.deepEqual([got.getFullYear(), got.getMonth(), got.getDate(), got.getHours(), got.getMinutes()], [2026, 5, 12, 15, 30]);
-  const p = preset('month', new Date(2026, 4, 12, 15, 30));
+test('1 month: same day and time next month in the zone', () => {
+  const now = utc('2026-05-12T20:30:00Z'); // 15:30 CDT
+  assert.equal(iso(addMonth(now, CHI)), '2026-06-12T20:30:00.000Z');
+  const p = preset('month', now, CHI);
   assert.equal(p.from, null);
-  assert.equal(p.until.getTime(), got.getTime());
+  assert.equal(iso(p.until), '2026-06-12T20:30:00.000Z');
   assert.ok(PRESETS.some(([k]) => k === 'month'));
+  // 18:00 CST in February gives 18:00 CDT in March.
+  assert.equal(iso(addMonth(utc('2026-02-16T00:00:00Z'), CHI)), '2026-03-15T23:00:00.000Z');
 });
 
 test('1 month: a short next month clamps to its last day', () => {
-  const ymd = (d) => [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()];
-  assert.deepEqual(ymd(addMonth(new Date(2026, 0, 31, 9, 15))), [2026, 2, 28, 9, 15]);
-  assert.deepEqual(ymd(addMonth(new Date(2028, 0, 31, 9, 15))), [2028, 2, 29, 9, 15], 'leap year');
-  assert.deepEqual(ymd(addMonth(new Date(2026, 2, 31, 8, 0))), [2026, 4, 30, 8, 0]);
-  assert.deepEqual(ymd(addMonth(new Date(2026, 0, 28, 8, 0))), [2026, 2, 28, 8, 0]);
+  assert.equal(iso(addMonth(utc('2026-01-31T15:15:00Z'), CHI)), '2026-02-28T15:15:00.000Z');
+  assert.equal(iso(addMonth(utc('2028-01-31T15:15:00Z'), CHI)), '2028-02-29T15:15:00.000Z', 'leap year');
+  assert.equal(iso(addMonth(utc('2026-03-31T13:00:00Z'), CHI)), '2026-04-30T13:00:00.000Z');
+  assert.equal(iso(addMonth(utc('2026-01-28T14:00:00Z'), CHI)), '2026-02-28T14:00:00.000Z');
+  // 00:30 on 31 March in Kyiv is still 30 March in UTC. The clamp uses
+  // Kyiv's date: 30 April, 00:30 EEST.
+  assert.equal(iso(addMonth(utc('2026-03-30T21:30:00Z'), KYIV)), '2026-04-29T21:30:00.000Z');
 });
 
 test('1 month: December rolls into January of the next year', () => {
-  const ymd = (d) => [d.getFullYear(), d.getMonth() + 1, d.getDate(), d.getHours(), d.getMinutes()];
-  assert.deepEqual(ymd(addMonth(new Date(2026, 11, 15, 18, 0))), [2027, 1, 15, 18, 0]);
-  assert.deepEqual(ymd(addMonth(new Date(2026, 11, 31, 23, 59))), [2027, 1, 31, 23, 59]);
+  assert.equal(iso(addMonth(utc('2026-12-16T00:00:00Z'), CHI)), '2027-01-16T00:00:00.000Z');
+  // 23:59 CST on 31 December is already 2027 in UTC.
+  assert.equal(iso(addMonth(utc('2027-01-01T05:59:00Z'), CHI)), '2027-02-01T05:59:00.000Z');
 });
 
 // ---- Link problems and passwords ----

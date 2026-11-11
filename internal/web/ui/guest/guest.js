@@ -247,6 +247,8 @@ function showMain(data) {
   startApprovals();
 }
 
+// updateUntil shows the end in the guest's own time zone. The server
+// never sends HA's zone to guests, since it hints at where the home is.
 function updateUntil() {
   if (!view) return;
   $('until').textContent = formatUntil(view.link && view.link.valid_until, Date.now());

@@ -244,6 +244,14 @@ A link is a URL, a validity window and a set of templates plus optional extra ru
 - The window applies to everything on the link, whatever the rules say.
 - A guest's open page stops getting updates within `streams.recheck_s` seconds after the link ends.
 
+### Time zones
+
+- The admin page shows and reads every time in HA's time zone (Settings → System → General). This covers the window inputs, the presets, the link list, devices and the activity log. The editor names the zone above the inputs.
+- The presets use HA's wall clock. **Today** ends at midnight. **This weekend** runs from Friday 17:00 to Monday 00:00. **1 week** and **1 month** keep the time of day.
+- Around a daylight saving change, a time that does not exist moves forward by the gap. For example, 02:30 on a day that jumps from 02:00 to 03:00 becomes 03:30. A time that happens twice means the first one.
+- If HA has not reported a time zone, the admin page uses the browser's zone and says so.
+- Guests see times in their own phone's time zone. The app never tells guests HA's time zone, since it hints at where the home is. Every time the guest page gets is in UTC.
+
 ### One-time use
 
 A link with **one time** on lets each pair of entity and action run once. Other pairs stay available. A guest who unlocks the door once can still dim a light, and can dim it once.
