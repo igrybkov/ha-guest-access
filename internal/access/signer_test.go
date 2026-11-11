@@ -87,6 +87,8 @@ func TestSignerBinding(t *testing.T) {
 	exp := t0.Add(time.Hour)
 	loc := s.Sign("linkA", exp)
 	ses := s.SignSession("linkA", "p1", exp)
+	dev := s.SignDevice("linkA", "d1", exp)
+	sesD1 := s.SignSession("linkA", "d1", exp) // same id bytes as dev
 	other := NewSigner(bytes.Repeat([]byte{0x43}, MinKeyLen))
 
 	checks := []struct {
@@ -101,6 +103,13 @@ func TestSignerBinding(t *testing.T) {
 		{"session for another link", ok2(s.VerifySession("linkB", ses, t0))},
 		{"location from another key", other.Verify("linkA", loc, t0)},
 		{"session from another key", ok2(other.VerifySession("linkA", ses, t0))},
+		{"device used as a location", s.Verify("linkA", dev, t0)},
+		{"device used as a session", ok2(s.VerifySession("linkA", dev, t0))},
+		{"session used as a device", ok3(s.VerifyDevice("linkA", sesD1, t0))},
+		{"location used as a device", ok3(s.VerifyDevice("linkA", loc, t0))},
+		{"device for another link", ok3(s.VerifyDevice("linkB", dev, t0))},
+		{"device from another key", ok3(other.VerifyDevice("linkA", dev, t0))},
+		{"empty device token", ok3(s.VerifyDevice("linkA", "", t0))},
 		{"empty token", s.Verify("linkA", "", t0)},
 		{"empty session token", ok2(s.VerifySession("linkA", "", t0))},
 		{"huge token", s.Verify("linkA", string(bytes.Repeat([]byte("A"), 1<<20)), t0)},
@@ -129,10 +138,14 @@ func TestSignerTampered(t *testing.T) {
 	for name, tok := range map[string]string{
 		"location": s.Sign("l1", exp),
 		"session":  s.SignSession("l1", "p1", exp),
+		"device":   s.SignDevice("l1", "d1", exp),
 	} {
 		verify := func(tk string) bool {
-			if name == "location" {
+			switch name {
+			case "location":
 				return s.Verify("l1", tk, t0)
+			case "device":
+				return ok3(s.VerifyDevice("l1", tk, t0))
 			}
 			_, ok := s.VerifySession("l1", tk, t0)
 			return ok
@@ -195,18 +208,50 @@ func TestSignSessionBadIDPanics(t *testing.T) {
 
 func ok2(_ string, ok bool) bool { return ok }
 
+func ok3(_ string, _ time.Time, ok bool) bool { return ok }
+
+func TestSignerDevice(t *testing.T) {
+	s := NewSigner(testKey)
+	exp := t0.Add(48 * time.Hour)
+	tok := s.SignDevice("l1", "3f9a1c0d7e2b4a65", exp)
+	id, gotExp, ok := s.VerifyDevice("l1", tok, t0)
+	if !ok || id != "3f9a1c0d7e2b4a65" || !gotExp.Equal(exp) {
+		t.Fatalf("VerifyDevice = %q, %v, %v", id, gotExp, ok)
+	}
+	if _, _, ok := s.VerifyDevice("l1", tok, exp); ok {
+		t.Error("device token verifies at its expiry")
+	}
+	if _, _, ok := s.VerifyDevice("l1", tok, exp.Add(-time.Second)); !ok {
+		t.Error("device token fails a second before its expiry")
+	}
+	for _, id := range []string{"", string(bytes.Repeat([]byte("x"), maxPasswordIDLen+1))} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("SignDevice with a %d-byte id did not panic", len(id))
+				}
+			}()
+			s.SignDevice("l1", id, exp)
+		}()
+	}
+}
+
 // FuzzVerify feeds random tokens. None may verify, and none may panic.
 func FuzzVerify(f *testing.F) {
 	s := NewSigner(testKey)
 	exp := t0.Add(time.Hour)
 	good := s.Sign("l1", exp)
 	goodSes := s.SignSession("l1", "p1", exp)
-	for _, seed := range []string{"", "A", good[:len(good)-1], good + "A", goodSes[:10], "AQE"} {
+	goodDev := s.SignDevice("l1", "d1", exp)
+	for _, seed := range []string{"", "A", good[:len(good)-1], good + "A", goodSes[:10], "AQE", goodDev[:len(goodDev)-2], "AQM"} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, tok string) {
-		if tok == good || tok == goodSes {
+		if tok == good || tok == goodSes || tok == goodDev {
 			return
+		}
+		if _, _, ok := s.VerifyDevice("l1", tok, t0); ok {
+			t.Fatalf("random device token %q verifies", tok)
 		}
 		if s.Verify("l1", tok, t0) {
 			t.Fatalf("random token %q verifies", tok)

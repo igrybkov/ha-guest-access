@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Link is one guest link in links.yaml. It grants the union of its
@@ -31,6 +32,12 @@ type Link struct {
 	// Passwords lock the link. With none, the slug alone is enough. With
 	// any, the guest must enter one of them first.
 	Passwords []LinkPassword `yaml:"passwords,omitempty" json:"passwords,omitempty"`
+	// Approval turns on device approval. Both false means off.
+	Approval Approval `yaml:"approval,omitempty" json:"approval"`
+	// Devices are the approved devices. Only the approval flow adds them;
+	// an admin edit never sets them. Their cap is an app option, enforced
+	// when one is added, so lowering it never breaks a saved link.
+	Devices []LinkDevice `yaml:"devices,omitempty" json:"devices,omitempty"`
 	// Used lists the pairs a one-time link has used up.
 	Used    []Use `yaml:"used,omitempty" json:"used,omitempty"`
 	Revoked bool  `yaml:"revoked,omitempty" json:"revoked,omitempty"`
@@ -58,6 +65,78 @@ type LinkPassword struct {
 	// (access.HashPassword). Nothing is trimmed or normalized.
 	Hash      string    `yaml:"hash" json:"-"`
 	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
+}
+
+// Approval says who may admit a new device to a link.
+//
+//   - Both false: off. Any browser with the slug (and password) gets in.
+//   - Manual: the admin (or HA) approves each new device.
+//   - SelfService: an approved device of the same link can approve new
+//     ones.
+//   - SelfService without Manual is claim mode: the first device is
+//     approved at once, and later ones need an approved device.
+type Approval struct {
+	Manual      bool `yaml:"manual,omitempty" json:"manual"`
+	SelfService bool `yaml:"self_service,omitempty" json:"self_service"`
+}
+
+// On reports whether new devices need approval.
+func (a Approval) On() bool { return a.Manual || a.SelfService }
+
+// Claim reports whether the first device approves itself.
+func (a Approval) Claim() bool { return a.SelfService && !a.Manual }
+
+// MaxDeviceTextLen caps LinkDevice.Label and LinkDevice.Device, in bytes.
+const MaxDeviceTextLen = 64
+
+// Values of LinkDevice.ApprovedBy. A device approved by another device has
+// ApprovedByDevicePrefix and that device's id.
+const (
+	ApprovedByAdmin        = "admin"
+	ApprovedByHA           = "ha"
+	ApprovedByClaim        = "claim"
+	ApprovedByDevicePrefix = "device:"
+)
+
+// LinkDevice is one approved device of a link. Its signed cookie names the
+// link and the device id; deleting the device revokes it at once.
+type LinkDevice struct {
+	ID string `yaml:"id" json:"id"`
+	// Label is the password label the device used, if the link has
+	// passwords.
+	Label string `yaml:"label,omitempty" json:"label,omitempty"`
+	// Device is a short summary of the browser, such as "iPhone, Safari".
+	Device     string    `yaml:"device,omitempty" json:"device,omitempty"`
+	ApprovedAt time.Time `yaml:"approved_at" json:"approved_at"`
+	// ApprovedBy is one of the ApprovedBy values.
+	ApprovedBy string    `yaml:"approved_by" json:"approved_by"`
+	LastSeenAt time.Time `yaml:"last_seen_at,omitempty" json:"last_seen_at,omitzero"`
+}
+
+// Device returns the approved device with id.
+func (l Link) Device(id string) (LinkDevice, bool) {
+	for _, d := range l.Devices {
+		if d.ID == id {
+			return d, true
+		}
+	}
+	return LinkDevice{}, false
+}
+
+// validApprovedBy checks the shape only. It never checks that an approver
+// device still exists: revoking an approver must not break the link.
+func validApprovedBy(s string) bool {
+	switch s {
+	case ApprovedByAdmin, ApprovedByHA, ApprovedByClaim:
+		return true
+	}
+	id, ok := strings.CutPrefix(s, ApprovedByDevicePrefix)
+	return ok && idRe.MatchString(id)
+}
+
+// hasControl reports whether s holds a control character.
+func hasControl(s string) bool {
+	return strings.ContainsFunc(s, unicode.IsControl)
 }
 
 // argon2Prefix starts every argon2id PHC string. A hash without it is
@@ -178,6 +257,28 @@ func (l Link) validate(p *problems, path string) {
 		}
 		if !strings.HasPrefix(pw.Hash, argon2Prefix) {
 			p.add(join(at, "hash"), "must be an argon2id hash")
+		}
+	}
+	devIDs := map[string]bool{}
+	for i, d := range l.Devices {
+		at := fmt.Sprintf("%s[%d]", join(path, "devices"), i)
+		switch {
+		case !idRe.MatchString(d.ID):
+			p.add(join(at, "id"), "must be 1-64 of a-z, 0-9, _ and -")
+		case devIDs[d.ID]:
+			p.add(join(at, "id"), "%q is used twice", d.ID)
+		}
+		devIDs[d.ID] = true
+		for _, f := range []struct{ name, v string }{{"label", d.Label}, {"device", d.Device}} {
+			if len(f.v) > MaxDeviceTextLen || hasControl(f.v) {
+				p.add(join(at, f.name), "must be at most %d bytes with no control characters", MaxDeviceTextLen)
+			}
+		}
+		if d.ApprovedAt.IsZero() {
+			p.add(join(at, "approved_at"), "is required")
+		}
+		if !validApprovedBy(d.ApprovedBy) {
+			p.add(join(at, "approved_by"), "must be admin, ha, claim or device:<id>")
 		}
 	}
 	if l.UseCount < 0 {

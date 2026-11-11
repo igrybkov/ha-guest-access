@@ -12,19 +12,22 @@ import (
 // MinKeyLen is the shortest HMAC key NewSigner takes, in bytes.
 const MinKeyLen = 32
 
-// Token purposes. A token signed for one never passes the check of the
-// other, so a location cookie can't stand in for a session and back.
+// Token purposes. A token signed for one never passes the check of
+// another, so a location cookie can't stand in for a session, a device
+// token for either, and back.
 const (
 	purposeLocation byte = 1
 	purposeSession  byte = 2
+	purposeDevice   byte = 3
 )
 
 // tokenVersion is the first byte of every token. Bump it to change the
 // format; old tokens then fail and guests sign in again.
 const tokenVersion byte = 1
 
-// maxPasswordIDLen caps the password id in a session token. It keeps the
-// token small and its length prefix one byte.
+// maxPasswordIDLen caps the password id in a session token, and the
+// device id in a device token. It keeps the token small and its length
+// prefix one byte.
 const maxPasswordIDLen = 255
 
 // maxTokenLen caps the encoded token before decoding. The longest valid
@@ -35,10 +38,11 @@ const maxTokenLen = 512
 // padding) of:
 //
 //	version (1) | purpose (1) | expiry, Unix seconds (8) |
-//	[session only: password id length (1) | password id] | HMAC-SHA256 (32)
+//	[session and device only: id length (1) | id] | HMAC-SHA256 (32)
 //
-// The HMAC covers the version, purpose, expiry, the length-prefixed link
-// id and the length-prefixed password id. The link id is not in the token:
+// The id is the password id of a session token and the device id of a
+// device token. The HMAC covers the version, purpose, expiry, the
+// length-prefixed link id and the length-prefixed id. The link id is not in the token:
 // the caller passes it, so a token for link A fails for link B.
 type Signer struct {
 	key []byte
@@ -85,10 +89,42 @@ func (s *Signer) VerifySession(linkID, token string, now time.Time) (passwordID 
 	return s.verify(purposeSession, linkID, token, now)
 }
 
+// SignDevice returns a device token for device deviceID of linkID. It
+// expires at exp, the link's end. The caller must also check that the
+// device is still on the link, so a revoke works at once. It panics on an
+// empty deviceID or one over 255 bytes.
+func (s *Signer) SignDevice(linkID, deviceID string, exp time.Time) string {
+	if deviceID == "" || len(deviceID) > maxPasswordIDLen {
+		panic(fmt.Sprintf("access: device id length %d out of range", len(deviceID)))
+	}
+	return s.sign(purposeDevice, linkID, deviceID, exp)
+}
+
+// VerifyDevice checks a device token for linkID at now. It returns the
+// device id and the token's expiry, so the caller can renew a token whose
+// link was extended. Location and session tokens never pass here, and
+// device tokens never pass Verify or VerifySession.
+func (s *Signer) VerifyDevice(linkID, token string, now time.Time) (deviceID string, exp time.Time, ok bool) {
+	id, ok := s.verify(purposeDevice, linkID, token, now)
+	if !ok {
+		return "", time.Time{}, false
+	}
+	return id, tokenExpiry(token), true
+}
+
+// tokenExpiry reads the expiry of a token that verify already accepted.
+func tokenExpiry(token string) time.Time {
+	raw, _ := base64.RawURLEncoding.Strict().DecodeString(token)
+	return time.Unix(int64(binary.BigEndian.Uint64(raw[2:10])), 0).UTC()
+}
+
+// hasID reports whether tokens of purpose carry an id.
+func hasID(purpose byte) bool { return purpose == purposeSession || purpose == purposeDevice }
+
 func (s *Signer) sign(purpose byte, linkID, passwordID string, exp time.Time) string {
 	body := []byte{tokenVersion, purpose}
 	body = binary.BigEndian.AppendUint64(body, uint64(exp.Unix()))
-	if purpose == purposeSession {
+	if hasID(purpose) {
 		body = append(body, byte(len(passwordID)))
 		body = append(body, passwordID...)
 	}
@@ -97,7 +133,7 @@ func (s *Signer) sign(purpose byte, linkID, passwordID string, exp time.Time) st
 }
 
 // verify parses token, checks the MAC first and the expiry after, and
-// returns the password id (empty for location tokens).
+// returns the id (empty for location tokens).
 func (s *Signer) verify(purpose byte, linkID, token string, now time.Time) (string, bool) {
 	if len(token) == 0 || len(token) > maxTokenLen || !isBase64URL(token) {
 		return "", false
@@ -114,7 +150,7 @@ func (s *Signer) verify(purpose byte, linkID, token string, now time.Time) (stri
 	}
 	body, sum := raw[:len(raw)-sha256.Size], raw[len(raw)-sha256.Size:]
 	var passwordID string
-	if purpose == purposeSession {
+	if hasID(purpose) {
 		if len(body) < head+1 {
 			return "", false
 		}

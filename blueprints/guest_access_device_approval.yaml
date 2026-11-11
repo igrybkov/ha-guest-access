@@ -1,0 +1,87 @@
+blueprint:
+  name: Guest Access device approval
+  description: >-
+    When a new device asks to use a guest link, send an actionable
+    notification to your phone. Tap Approve or Deny. The guest sees a short
+    code on their screen; the notification shows the same code, so you can
+    check it is them. You never type the code anywhere.
+  domain: automation
+  source_url: https://github.com/igrybkov/ha-guest-access/blob/main/blueprints/guest_access_device_approval.yaml
+  author: Illia Grybkov
+  homeassistant:
+    min_version: 2024.10.0
+  input:
+    notify_device:
+      name: Device to notify
+      description: Device needs to run the official Home Assistant app to receive notifications.
+      selector:
+        device:
+          filter:
+            integration: mobile_app
+
+# One run per request or tap, so two guests at the door both get through.
+mode: parallel
+max: 20
+
+triggers:
+  - trigger: event
+    id: request
+    event_type: guest_access_device_request
+  - trigger: event
+    id: decision
+    event_type: mobile_app_notification_action
+
+variables:
+  approve_prefix: GUEST_ACCESS_APPROVE_
+  deny_prefix: GUEST_ACCESS_DENY_
+
+conditions:
+  # Taps on other notifications are not ours.
+  - condition: template
+    value_template: >-
+      {{ trigger.id == 'request'
+         or (trigger.event.data.action | default('') | string).startswith(approve_prefix)
+         or (trigger.event.data.action | default('') | string).startswith(deny_prefix) }}
+
+actions:
+  - choose:
+      - alias: "A new device asks for access"
+        conditions:
+          - condition: trigger
+            id: request
+        sequence:
+          - alias: "Send the actionable notification"
+            domain: mobile_app
+            type: notify
+            device_id: !input notify_device
+            title: >-
+              {% set d = trigger.event.data %}{{ d.link_name }}{{ ': ' ~ d.label if d.label else '' }} wants a new device in
+            message: >-
+              {% set d = trigger.event.data %}{{ d.device }}. Code {{ d.code }}. Check that the guest sees this code.
+            data:
+              tag: "guest_access_{{ trigger.event.data.request_id }}"
+              actions:
+                - action: "{{ approve_prefix ~ trigger.event.data.request_id }}"
+                  title: Approve
+                  authenticationRequired: true
+                - action: "{{ deny_prefix ~ trigger.event.data.request_id }}"
+                  title: Deny
+                  destructive: true
+      - alias: "Approve was tapped"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.action.startswith(approve_prefix) }}"
+        sequence:
+          - event: guest_access_device_decision
+            event_data:
+              request_id: "{{ trigger.event.data.action[approve_prefix | length:] }}"
+              approve: true
+      - alias: "Deny was tapped"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.event.data.action.startswith(deny_prefix) }}"
+        sequence:
+          - event: guest_access_device_decision
+            event_data:
+              request_id: "{{ trigger.event.data.action[deny_prefix | length:] }}"
+              approve: false
