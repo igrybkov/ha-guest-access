@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 - Links are on or off now. **Revoke** is gone. **Deactivate** turns a
   link off, and **Activate** turns it on again, as often as you like.
