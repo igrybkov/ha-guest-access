@@ -82,6 +82,21 @@ func (a *app) lastRequestEvent() map[string]any {
 	return last
 }
 
+// waitAudit waits for an audit record of event. Tests wait on the audit
+// file, not on device/status: that route is rate limited, so a tight poll
+// runs out of tokens on a slow machine before HA's decision lands.
+func (a *app) waitAudit(event string) {
+	a.t.Helper()
+	waitFor(a.t, event, func() bool {
+		for _, r := range a.auditRecords() {
+			if r.Event == event {
+				return true
+			}
+		}
+		return false
+	})
+}
+
 func approvalApp(t *testing.T) *app {
 	a := startApp(t, appOpts{})
 	waitFor(t, "decision subscription", func() bool { return a.ha.Subscribers(approval.EventDeviceDecision) > 0 })
@@ -116,7 +131,10 @@ func TestE2EApprovalManualByHA(t *testing.T) {
 		t.Errorf("status while waiting: %s", s)
 	}
 	a.ha.Emit(approval.EventDeviceDecision, map[string]any{"request_id": ev["request_id"], "approve": true})
-	waitFor(t, "approval", func() bool { return b.status(l, "device/status", nil) == "approved" })
+	a.waitAudit("device.approved")
+	if s := b.status(l, "device/status", nil); s != "approved" {
+		t.Fatalf("status after approval: %s", s)
+	}
 	if c := b.act(l); c != 200 {
 		t.Fatalf("act after approval: %d", c)
 	}
@@ -138,7 +156,10 @@ func TestE2EApprovalDeny(t *testing.T) {
 	b.do("POST", l, "device/request", nil)
 	ev := a.lastRequestEvent()
 	a.ha.Emit(approval.EventDeviceDecision, map[string]any{"request_id": ev["request_id"], "approve": false})
-	waitFor(t, "denial", func() bool { return b.status(l, "device/status", nil) == "denied" })
+	a.waitAudit("device.denied")
+	if s := b.status(l, "device/status", nil); s != "denied" {
+		t.Fatalf("status after deny: %s", s)
+	}
 	if c := b.act(l); c != 403 {
 		t.Errorf("act after deny: %d", c)
 	}
