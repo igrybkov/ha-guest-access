@@ -49,10 +49,14 @@ async function remove(l, btn, after) {
 }
 
 // linkActions are the buttons for one link. afterDelete defaults to after.
-function linkActions(l, after, { open = true, afterDelete = after } = {}) {
+function linkActions(l, after, { open = true, copy = false, afterDelete = after } = {}) {
   const live = l.status !== 'revoked';
   return h('div', { class: 'actions' },
     open && h('a', { class: 'button', href: `#/links/edit/${encodeURIComponent(l.id)}`, text: 'Open' }),
+    copy && live && h('button', {
+      type: 'button', text: l.url ? 'Copy URL' : 'Copy path', 'aria-label': `Copy the URL of ${linkLabel(l)}`,
+      onclick: () => copyText(l.url || l.path),
+    }),
     live && h('button', { type: 'button', text: 'New URL', onclick: (e) => rotate(l, e.currentTarget, after) }),
     live && h('button', { type: 'button', class: 'danger', text: 'Revoke', onclick: (e) => revoke(l, e.currentTarget, after) }),
     h('button', { type: 'button', class: 'danger', text: 'Delete', onclick: (e) => remove(l, e.currentTarget, afterDelete) }));
@@ -78,7 +82,7 @@ async function list(view) {
       (l.extra || []).length > 0 && h('div', { class: 'muted', text: `+ ${l.extra.length} extra rule${l.extra.length > 1 ? 's' : ''}` })),
     h('td', { class: 'num', text: String(l.use_count || 0) }),
     h('td', { class: 'small', text: l.last_used_at ? fmtTime(l.last_used_at, haZone()) : 'Never' }),
-    h('td', {}, linkActions(l, reload, { open: false }))));
+    h('td', {}, linkActions(l, reload, { open: false, copy: true }))));
   fill(view, 
     h('div', { class: 'toolbar' }, h('h1', { text: 'Links' }),
       h('a', { class: 'button primary', href: '#/links/new', text: 'New link' })),

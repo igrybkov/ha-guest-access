@@ -138,8 +138,11 @@ export async function copyText(text, input) {
     if (input) {
       input.focus();
       input.select();
+      toast('Press Ctrl+C or Cmd+C to copy', 'error');
+    } else {
+      // No field to select: show the text so it can still be copied.
+      toast(`Copy did not work. ${text}`, 'error');
     }
-    toast('Press Ctrl+C or Cmd+C to copy', 'error');
   }
 }
 

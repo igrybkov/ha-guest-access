@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Admin: a Copy URL button on each link in the Links list.
 - A link's name is optional and for the admin only. Guests no longer see
   it: the guest page shows the link's own title, else the global
   `guest.title`. A new link starts with a friendly made-up name such as
