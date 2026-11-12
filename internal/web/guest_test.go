@@ -670,6 +670,14 @@ func TestGuestParty(t *testing.T) {
 	if u := decode[map[string]string](t, h.g(req{method: "GET", path: "/g/" + l.Slug + "/party"}))["url"]; u != "https://ma.example/party?code=x" {
 		t.Errorf("url = %q", u)
 	}
+	// A template with no rules, only for the party: its own access
+	// decides. No access: shown. Local only, guest outside: hidden.
+	if p, code := party(h, h.link("party_only")); !p || code != 200 {
+		t.Errorf("party-only template: %v %d", p, code)
+	}
+	if p, code := party(h, h.link("party_local")); p || code != 404 {
+		t.Errorf("party-only template, local only, guest outside: %v %d", p, code)
+	}
 	// MA times out: no URL, and quickly.
 	h = newHarness(t, withMA(stubMA{block: true}), func(o *config.Options, _ *Deps) { o.MATimeout = 50 * time.Millisecond })
 	start := time.Now()

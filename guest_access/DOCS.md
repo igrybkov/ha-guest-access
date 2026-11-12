@@ -588,7 +588,7 @@ To turn it on:
 1. Set `music_assistant.url` to your MA address, such as `http://d5369777-music-assistant:8095`.
 2. Create a long-lived token in MA (look in your MA user profile) and put it in `music_assistant.token`.
 3. Turn on guest access for the party in MA's party settings.
-4. Put `party: true` on a template. Links that use it show a "Join the party" button when the rules' access passes.
+4. Put `party: true` on a template. Links that use it show a "Join the party" button when the rules' access passes. A template can also have no rules, only for the party. Its own access then decides, and with none set the button always shows.
 
 The app asks MA for the join URL each time the page needs it. The call times out after `music_assistant.timeout_ms` milliseconds (2000). If MA is down, slow or refuses the token, the button is left out and nothing else changes.
 

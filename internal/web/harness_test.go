@@ -96,6 +96,9 @@ func testTemplates() []model.Template {
 		{ID: "music", Name: "Music", Party: true, Rules: []model.Rule{{
 			Select: model.Selector{Entities: []string{"media_player.living_room"}}, Actions: []string{"media_player.volume_set"},
 		}}},
+		// Templates with no rules, only for the party.
+		{ID: "party_only", Name: "Party", Party: true},
+		{ID: "party_local", Name: "Party at home", Party: true, Access: &model.Access{Network: model.NetworkLocal}},
 	}
 }
 

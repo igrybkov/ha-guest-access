@@ -200,7 +200,10 @@ func Resolve(link model.Link, templates []model.Template, inv model.Inventory) (
 			continue
 		}
 		t := templates[i]
-		if len(t.Rules) == 0 {
+		switch {
+		case len(t.Rules) == 0 && t.Party:
+			r.warn(id, -1, "This template has no rules, so it only shows the party link.")
+		case len(t.Rules) == 0:
 			r.warn(id, -1, "This template has no rules yet, so it grants nothing.")
 		}
 		for j, rule := range t.Rules {

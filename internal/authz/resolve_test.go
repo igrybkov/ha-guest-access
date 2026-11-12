@@ -306,6 +306,7 @@ func TestResolveEmpty(t *testing.T) {
 		{"empty link", model.Link{}, []model.Template{empty}, house(), Warning{Rule: -1, Message: "This link grants nothing yet. Add a template or a rule."}},
 		{"template with no rules", model.Link{TemplateIDs: []string{"empty"}}, []model.Template{empty}, house(), Warning{Template: "empty", Rule: -1, Message: "This template has no rules yet, so it grants nothing."}},
 		{"template with empty rules", model.Link{TemplateIDs: []string{"empty"}}, []model.Template{{ID: "empty", Name: "E", Rules: []model.Rule{}}}, house(), Warning{Template: "empty", Rule: -1, Message: "This template has no rules yet, so it grants nothing."}},
+		{"party template with no rules", model.Link{TemplateIDs: []string{"party"}}, []model.Template{{ID: "party", Name: "P", Party: true}}, house(), Warning{Template: "party", Rule: -1, Message: "This template has no rules, so it only shows the party link."}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			g, w := Resolve(tc.link, tc.tpls, tc.inv)

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Fix: a template with **Party** on and no rules now shows the Music
+  Assistant party link. Before, the party link needed a rule whose
+  access passed, so a template made only for the party never showed
+  it. Such a template uses its own access settings, if any.
+
 ## 0.5.0
 
 - Links are on or off now. **Revoke** is gone. **Deactivate** turns a

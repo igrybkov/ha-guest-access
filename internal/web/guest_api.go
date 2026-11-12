@@ -372,7 +372,8 @@ func guestBranding(gs model.GuestSettings, l model.Link) model.GuestSettings {
 
 // partyAllowed reports whether the guest page shows the party button:
 // Music Assistant is set up, and a template of the link with party: true
-// has a rule whose access passes now. It never calls MA.
+// has a rule whose access passes now, or has no rules and its own access
+// passes. It never calls MA.
 func (s *Server) partyAllowed(g *guestReq, ts []model.Template, acc accessCheck) bool {
 	if !s.deps.Options.MusicAssistantEnabled() {
 		return false
@@ -380,6 +381,18 @@ func (s *Server) partyAllowed(g *guestReq, ts []model.Template, acc accessCheck)
 	for _, id := range g.link.TemplateIDs {
 		i := slices.IndexFunc(ts, func(t model.Template) bool { return t.ID == id })
 		if i < 0 || !ts[i].Party {
+			continue
+		}
+		// A template with no rules can exist only for the party. Its own
+		// access then decides, else no limits.
+		if len(ts[i].Rules) == 0 {
+			var own model.Access
+			if ts[i].Access != nil {
+				own = *ts[i].Access
+			}
+			if acc.allow(own) {
+				return true
+			}
 			continue
 		}
 		for r := range ts[i].Rules {
