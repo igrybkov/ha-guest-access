@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - Admin: a Copy URL button on each link in the Links list. New URL
   copies the new URL to the clipboard right away.
