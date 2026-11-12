@@ -49,8 +49,8 @@ func TestE2EAuditActDenials(t *testing.T) {
 	light := map[string]any{"entity_id": "light.guest_room", "action": "light.turn_on"}
 
 	all := a.newLink(map[string]any{"templates": []string{"guest_room", "entry", "office"}})
-	revoked := a.newLink(map[string]any{"templates": []string{"guest_room"}})
-	a.adminJSON("POST", "/api/links/"+revoked.ID+"/revoke", map[string]any{})
+	off := a.newLink(map[string]any{"templates": []string{"guest_room"}})
+	a.adminJSON("POST", "/api/links/"+off.ID+"/deactivate", map[string]any{})
 	locked := a.newLink(map[string]any{"templates": []string{"guest_room"}})
 	a.adminJSON("POST", "/api/links/"+locked.ID+"/passwords", map[string]any{"label": "Anna", "password": "pw"})
 	approve := a.newLink(map[string]any{"templates": []string{"guest_room"}, "approval": map[string]any{"manual": true}})
@@ -64,7 +64,7 @@ func TestE2EAuditActDenials(t *testing.T) {
 		reason string
 		send   func() reply
 	}{
-		{"inactive", func() reply { return a.act(revoked, "light.guest_room", "light.turn_on", nil) }},
+		{"inactive", func() reply { return a.act(off, "light.guest_room", "light.turn_on", nil) }},
 		{"no_session", func() reply { return a.act(locked, "light.guest_room", "light.turn_on", nil) }},
 		{"session_invalid", func() reply {
 			return a.act(locked, "light.guest_room", "light.turn_on", nil, &http.Cookie{Name: "ga_session_" + locked.ID, Value: "AQIAAAAAZ2ZnZ2ZnZ2ZnZ2Zn"})

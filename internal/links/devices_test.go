@@ -99,11 +99,15 @@ func TestAddDevice(t *testing.T) {
 func TestAddDeviceInactiveLink(t *testing.T) {
 	s := newStore(t, t.TempDir())
 	l := mustCreate(t, s, draft(), "")
-	if err := s.Revoke(l.ID); err != nil {
+	if _, err := s.Deactivate(l.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.AddDevice(l.ID, newDevice(model.ApprovedByAdmin), maxDev); !errors.Is(err, ErrInactive) {
-		t.Errorf("revoked link: %v", err)
+		t.Errorf("inactive link: %v", err)
+	}
+	expired := mustCreate(t, s, func() model.Link { d := draft(); d.ValidUntil = t0; return d }(), "")
+	if _, err := s.AddDevice(expired.ID, newDevice(model.ApprovedByAdmin), maxDev); !errors.Is(err, ErrInactive) {
+		t.Errorf("expired link: %v", err)
 	}
 }
 

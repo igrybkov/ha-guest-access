@@ -10,7 +10,8 @@ import {
   auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections, settingsWarnings, addMonth, PRESETS,
   linkProblems, removePasswordPrompt, wallToUTC, wallParts, usableZone, browserZone, zoneNote, fmtTime, fmtWindow,
   PENDING_ROUTE, wantsPending, haRoutePath, pollMs, ago, pendingRows, pendingBadge,
-  pickPreset, formPreset, needsEnd, INACTIVE_HINT, STATUS_LABELS,
+  pickPreset, formPreset, needsEnd, INACTIVE_HINT, STATUS_LABELS, PRESET_HINTS, DAYS_MAX, DAYS_DEFAULT, daysValue, daysEnd, fmtUntil,
+  DEACTIVATE_NOTE, NO_WINDOW, SUGGEST_NEW_URL_NOTE, endsAfter, activateChoices, activateWindow, activateBody, activateSummary,
   entityTextProblems, entityRow, entityTextMap, ENTITY_NAME_MAX, ENTITY_DESCRIPTION_MAX,
 } from './lib.js';
 
@@ -343,7 +344,7 @@ const linkView = {
   valid_until: '2026-11-16T06:00:00Z', templates: ['guest'],
   extra: [{ select: { entities: ['lock.front'] }, actions: ['lock.unlock'], access: { near_home_m: 200 } }],
   one_time: true, passwords: [{ id: 'p1', label: 'Anna', created_at: '2026-11-01T10:00:00Z' }],
-  used: [], use_count: 3, last_used_at: '2026-11-02T10:00:00Z', revoked: false,
+  used: [], use_count: 3, last_used_at: '2026-11-02T10:00:00Z',
   approval: { manual: false, self_service: true }, devices: [{ id: 'd1' }],
   status: 'active', path: '/g/secret-slug-123', url: 'https://x/g/secret-slug-123', warnings: [],
 };
@@ -1061,4 +1062,174 @@ test('entityTextMap reads the API body', () => {
   assert.equal(m.get('light.a').name, 'Lamp');
   assert.equal(entityTextMap({}).size, 0);
   assert.equal(entityTextMap(null).size, 0);
+});
+
+// ---- Days preset ----
+
+test('Days: the input takes a whole number from 1 to DAYS_MAX', () => {
+  for (const [s, want] of [['1', 1], [' 10 ', 10], [String(DAYS_MAX), DAYS_MAX], [3, 3]]) assert.equal(daysValue(s), want, String(s));
+  for (const s of ['', '0', '-1', '1.5', '1e2', 'x', String(DAYS_MAX + 1), null, undefined]) assert.equal(daysValue(s), null, String(s));
+  assert.ok(daysValue(DAYS_DEFAULT));
+  assert.ok(PRESETS.some(([k]) => k === 'days'));
+  assert.deepEqual(PRESETS.at(-1), ['inactive', 'Inactive']);
+});
+
+test('Days: 1 day is Today, N days end at midnight after day N', () => {
+  const now = utc('2026-11-11T20:30:00Z'); // Wednesday 14:30 CST
+  assert.equal(iso(daysEnd(1, now, CHI)), iso(preset('today', now, CHI).until));
+  // Day 10 is Friday Nov 20; it ends at midnight, Saturday Nov 21 00:00.
+  assert.equal(iso(daysEnd(10, now, CHI)), '2026-11-21T06:00:00.000Z');
+  const p = preset('days', now, CHI, 10);
+  assert.equal(p.from, null);
+  assert.equal(iso(p.until), '2026-11-21T06:00:00.000Z');
+  assert.equal(iso(preset('days', now, KYIV, '2').until), '2026-11-12T22:00:00.000Z');
+  assert.equal(preset('days', now, CHI, 0), null);
+  assert.equal(preset('days', now, CHI, ''), null);
+});
+
+test('Days: a DST change inside the range keeps midnight', () => {
+  // Chicago falls back on Nov 1. Day 10 from Wed Oct 28 ends Sat Nov 7 00:00 CST.
+  assert.equal(iso(daysEnd(10, utc('2026-10-28T19:30:00Z'), CHI)), '2026-11-07T06:00:00.000Z');
+  // Chicago springs forward on Mar 8. Day 5 from Thu Mar 5 ends Tue Mar 10 00:00 CDT.
+  assert.equal(iso(daysEnd(5, utc('2026-03-05T18:00:00Z'), CHI)), '2026-03-10T05:00:00.000Z');
+  // Kyiv falls back on Oct 25. Day 10 from Tue Oct 20 ends Fri Oct 30 00:00 EET.
+  assert.equal(iso(daysEnd(10, utc('2026-10-20T09:00:00Z'), KYIV)), '2026-10-29T22:00:00.000Z');
+  // Kyiv springs forward on Mar 29. Day 3 from Sat Mar 28 ends Tue Mar 31 00:00 EEST.
+  assert.equal(iso(daysEnd(3, utc('2026-03-28T10:00:00Z'), KYIV)), '2026-03-30T21:00:00.000Z');
+});
+
+test('Days: just before midnight, day 1 still ends tonight', () => {
+  const now = utc('2026-11-12T05:59:00Z'); // Wed 23:59 CST
+  assert.equal(iso(daysEnd(1, now, CHI)), '2026-11-12T06:00:00.000Z');
+  assert.equal(iso(daysEnd(2, now, CHI)), '2026-11-13T06:00:00.000Z');
+});
+
+test('fmtUntil shows the end in the zone', () => {
+  assert.match(fmtUntil(utc('2026-11-21T06:00:00Z'), CHI), /^Until Sat, Nov 21, 12:00\sAM$/u);
+  assert.match(fmtUntil(utc('2026-11-21T06:00:00Z'), KYIV), /^Until Sat, Nov 21, 8:00\sAM$/u);
+  assert.equal(fmtUntil(null, CHI), '');
+  assert.equal(fmtUntil(new Date('x'), CHI), '');
+});
+
+test('presets say what they do', () => {
+  assert.match(PRESET_HINTS.weekend, /Fri 5 PM to Sun night/);
+  for (const [k] of PRESETS) {
+    if (k !== 'custom' && k !== 'inactive') assert.ok(PRESET_HINTS[k], k);
+  }
+  assert.ok(PRESETS.some(([k, label]) => k === 'weekend' && label === 'This weekend'));
+});
+
+test('pickPreset: Days sets the window', () => {
+  const now = utc('2026-11-11T20:30:00Z');
+  const f = { ...linkForm(), inactive: true };
+  const w = pickPreset(f, 'days', now, CHI, 10);
+  assert.equal(f.inactive, false);
+  assert.equal(f.valid_from, null);
+  assert.equal(f.valid_until, '2026-11-21T06:00:00.000Z');
+  assert.equal(iso(w.until), f.valid_until);
+});
+
+// ---- Activate and deactivate ----
+
+test('deactivate and activate paths', () => {
+  assert.equal(paths.deactivate('a b'), 'api/links/a%20b/deactivate');
+  assert.equal(paths.activate('a b'), 'api/links/a%20b/activate');
+  assert.equal(DEACTIVATE_NOTE, 'Guests lose access until you activate it again.');
+  assert.equal(NO_WINDOW, 'Pick when it works first.');
+  assert.deepEqual(Object.keys(STATUS_LABELS), ['active', 'inactive', 'scheduled', 'expired']);
+});
+
+const NOW = utc('2026-11-11T20:30:00Z'); // Wednesday 14:30 CST
+
+test('endsAfter needs an end after now', () => {
+  assert.equal(endsAfter({ valid_until: '2026-11-12T00:00:00Z' }, NOW), true);
+  assert.equal(endsAfter({ valid_until: '2026-11-11T20:30:00Z' }, NOW), false, 'ends now');
+  assert.equal(endsAfter({ valid_until: '2026-11-01T00:00:00Z' }, NOW), false);
+  assert.equal(endsAfter({}, NOW), false);
+  assert.equal(endsAfter({ valid_until: '0001-01-01T00:00:00Z' }, NOW), false);
+});
+
+test('activateChoices: keep the window only while it ends after now', () => {
+  const live = activateChoices({ valid_until: '2026-11-20T00:00:00Z' }, NOW);
+  assert.equal(live.window, 'keep');
+  assert.deepEqual(live.windows[0], ['keep', 'Keep the current window']);
+  assert.equal(live.url, 'keep');
+  assert.equal(live.urlNote, '');
+  assert.ok(!live.windows.some(([k]) => k === 'inactive'));
+  for (const k of ['today', 'weekend', 'week', 'month', 'days', 'custom']) assert.ok(live.windows.some(([w]) => w === k), k);
+
+  const old = activateChoices({ valid_until: '2026-11-01T00:00:00Z' }, NOW);
+  assert.equal(old.window, 'week');
+  assert.ok(!old.windows.some(([k]) => k === 'keep'));
+  assert.equal(activateChoices({}, NOW).window, 'week');
+});
+
+test('activateChoices: a link that was turned off for good suggests a new URL', () => {
+  const c = activateChoices({ valid_until: '2026-11-20T00:00:00Z', suggest_new_url: true }, NOW);
+  assert.equal(c.url, 'new');
+  assert.equal(c.urlNote, SUGGEST_NEW_URL_NOTE);
+});
+
+test('activateBody: each URL and window choice', () => {
+  const l = { valid_from: '2026-11-10T00:00:00Z', valid_until: '2026-11-20T00:00:00Z' };
+  assert.deepEqual(activateBody({ url: 'keep', window: 'keep' }, l, NOW, CHI), { body: {} });
+  assert.deepEqual(activateBody({ url: 'new', window: 'keep' }, l, NOW, CHI), { body: { rotate: true } });
+  assert.deepEqual(activateBody({ url: 'keep', window: 'week' }, l, NOW, CHI),
+    { body: { valid_from: null, valid_until: iso(preset('week', NOW, CHI).until) } });
+  assert.deepEqual(activateBody({ url: 'new', window: 'days', days: '10' }, l, NOW, CHI),
+    { body: { rotate: true, valid_from: null, valid_until: '2026-11-21T06:00:00.000Z' } });
+  const weekend = preset('weekend', NOW, CHI);
+  assert.deepEqual(activateBody({ url: 'keep', window: 'weekend' }, l, NOW, CHI),
+    { body: { valid_from: iso(weekend.from), valid_until: iso(weekend.until) } });
+  assert.deepEqual(activateBody({ url: 'keep', window: 'custom', from: '2026-11-12T09:00', until: '2026-11-12T18:00' }, l, NOW, CHI),
+    { body: { valid_from: '2026-11-12T15:00:00.000Z', valid_until: '2026-11-13T00:00:00.000Z' } });
+  assert.deepEqual(activateBody({ url: 'keep', window: 'custom', from: '', until: '2026-11-12T18:00' }, l, NOW, CHI),
+    { body: { valid_from: null, valid_until: '2026-11-13T00:00:00.000Z' } });
+});
+
+test('activateBody: a window that does not end in the future is refused', () => {
+  const past = { valid_until: '2026-11-01T00:00:00Z' };
+  const cases = [
+    [{ window: 'keep' }, past, 'valid_until', NO_WINDOW],
+    [{ window: 'days', days: '0' }, past, 'days', /1 to 365/],
+    [{ window: 'days', days: '' }, past, 'days', /whole number/],
+    [{ window: 'custom', from: '', until: '' }, past, 'valid_until', /ends/],
+    [{ window: 'custom', from: '', until: '2026-11-11T14:00' }, past, 'valid_until', /future/],
+    [{ window: 'custom', from: '2026-11-13T09:00', until: '2026-11-12T09:00' }, past, 'valid_until', /after the start/],
+    [{ window: 'nope' }, past, 'window', NO_WINDOW],
+  ];
+  for (const [c, l, path, msg] of cases) {
+    const r = activateBody({ url: 'new', ...c }, l, NOW, CHI);
+    assert.equal(r.body, undefined, JSON.stringify(c));
+    assert.equal(r.problem.path, path, JSON.stringify(c));
+    if (msg instanceof RegExp) assert.match(r.problem.message, msg);
+    else assert.equal(r.problem.message, msg);
+    assert.equal(activateSummary({ url: 'new', ...c }, l, NOW, CHI), r.problem.message);
+  }
+});
+
+test('activateSummary says what will happen', () => {
+  const l = { valid_until: '2026-11-20T00:00:00Z' };
+  assert.match(activateSummary({ url: 'keep', window: 'keep' }, l, NOW, CHI), /^Guests can use it until .*, with the same URL\.$/);
+  assert.match(activateSummary({ url: 'new', window: 'today' }, l, NOW, CHI), /^Guests can use it now until .*, with a new URL\. The old URL stops working\.$/);
+  assert.match(activateSummary({ url: 'keep', window: 'weekend' }, l, NOW, CHI), /^Guests can use it .* to .*, with the same URL\.$/);
+});
+
+test('activateWindow keeps, picks presets and checks custom windows', () => {
+  const tz = 'America/Chicago';
+  const now = new Date('2026-11-11T18:00:00Z'); // Wed 12:00 in Chicago
+  const future = { valid_until: '2026-11-20T06:00:00Z' };
+  const past = { valid_until: '2026-11-01T06:00:00Z' };
+  assert.deepEqual(activateWindow({ window: 'keep' }, future, now, tz), { keep: true });
+  assert.equal(activateWindow({ window: 'keep' }, past, now, tz).problem.path, 'valid_until');
+  assert.equal(activateWindow({ window: 'days', days: '0' }, past, now, tz).problem.path, 'days');
+  const d = activateWindow({ window: 'days', days: '1' }, past, now, tz);
+  assert.equal(d.from, null);
+  // One day ends at midnight tonight in Chicago: 06:00 UTC next day.
+  assert.equal(d.until.toISOString(), '2026-11-12T06:00:00.000Z');
+  const c = (from, until) => activateWindow({ window: 'custom', from, until }, past, now, tz);
+  assert.equal(c('', '').problem.message, 'Pick when the link ends.');
+  assert.equal(c('', '2026-11-10T10:00').problem.message, 'Pick an end in the future.');
+  assert.equal(c('2026-11-15T10:00', '2026-11-14T10:00').problem.message, 'The end must be after the start.');
+  assert.equal(c('', '2026-11-14T10:00').until.toISOString(), '2026-11-14T16:00:00.000Z');
 });

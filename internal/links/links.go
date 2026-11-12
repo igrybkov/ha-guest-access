@@ -23,8 +23,11 @@ import (
 var (
 	// ErrNotFound means no link (or password) has that id.
 	ErrNotFound = errors.New("not found")
-	// ErrInactive means the link is revoked, not started or expired.
+	// ErrInactive means the link is set inactive, not started or expired.
 	ErrInactive = errors.New("link is not active")
+	// ErrNoWindow means Activate was asked to turn on a link that has no
+	// end, or whose end has passed.
+	ErrNoWindow = errors.New("link has no end in the future")
 	// ErrUsed means a one-time link already used this action on this
 	// entity.
 	ErrUsed = errors.New("action already used")
@@ -240,21 +243,90 @@ func (s *Store) Create(draft model.Link, customSlug string) (model.Link, error) 
 }
 
 // Update replaces the editable fields of link id with those of edit. Other
-// fields of edit are ignored.
+// fields of edit are ignored. An update that turns an inactive link on
+// clears SuggestNewURL, as Activate does.
 func (s *Store) Update(id string, edit model.Link) (model.Link, error) {
 	return s.change(id, func(l *model.Link) error {
+		wasOff := l.Inactive
 		setEditable(l, edit)
+		if wasOff && !l.Inactive {
+			l.SuggestNewURL = false
+		}
 		return nil
 	})
 }
 
-// Revoke ends link id at once. Its slug stops working.
-func (s *Store) Revoke(id string) error {
-	_, err := s.change(id, func(l *model.Link) error {
-		l.Revoked = true
+// Deactivate turns link id off at once. Guests get "not active" until it
+// is activated again. Uses, devices, passwords and sessions are kept.
+func (s *Store) Deactivate(id string) (model.Link, error) {
+	return s.change(id, func(l *model.Link) error {
+		l.Inactive = true
 		return nil
 	})
-	return err
+}
+
+// Activation says how Activate turns a link on. Each window field is
+// changed only when its Set flag is true; a zero time then clears it.
+type Activation struct {
+	// NewURL gives the link a new slug: CustomSlug, or a random one when
+	// it is empty. CustomSlug counts only with NewURL.
+	NewURL     bool
+	CustomSlug string
+	SetFrom    bool
+	ValidFrom  time.Time
+	SetUntil   bool
+	ValidUntil time.Time
+}
+
+// Activate turns link id on in one write: an optional new URL, an
+// optional new window, and Inactive cleared. The window must end after
+// now, or it fails with ErrNoWindow, and it must pass Link.Validate.
+// Uses, devices, passwords and sessions are kept. It also works on a link
+// that is already on, to give it a new window or URL. changed lists what
+// changed, by field name ("inactive", "url", "valid_from", "valid_until"),
+// for the audit record.
+func (s *Store) Activate(id string, a Activation, now time.Time) (out model.Link, changed []string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	err = s.update(true, func(ls *model.Links) error {
+		cur, err := at(ls, id)
+		if err != nil {
+			return err
+		}
+		l := *cur
+		if a.SetFrom && !l.ValidFrom.Equal(a.ValidFrom) {
+			l.ValidFrom = a.ValidFrom.UTC()
+			changed = append(changed, "valid_from")
+		}
+		if a.SetUntil && !l.ValidUntil.Equal(a.ValidUntil) {
+			l.ValidUntil = a.ValidUntil.UTC()
+			changed = append(changed, "valid_until")
+		}
+		if l.ValidUntil.IsZero() || !l.ValidUntil.After(now) {
+			return ErrNoWindow
+		}
+		if l.Inactive {
+			l.Inactive = false
+			changed = append(changed, "inactive")
+		}
+		if a.NewURL {
+			if err := s.rotate(ls, &l, a.CustomSlug); err != nil {
+				return err
+			}
+			changed = append(changed, "url")
+		}
+		l.SuggestNewURL = false
+		if err := l.Validate(); err != nil {
+			return err
+		}
+		*cur = l
+		out = l
+		return nil
+	})
+	if err != nil {
+		return model.Link{}, nil, err
+	}
+	return out, changed, nil
 }
 
 // RotateSlug gives link id a new slug: customSlug, or a random one when it
@@ -268,11 +340,9 @@ func (s *Store) RotateSlug(id, customSlug string) (model.Link, error) {
 		if err != nil {
 			return err
 		}
-		slug, err := s.pickSlug(ls, customSlug)
-		if err != nil {
+		if err := s.rotate(ls, l, customSlug); err != nil {
 			return err
 		}
-		l.Slug = slug
 		out = *l
 		return nil
 	})
@@ -280,6 +350,18 @@ func (s *Store) RotateSlug(id, customSlug string) (model.Link, error) {
 		return model.Link{}, err
 	}
 	return out, nil
+}
+
+// rotate gives l a new slug from pickSlug. A new URL is what
+// SuggestNewURL asks for, so it clears it.
+func (s *Store) rotate(ls *model.Links, l *model.Link, customSlug string) error {
+	slug, err := s.pickSlug(ls, customSlug)
+	if err != nil {
+		return err
+	}
+	l.Slug = slug
+	l.SuggestNewURL = false
+	return nil
 }
 
 // Delete removes link id.
@@ -375,7 +457,7 @@ func (s *Store) addDevice(linkID string, d model.LinkDevice, maxDevices int, cla
 	return out, nil
 }
 
-// RemoveDevice revokes device deviceID of link linkID. Its cookie stops
+// RemoveDevice removes device deviceID of link linkID. Its cookie stops
 // working on the next request.
 func (s *Store) RemoveDevice(linkID, deviceID string) error {
 	_, err := s.change(linkID, func(l *model.Link) error {
@@ -389,7 +471,7 @@ func (s *Store) RemoveDevice(linkID, deviceID string) error {
 	return err
 }
 
-// ResetDevices revokes every device of link linkID. In claim mode the
+// ResetDevices removes every device of link linkID. In claim mode the
 // next device claims the link again.
 func (s *Store) ResetDevices(linkID string) error {
 	_, err := s.change(linkID, func(l *model.Link) error {
@@ -482,7 +564,7 @@ func (s *Store) change(id string, fn func(*model.Link) error) (model.Link, error
 // the HA call.
 //
 //   - The link must be active at now, checked again under the lock, so a
-//     revoke that lands first always wins.
+//     deactivation that lands first always wins.
 //   - On a one-time link, a pair used before gives ErrUsed. Of N parallel
 //     calls for the same pair, exactly one succeeds.
 //   - Every link counts the use in UseCount and LastUsedAt.

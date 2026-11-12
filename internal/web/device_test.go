@@ -275,8 +275,8 @@ func TestDeviceResetClaimsAgain(t *testing.T) {
 	}
 }
 
-// Revoking a device ends its open stream.
-func TestDeviceRevokeEndsStream(t *testing.T) {
+// Removing a device ends its open stream.
+func TestDeviceRemoveEndsStream(t *testing.T) {
 	h := newHarness(t)
 	l := h.approvalLink(model.Approval{SelfService: true})
 	j := jar{}
@@ -292,7 +292,7 @@ func TestDeviceRevokeEndsStream(t *testing.T) {
 	for ev, _ := next(t, ch); ev.name != "ready"; ev, _ = next(t, ch) {
 	}
 	if rec := h.a(req{method: "DELETE", path: "/api/links/" + l.ID + "/devices/" + got.Devices[0].ID, body: map[string]any{}}); rec.Code != 200 {
-		t.Fatalf("revoke: %d %s", rec.Code, rec.Body)
+		t.Fatalf("remove: %d %s", rec.Code, rec.Body)
 	}
 	for {
 		ev, ok := next(t, ch)
@@ -304,7 +304,7 @@ func TestDeviceRevokeEndsStream(t *testing.T) {
 		}
 	}
 	if rec := h.dev(j, l, "GET", "state", nil); rec.Code != 403 {
-		t.Errorf("state after revoke: %d", rec.Code)
+		t.Errorf("state after remove: %d", rec.Code)
 	}
 }
 

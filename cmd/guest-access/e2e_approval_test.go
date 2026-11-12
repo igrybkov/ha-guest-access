@@ -286,8 +286,8 @@ func TestE2EApprovalSelfService(t *testing.T) {
 	}
 }
 
-// Revoking a device ends its access and its open event stream.
-func TestE2EApprovalRevoke(t *testing.T) {
+// Removing a device ends its access and its open event stream.
+func TestE2EApprovalRemoveDevice(t *testing.T) {
 	a := approvalApp(t)
 	l := a.approvalLink(false, true)
 	b := a.browser(iPhoneUA)
@@ -341,10 +341,10 @@ func TestE2EApprovalRevoke(t *testing.T) {
 		t.Fatalf("devices = %+v", view.Devices)
 	}
 	if r := a.adminJSON("DELETE", "/api/links/"+l.ID+"/devices/"+view.Devices[0].ID, map[string]any{}); r.code != 200 {
-		t.Fatalf("revoke: %d %s", r.code, r.body)
+		t.Fatalf("remove: %d %s", r.code, r.body)
 	}
 	waitEvent("end")
 	if c := b.act(l); c != 403 {
-		t.Errorf("act after revoke: %d", c)
+		t.Errorf("act after remove: %d", c)
 	}
 }

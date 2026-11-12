@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,14 +65,14 @@ func TestCreate(t *testing.T) {
 	s := newStore(t, dir)
 	d := draft()
 	// Server-owned fields in the draft are ignored.
-	d.ID, d.Slug, d.UseCount, d.Revoked = "mine", "chosen-by-client", 99, true
+	d.ID, d.Slug, d.UseCount, d.SuggestNewURL = "mine", "chosen-by-client", 99, true
 	d.Passwords = []model.LinkPassword{{ID: "p", Label: "x", Hash: hash}}
 	d.Used = []model.Use{{EntityID: "lock.a", Action: "lock.unlock", At: t0}}
 	l := mustCreate(t, s, d, "")
 	if l.ID == "mine" || len(l.ID) != 16 || l.Slug != "random-slug-000001" || !l.CreatedAt.Equal(t0) {
 		t.Errorf("created %+v", l)
 	}
-	if l.UseCount != 0 || l.Revoked || len(l.Passwords) != 0 || len(l.Used) != 0 {
+	if l.UseCount != 0 || l.SuggestNewURL || len(l.Passwords) != 0 || len(l.Used) != 0 {
 		t.Errorf("server-owned fields copied from the draft: %+v", l)
 	}
 	got, err := newStore(t, dir).Get(l.ID)
@@ -243,7 +245,7 @@ func TestUpdateKeepsServerFields(t *testing.T) {
 	edit := draft()
 	edit.Name, edit.Note, edit.OneTime = "Anna and Ben", "door code is in the script", true
 	edit.ValidUntil = t0.Add(72 * time.Hour)
-	edit.Slug, edit.Revoked, edit.UseCount = "client-slug-xxxx", true, 5
+	edit.Slug, edit.SuggestNewURL, edit.UseCount = "client-slug-xxxx", true, 5
 	edit.Passwords = []model.LinkPassword{{ID: "p", Label: "x"}}
 	got, err := s.Update(l.ID, edit)
 	if err != nil {
@@ -252,7 +254,7 @@ func TestUpdateKeepsServerFields(t *testing.T) {
 	if got.Name != "Anna and Ben" || !got.OneTime || !got.ValidUntil.Equal(t0.Add(72*time.Hour)) {
 		t.Errorf("edit not applied: %+v", got)
 	}
-	if got.Slug != l.Slug || got.Revoked || got.UseCount != 0 || len(got.Passwords) != 1 || got.Passwords[0].Hash != hash {
+	if got.Slug != l.Slug || got.SuggestNewURL || got.UseCount != 0 || len(got.Passwords) != 1 || got.Passwords[0].Hash != hash {
 		t.Errorf("server fields changed: %+v", got)
 	}
 	bad := edit
@@ -381,26 +383,201 @@ func TestInactiveLink(t *testing.T) {
 	if err != nil || !got.Inactive || !got.ValidUntil.Equal(off.ValidUntil) {
 		t.Errorf("deactivate: %+v %v", got, err)
 	}
-	if err := s.Revoke(l.ID); err != nil {
-		t.Fatal(err)
-	}
-	if got, _ := s.Get(l.ID); got.Status(t0) != model.StatusRevoked {
-		t.Errorf("revoked inactive link: %s", got.Status(t0))
+	// Deactivate on an inactive link is a no-op.
+	if got, err := s.Deactivate(l.ID); err != nil || got.Status(t0) != model.StatusInactive {
+		t.Errorf("deactivate twice: %+v %v", got, err)
 	}
 }
 
-func TestRevoke(t *testing.T) {
-	s := newStore(t, t.TempDir())
-	l := mustCreate(t, s, draft(), "")
-	if err := s.Revoke(l.ID); err != nil {
+// Deactivate turns a link off and keeps everything else. Activate turns
+// it back on with the same state.
+func TestDeactivateActivateKeepState(t *testing.T) {
+	dir := t.TempDir()
+	s := newStore(t, dir)
+	d := draft()
+	d.OneTime = true
+	l := mustCreate(t, s, d, "")
+	pw, err := s.AddPassword(l.ID, "Anna", hash)
+	if err != nil {
 		t.Fatal(err)
 	}
-	got, _ := s.Get(l.ID)
-	if got.Status(t0) != model.StatusRevoked {
-		t.Errorf("status %s", got.Status(t0))
+	dev, err := s.AddDevice(l.ID, newDevice(model.ApprovedByAdmin), maxDev)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := s.Consume(l.ID, "lock.a", "lock.unlock", t0); !errors.Is(err, ErrInactive) {
-		t.Errorf("consume on a revoked link: %v", err)
+	if _, err := s.Consume(l.ID, "lock.a", "lock.unlock", t0); err != nil {
+		t.Fatal(err)
+	}
+	off, err := s.Deactivate(l.ID)
+	if err != nil || off.Status(t0) != model.StatusInactive {
+		t.Fatalf("deactivate: %+v %v", off, err)
+	}
+	if _, err := s.Consume(l.ID, "lock.b", "lock.unlock", t0); !errors.Is(err, ErrInactive) {
+		t.Errorf("consume on an inactive link: %v", err)
+	}
+	if _, err := s.AddDevice(l.ID, newDevice(model.ApprovedByAdmin), maxDev); !errors.Is(err, ErrInactive) {
+		t.Errorf("add device on an inactive link: %v", err)
+	}
+	on, changed, err := s.Activate(l.ID, Activation{}, t0)
+	if err != nil || on.Status(t0) != model.StatusActive || !slices.Equal(changed, []string{"inactive"}) {
+		t.Fatalf("activate: %+v %v %v", on, changed, err)
+	}
+	got, _ := newStore(t, dir).Get(l.ID)
+	if got.Slug != l.Slug || got.UseCount != 1 || len(got.Used) != 1 || len(got.Devices) != 1 || got.Devices[0].ID != dev.ID ||
+		len(got.Passwords) != 1 || got.Passwords[0].ID != pw.ID || !got.ValidUntil.Equal(l.ValidUntil) {
+		t.Errorf("state not kept: %+v", got)
+	}
+	if _, err := s.Consume(l.ID, "lock.a", "lock.unlock", t0); !errors.Is(err, ErrUsed) {
+		t.Errorf("used pair after activate: %v", err)
+	}
+}
+
+func TestActivate(t *testing.T) {
+	later := t0.Add(24 * time.Hour)
+	for _, tc := range []struct {
+		name    string
+		link    func(*model.Link)
+		a       Activation
+		wantErr error // nil, ErrNoWindow, ErrSlugTaken, or errInvalid for a validation error
+		changed []string
+		check   func(t *testing.T, before, after model.Link)
+	}{
+		{name: "keep window", link: func(l *model.Link) { l.Inactive = true }, changed: []string{"inactive"}},
+		{name: "already on, nothing to do", changed: nil},
+		{name: "new until", link: func(l *model.Link) { l.Inactive = true },
+			a: Activation{SetUntil: true, ValidUntil: later}, changed: []string{"valid_until", "inactive"},
+			check: func(t *testing.T, _, after model.Link) {
+				if !after.ValidUntil.Equal(later) {
+					t.Errorf("until %v", after.ValidUntil)
+				}
+			}},
+		{name: "same until is no change", a: Activation{SetUntil: true, ValidUntil: t0.Add(48 * time.Hour)}, changed: nil},
+		{name: "set and clear from", link: func(l *model.Link) { l.Inactive = true; l.ValidFrom = t0.Add(-time.Hour) },
+			a: Activation{SetFrom: true}, changed: []string{"valid_from", "inactive"},
+			check: func(t *testing.T, _, after model.Link) {
+				if !after.ValidFrom.IsZero() {
+					t.Errorf("from %v", after.ValidFrom)
+				}
+			}},
+		{name: "future from is scheduled", a: Activation{SetFrom: true, ValidFrom: t0.Add(time.Hour)}, changed: []string{"valid_from"},
+			check: func(t *testing.T, _, after model.Link) {
+				if after.Status(t0) != model.StatusScheduled {
+					t.Errorf("status %s", after.Status(t0))
+				}
+			}},
+		{name: "no end", link: func(l *model.Link) { l.Inactive = true; l.ValidUntil = time.Time{} }, wantErr: ErrNoWindow},
+		{name: "end passed", link: func(l *model.Link) { l.Inactive = true; l.ValidUntil = t0.Add(-time.Hour) }, wantErr: ErrNoWindow},
+		{name: "end now", a: Activation{SetUntil: true, ValidUntil: t0}, wantErr: ErrNoWindow},
+		{name: "until cleared", a: Activation{SetUntil: true}, wantErr: ErrNoWindow},
+		{name: "past end fixed", link: func(l *model.Link) { l.Inactive = true; l.ValidUntil = t0.Add(-time.Hour) },
+			a: Activation{SetUntil: true, ValidUntil: later}, changed: []string{"valid_until", "inactive"}},
+		{name: "until before from", a: Activation{SetFrom: true, ValidFrom: later.Add(time.Hour), SetUntil: true, ValidUntil: later}, wantErr: errInvalid},
+		{name: "new random url", link: func(l *model.Link) { l.Inactive = true }, a: Activation{NewURL: true},
+			changed: []string{"inactive", "url"},
+			check: func(t *testing.T, before, after model.Link) {
+				if after.Slug == before.Slug {
+					t.Error("slug kept")
+				}
+			}},
+		{name: "new custom url", a: Activation{NewURL: true, CustomSlug: "a-custom-slug-here"}, changed: []string{"url"},
+			check: func(t *testing.T, _, after model.Link) {
+				if after.Slug != "a-custom-slug-here" {
+					t.Errorf("slug %s", after.Slug)
+				}
+			}},
+		{name: "taken url", a: Activation{NewURL: true, CustomSlug: "taken-slug-other"}, wantErr: ErrSlugTaken},
+		{name: "bad custom url", a: Activation{NewURL: true, CustomSlug: "BAD"}, wantErr: errBadSlug},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			s := newStore(t, dir)
+			mustCreate(t, s, draft(), "taken-slug-other")
+			d := draft()
+			if tc.link != nil {
+				tc.link(&d)
+			}
+			before := mustCreate(t, s, d, "")
+			after, changed, err := s.Activate(before.ID, tc.a, t0)
+			var ve *model.ValidationError
+			switch {
+			case tc.wantErr == errInvalid:
+				if !errors.As(err, &ve) {
+					t.Fatalf("err = %v, want a validation error", err)
+				}
+			case tc.wantErr != nil:
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tc.wantErr)
+				}
+			case err != nil:
+				t.Fatal(err)
+			}
+			stored, _ := newStore(t, dir).Get(before.ID)
+			if tc.wantErr != nil {
+				if !reflect.DeepEqual(stored, before) {
+					t.Errorf("a refused activate changed the link:\n%+v\n%+v", stored, before)
+				}
+				return
+			}
+			if !slices.Equal(changed, tc.changed) {
+				t.Errorf("changed = %v, want %v", changed, tc.changed)
+			}
+			if stored.Inactive || !reflect.DeepEqual(stored, after) {
+				t.Errorf("stored %+v, returned %+v", stored, after)
+			}
+			if tc.check != nil {
+				tc.check(t, before, after)
+			}
+		})
+	}
+	if _, _, err := newStore(t, t.TempDir()).Activate("nope", Activation{}, t0); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown link: %v", err)
+	}
+}
+
+// errInvalid marks a want of *model.ValidationError in table tests.
+var errInvalid = errors.New("invalid")
+
+// Activate and a new URL clear SuggestNewURL. Deactivate keeps it.
+func TestSuggestNewURLCleared(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, migrate.LinksFile), []byte(`version: 2
+links:
+  - {id: a, name: A, slug: slug-aaaaaaaaaa, created_at: 2026-11-10T09:00:00Z, valid_until: 2026-11-20T09:00:00Z, inactive: true, suggest_new_url: true}
+  - {id: b, name: B, slug: slug-bbbbbbbbbb, created_at: 2026-11-10T09:00:00Z, valid_until: 2026-11-20T09:00:00Z, inactive: true, suggest_new_url: true}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := newStore(t, dir)
+	for _, id := range []string{"a", "b"} {
+		if l, _ := s.Get(id); !l.SuggestNewURL || l.Status(t0) != model.StatusInactive {
+			t.Fatalf("%s on load: %+v", id, l)
+		}
+	}
+	if l, err := s.Deactivate("a"); err != nil || !l.SuggestNewURL {
+		t.Errorf("deactivate: %+v %v", l, err)
+	}
+	if l, _, err := s.Activate("a", Activation{}, t0); err != nil || l.SuggestNewURL || l.Slug != "slug-aaaaaaaaaa" {
+		t.Errorf("activate: %+v %v", l, err)
+	}
+	if l, err := s.RotateSlug("b", ""); err != nil || l.SuggestNewURL || l.Status(t0) != model.StatusInactive {
+		t.Errorf("rotate: %+v %v", l, err)
+	}
+	// An editor save that keeps the link off keeps the flag; one that
+	// turns it on clears it.
+	if err := os.WriteFile(filepath.Join(dir, migrate.LinksFile), []byte(`version: 2
+links:
+  - {id: c, name: C, slug: slug-cccccccccc, created_at: 2026-11-10T09:00:00Z, valid_until: 2026-11-20T09:00:00Z, inactive: true, suggest_new_url: true}
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s = newStore(t, dir)
+	c, _ := s.Get("c")
+	if l, err := s.Update("c", c); err != nil || !l.SuggestNewURL {
+		t.Errorf("save while off: %+v %v", l, err)
+	}
+	c.Inactive = false
+	if l, err := s.Update("c", c); err != nil || l.SuggestNewURL || l.Status(t0) != model.StatusActive {
+		t.Errorf("save that turns it on: %+v %v", l, err)
 	}
 }
 

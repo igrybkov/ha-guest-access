@@ -20,7 +20,8 @@ export const paths = {
   template: (id) => `api/templates/${enc(id)}`,
   links: 'api/links',
   link: (id) => `api/links/${enc(id)}`,
-  revoke: (id) => `api/links/${enc(id)}/revoke`,
+  deactivate: (id) => `api/links/${enc(id)}/deactivate`,
+  activate: (id) => `api/links/${enc(id)}/activate`,
   rotate: (id) => `api/links/${enc(id)}/rotate`,
   passwords: (id) => `api/links/${enc(id)}/passwords`,
   password: (id, pid) => `api/links/${enc(id)}/passwords/${enc(pid)}`,
@@ -254,26 +255,66 @@ export function addMonth(d, tz) {
 }
 
 // PRESETS are the window shortcuts. from null means "from now".
-// Inactive is no window: it turns the link off and keeps the dates.
+// Days takes a number of days (see daysEnd). Inactive is no window: it
+// turns the link off and keeps the dates.
 export const PRESETS = [
   ['today', 'Today'],
   ['weekend', 'This weekend'],
   ['week', '1 week'],
   ['month', '1 month'],
+  ['days', 'Days'],
   ['custom', 'Custom'],
   ['inactive', 'Inactive'],
 ];
+
+// PRESET_HINTS say what a preset does, as a button title.
+export const PRESET_HINTS = {
+  today: 'Now until midnight tonight',
+  weekend: 'Fri 5 PM to Sun night. Starts now if it is already the weekend.',
+  week: 'Now until the same time in 7 days',
+  month: 'Now until the same day and time next month',
+  days: 'Now until midnight at the end of day N. Today is day 1.',
+};
+
+// DAYS_MAX is the most days the Days choice takes.
+export const DAYS_MAX = 365;
+// DAYS_DEFAULT is what the Days input starts at.
+export const DAYS_DEFAULT = 3;
+
+// daysValue reads the Days input. It returns a whole number from 1 to
+// DAYS_MAX, or null.
+export function daysValue(s) {
+  const t = String(s ?? '').trim();
+  if (!/^\d+$/.test(t)) return null;
+  const n = Number(t);
+  return n >= 1 && n <= DAYS_MAX ? n : null;
+}
+
+// daysEnd is the end of a Days window: midnight at the end of day n in
+// tz, where today is day 1. 1 day is the same as Today.
+export function daysEnd(n, now, tz) {
+  const w = wallParts(now.getTime(), tz);
+  return new Date(wallToUTC({ y: w.y, mo: w.mo, d: w.d + n }, tz));
+}
+
+// fmtUntil shows the end of a window as "Until Sat, Nov 21, 12:00 AM" in tz.
+export function fmtUntil(d, tz) {
+  if (!d || Number.isNaN(d.getTime())) return '';
+  return `Until ${d.toLocaleString(undefined, {
+    weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: usableZone(tz),
+  })}`;
+}
 
 // INACTIVE_HINT shows under the presets while Inactive is picked.
 export const INACTIVE_HINT = "Guests can't use it until you pick when it works.";
 
 // pickPreset applies preset name to the link form f at now. Inactive
 // sets f.inactive and leaves the dates as they are. Any other preset
-// clears f.inactive, and a window preset also sets the dates. It returns
-// the window it set, or null.
-export function pickPreset(f, name, now, tz) {
+// clears f.inactive, and a window preset also sets the dates. days is
+// the Days count. It returns the window it set, or null.
+export function pickPreset(f, name, now, tz, days) {
   f.inactive = name === 'inactive';
-  const w = preset(name, now, tz);
+  const w = preset(name, now, tz, days);
   if (w) {
     f.valid_from = w.from ? w.from.toISOString() : null;
     f.valid_until = w.until.toISOString();
@@ -288,14 +329,16 @@ export const formPreset = (f) => (f.inactive ? 'inactive' : 'custom');
 // link must end. An inactive one may have no end.
 export const needsEnd = (body) => !body.inactive && !body.valid_until;
 
-// preset returns {from, until} for a preset at now, or null for custom.
-// Days, weekdays and times of day are wall-clock time in tz.
+// preset returns {from, until} for a preset at now, or null for custom,
+// inactive, or days without a valid count. Days, weekdays and times of
+// day are wall-clock time in tz.
 //   - today: now until midnight tonight.
 //   - weekend: Friday 17:00 until Monday 00:00. From Friday 17:00 to the
 //     end of Sunday it starts now.
 //   - week: now until the same time of day 7 days later.
 //   - month: now until the same day and time next month (addMonth).
-export function preset(name, now, tz) {
+//   - days: now until daysEnd(days).
+export function preset(name, now, tz, days) {
   const ms = now.getTime();
   const w = wallParts(ms, tz);
   const at = (addDays, h = 0) => new Date(wallToUTC({ y: w.y, mo: w.mo, d: w.d + addDays, h }, tz));
@@ -304,6 +347,10 @@ export function preset(name, now, tz) {
       return { from: null, until: addMonth(now, tz) };
     case 'today':
       return { from: null, until: at(1) };
+    case 'days': {
+      const n = daysValue(days);
+      return n ? { from: null, until: daysEnd(n, now, tz) } : null;
+    }
     case 'week':
       return { from: null, until: new Date(wallToUTC({ ...w, d: w.d + 7 }, tz) + (ms % 1000 + 1000) % 1000) };
     case 'weekend': {
@@ -778,7 +825,7 @@ export function groupProblems(problems, keys, normalize = (p) => p) {
 
 // ---- Links list ----
 
-export const STATUS_LABELS = { active: 'Active', inactive: 'Inactive', scheduled: 'Scheduled', expired: 'Expired', revoked: 'Revoked' };
+export const STATUS_LABELS = { active: 'Active', inactive: 'Inactive', scheduled: 'Scheduled', expired: 'Expired' };
 
 // brokenLinkNote is what the admin sees on a link that does not
 // validate (a hand edit of links.yaml broke it).
@@ -824,6 +871,92 @@ export function rotateWarning(l) {
   if (mode === 'claim') return 'Approved devices keep access after a new slug. Use Reset devices to remove them.';
   if (mode !== 'off') return 'Approved devices keep access after a new slug.';
   return '';
+}
+
+// ---- Activate and deactivate ----
+
+// DEACTIVATE_NOTE is the body of the Deactivate confirm dialog.
+export const DEACTIVATE_NOTE = 'Guests lose access until you activate it again.';
+
+// NO_WINDOW is the server's answer when a link has no end in the future.
+export const NO_WINDOW = 'Pick when it works first.';
+
+// SUGGEST_NEW_URL_NOTE says why the Activate dialog picks a new URL.
+export const SUGGEST_NEW_URL_NOTE = 'This link was turned off for good by an older version, so its old URL may still be around. A new URL is safer.';
+
+// endsAfter reports whether link l has an end after now.
+export function endsAfter(l, now) {
+  const t = l.valid_until ? new Date(l.valid_until) : null;
+  return !!t && t.getUTCFullYear() > 1 && t.getTime() > now.getTime();
+}
+
+// activateChoices are the options of the Activate dialog for link l at
+// now: the URL choice and the window choices, with their defaults. Keep
+// the current window is offered only while it ends after now.
+export function activateChoices(l, now) {
+  const keep = endsAfter(l, now);
+  const windows = [
+    ...(keep ? [['keep', 'Keep the current window']] : []),
+    ...PRESETS.filter(([k]) => k !== 'inactive'),
+  ];
+  return {
+    url: l.suggest_new_url ? 'new' : 'keep',
+    urlNote: l.suggest_new_url ? SUGGEST_NEW_URL_NOTE : '',
+    windows,
+    window: keep ? 'keep' : 'week',
+  };
+}
+
+// activateWindow returns the window a choice gives: {from, until} as
+// Dates (from null means now), or {keep: true}, or {problem} with the
+// field and message to show.
+//   c: {window, days, from, until}. from and until are datetime-local
+//   strings, read in tz, used only for custom.
+export function activateWindow(c, l, now, tz) {
+  if (c.window === 'keep') {
+    if (!endsAfter(l, now)) return { problem: { path: 'valid_until', message: NO_WINDOW } };
+    return { keep: true };
+  }
+  if (c.window === 'days' && !daysValue(c.days)) {
+    return { problem: { path: 'days', message: `Enter a whole number from 1 to ${DAYS_MAX}.` } };
+  }
+  if (c.window !== 'custom') {
+    const w = preset(c.window, now, tz, c.days);
+    return w || { problem: { path: 'window', message: NO_WINDOW } };
+  }
+  const from = fromLocalInput(c.from, tz);
+  const until = fromLocalInput(c.until, tz);
+  if (!until) return { problem: { path: 'valid_until', message: 'Pick when the link ends.' } };
+  if (until.getTime() <= now.getTime()) return { problem: { path: 'valid_until', message: 'Pick an end in the future.' } };
+  if (from && until.getTime() <= from.getTime()) return { problem: { path: 'valid_until', message: 'The end must be after the start.' } };
+  return { from, until };
+}
+
+// activateBody builds the POST body of the Activate call. c adds url:
+// 'keep' or 'new'. It returns {body} or {problem}.
+export function activateBody(c, l, now, tz) {
+  const w = activateWindow(c, l, now, tz);
+  if (w.problem) return { problem: w.problem };
+  const body = {};
+  if (c.url === 'new') body.rotate = true;
+  if (!w.keep) {
+    body.valid_from = w.from ? w.from.toISOString() : null;
+    body.valid_until = w.until.toISOString();
+  }
+  return { body };
+}
+
+// activateSummary says in one line what Activate will do, or why it
+// can't yet.
+export function activateSummary(c, l, now, tz) {
+  const w = activateWindow(c, l, now, tz);
+  if (w.problem) return w.problem.message;
+  const url = c.url === 'new' ? 'a new URL. The old URL stops working' : 'the same URL';
+  let when;
+  if (w.keep) when = fmtWindow(l, tz);
+  else if (w.from) when = `${fmtTime(w.from.toISOString(), tz)} to ${fmtTime(w.until.toISOString(), tz)}`;
+  else when = `now until ${fmtTime(w.until.toISOString(), tz)}`;
+  return `Guests can use it ${when}, with ${url}.`;
 }
 
 // grantSummary groups preview grants by entity: [{entity_id, name, actions}].

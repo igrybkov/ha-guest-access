@@ -326,15 +326,30 @@ Pick **Inactive** under **When it works** to save a link that does not work yet.
 
 - An inactive link never works for guests, whatever its window. The guest sees that the link is not active, as outside the window. Nothing runs, and no one-time use, device request or password try counts.
 - An inactive link may have no `valid_until`. Any dates it has stay as they are.
-- To turn it on, open the link and pick another preset, or edit the dates. The link then needs a `valid_until` again.
-- Turning a link off ends a guest's open page within `streams.recheck_s` seconds. Sessions and approved devices come back when you turn it on again, while the window still holds.
-- The **Links** screen shows it as **Inactive**. A revoked link stays **Revoked**.
+- To turn it on, press **Activate** (see below). You can also open the link and pick another preset, or edit the dates, and save. The link then needs a `valid_until` again.
+- Turning a link off ends a guest's open page within `streams.recheck_s` seconds. Sessions, approved devices, passwords and one-time uses stay. They come back when you turn it on again, while the window still holds.
+- The **Links** screen shows it as **Inactive**.
 - In `links.yaml` it has `inactive: true`.
+
+### Deactivate and Activate
+
+A link is on or off. You can turn it off and on again as often as you like, so one link can serve the same guest visit after visit.
+
+- **Deactivate** shows on an active or scheduled link. It turns the link off at once. It asks first: guests lose access until you activate it again. It is the same as picking **Inactive** and saving.
+- **Activate** shows on an inactive or expired link. It opens a dialog with three parts:
+  - **URL**: **Keep the current URL**, or **Make a new URL**. A new URL works like **New URL**: the old one stops working, and the new one is copied for you.
+  - **When it works**: **Keep the current window** (only while it ends in the future), one of the presets, **Days**, or **Custom** with your own dates. The default keeps the window when it can, else **1 week**.
+  - A line that says what will happen.
+- If the old URL may have leaked, pick **Make a new URL** before you activate.
+- A link that an older version of the app ended for good comes back as inactive. Its dialog picks **Make a new URL** by default, since its old URL was meant to be dead.
+- Activate refuses a window that does not end in the future. Each press writes one record to the audit log: `admin.link.deactivate`, or `admin.link.activate` with the fields it changed (never the slug).
+- From the API: `POST /api/links/{id}/deactivate` with `{}`. `POST /api/links/{id}/activate` with `{"rotate": false, "slug": "", "valid_from": null, "valid_until": "2026-11-20T00:00:00Z"}`. Every field is optional. A left-out window field keeps the saved value; `valid_from: null` clears it; `slug` needs `rotate`. A link with no end in the future gets 409 "Pick when it works first.".
 
 ### Time zones
 
 - The admin page shows and reads every time in HA's time zone (Settings → System → General). This covers the window inputs, the presets, the link list, devices and the activity log. The editor names the zone above the inputs.
-- The presets use HA's wall clock. **Today** ends at midnight. **This weekend** runs from Friday 17:00 to Monday 00:00. **1 week** and **1 month** keep the time of day.
+- The presets use HA's wall clock. **Today** ends at midnight. **This weekend** runs from Friday 17:00 to Monday 00:00, and starts now if it is already the weekend. **1 week** and **1 month** keep the time of day. Hover a preset to see what it does.
+- **Days** takes a number from 1 to 365. The link starts now and ends at midnight at the end of that day, where today is day 1. So 1 day is the same as **Today**, and 10 days on a Wednesday runs until the midnight after the second Friday. The end shows next to the number.
 - Around a daylight saving change, a time that does not exist moves forward by the gap. For example, 02:30 on a day that jumps from 02:00 to 03:00 becomes 03:30. A time that happens twice means the first one.
 - If HA has not reported a time zone, the admin page uses the browser's zone and says so.
 - Guests see times in their own phone's time zone. The app never tells guests HA's time zone, since it hints at where the home is. Every time the guest page gets is in UTC.
@@ -356,13 +371,13 @@ The slug is the secret part of the URL: `/g/<slug>`.
 
 The app keeps each slug so the admin screen can show the URL again.
 
-### Rotate and revoke
+### New URL and Delete
 
 - **New URL** (rotate) gives the link a new slug, random or custom. The old URL stops working at once. Guests who already signed in keep their password session and their approved device. Only the address changes, so send the new URL.
-- **Revoke** ends the link at once. It cannot be undone. Make a new link instead. Open pages stop within `streams.recheck_s` seconds.
-- **Delete** removes the link.
+- **Deactivate** turns the link off until you activate it again. See **Deactivate and Activate**.
+- **Delete** removes the link and its history.
 
-To cut off one guest and keep the rest, delete that guest's password, or revoke that guest's device. See **Passwords** and **Device approval**.
+To cut off one guest and keep the rest, delete that guest's password, or remove that guest's device. See **Passwords** and **Device approval**.
 
 ### QR code
 
@@ -464,9 +479,9 @@ An event with no `approve` is ignored. It is never read as a denial.
 - At most `approval.events_per_hour` request events per link per hour (5). Over it, the guest sees "try later". You can still approve from the app.
 - At most `approval.max_devices` approved devices per link (10).
 
-### Revoke and reset
+### Remove and reset
 
-- **Remove** on one device revokes it. Its next request fails and its open pages stop.
+- **Remove** on one device takes its access away. Its next request fails and its open pages stop.
 - **Reset devices** removes every approved device and every waiting request. In claim mode the next device claims the link again.
 
 Neither sends anything to HA. Both appear in the audit log.
@@ -585,7 +600,7 @@ When MA refuses the token, the app logs a warning, and the Settings and Diagnost
 
 ### The party outlives the link
 
-MA runs its own guest session. When a link ends or is revoked, a guest who already joined the party stays in MA until MA ends that session. The join code in MA also lives for MA's own party duration.
+MA runs its own guest session. When a link ends or is set inactive, a guest who already joined the party stays in MA until MA ends that session. The join code in MA also lives for MA's own party duration.
 
 To cut everyone off, turn off guest access for the party in MA. The app then gets no join URL. Check MA's party settings for how it ends sessions already open.
 
@@ -627,7 +642,7 @@ The app records who did what and when, for every security decision and every adm
 - guest actions, allowed and denied, with an internal reason for each denial
 - sign-ins, wrong passwords, lockouts and slow-downs
 - wrong links, rate-limit hits and invalid sessions
-- device requests (with the code shown on the guest's screen), approvals, denials, revokes and resets
+- device requests (with the code shown on the guest's screen), approvals, denials, removals and resets
 - location checks (the distance and the accuracy)
 - every admin write: templates, links, passwords, devices
 - app starts
@@ -708,7 +723,7 @@ Set these in the app's Configuration tab. Saving restarts the app. Each row show
 | `approval.admin_poll_s` | `5` | Seconds between checks for waiting devices while the app's page is open and visible. |
 | `ha.call_timeout_s` | `10` | Seconds to wait for HA to run a guest action. |
 | `ha.event_timeout_s` | `5` | Seconds to wait for HA to take an event the app sends. |
-| `streams.recheck_s` | `5` | Seconds between checks that an open page may still see its link. A revoke ends the page's updates within this time. |
+| `streams.recheck_s` | `5` | Seconds between checks that an open page may still see its link. Deactivating a link ends the page's updates within this time. |
 | `streams.heartbeat_s` | `25` | Seconds between keep-alive messages, so proxies keep the connection open. |
 | `streams.retry_after_s` | `30` | Seconds a page waits when its link has the most open pages. |
 | `streams.max_per_ip` | `3` | Open live-update pages per link from one client address, inside `rate_limits.max_streams_per_link`. One address can't take every slot. |
@@ -799,10 +814,10 @@ If you point the tunnel straight at the app with `ssl` on, cloudflared checks th
 ### What it does not protect against
 
 - **A script does whatever it does.** The app can only call the script. It cannot limit what the script does. Write scripts with care, and pick who gets them.
-- **A guest who shares the link and the password.** Anyone who has both can use the link until it ends. Use device approval to make that harder, and revoke when needed.
+- **A guest who shares the link and the password.** Anyone who has both can use the link until it ends. Use device approval to make that harder, and deactivate the link when needed.
 - **A guest who fakes their location.** See **Near home**.
 - **A guest who is not really local.** See **Local only**. It fails safe, but it is not a firewall.
-- **A stolen device that is already approved.** Revoke the device.
+- **A stolen device that is already approved.** Remove the device.
 - **Someone with access to the HA host or the `/data` folder.** They can read the slugs.
 - **Someone who slows the password form.** Anyone with the URL can make the link slow down. Guests then wait up to `rate_limits.password_link_delay_s` seconds to sign in. Nobody is locked out by someone else's guesses. See **Passwords**.
 
@@ -821,7 +836,7 @@ Pending device requests live in memory only. They are lost on a restart. Their H
 
 **The admin screen says "access only through Home Assistant".** Open the app from the HA sidebar. The admin port accepts only the HA proxy.
 
-**A link says it is not active.** The link has ended, has not started, is set inactive, or was revoked. Check its status and window on the **Links** screen.
+**A link says it is not active.** The link has ended, has not started, or is set inactive. Check its status and window on the **Links** screen.
 
 **A guest gets 404.** The slug is wrong, or it was rotated. Send the new URL. A link in `links.yaml` that a hand edit broke also gives 404: the app never serves a link that does not validate. The **Links** screen marks it and lists its problems, and the log has one warning for it.
 

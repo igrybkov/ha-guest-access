@@ -51,8 +51,11 @@ type Link struct {
 	// when one is added, so lowering it never breaks a saved link.
 	Devices []LinkDevice `yaml:"devices,omitempty" json:"devices,omitempty"`
 	// Used lists the pairs a one-time link has used up.
-	Used    []Use `yaml:"used,omitempty" json:"used,omitempty"`
-	Revoked bool  `yaml:"revoked,omitempty" json:"revoked,omitempty"`
+	Used []Use `yaml:"used,omitempty" json:"used,omitempty"`
+	// SuggestNewURL asks the admin UI to offer a new URL first when the
+	// link is turned on again, because the old URL was meant to be dead.
+	// Only the server sets it. Activate and a new URL clear it.
+	SuggestNewURL bool `yaml:"suggest_new_url,omitempty" json:"suggest_new_url,omitempty"`
 	// UseCount counts successful actions, for the admin list.
 	UseCount   int        `yaml:"use_count,omitempty" json:"use_count,omitempty"`
 	LastUsedAt *time.Time `yaml:"last_used_at,omitempty" json:"last_used_at,omitempty"`
@@ -119,7 +122,7 @@ const (
 )
 
 // LinkDevice is one approved device of a link. Its signed cookie names the
-// link and the device id; deleting the device revokes it at once.
+// link and the device id; deleting the device ends its access at once.
 type LinkDevice struct {
 	ID string `yaml:"id" json:"id"`
 	// Label is the password label the device used, if the link has
@@ -144,7 +147,7 @@ func (l Link) Device(id string) (LinkDevice, bool) {
 }
 
 // validApprovedBy checks the shape only. It never checks that an approver
-// device still exists: revoking an approver must not break the link.
+// device still exists: removing an approver must not break the link.
 func validApprovedBy(s string) bool {
 	switch s {
 	case ApprovedByAdmin, ApprovedByHA, ApprovedByClaim:
@@ -201,15 +204,11 @@ const (
 	StatusInactive  = "inactive"  // Inactive is set
 	StatusScheduled = "scheduled" // before ValidFrom
 	StatusExpired   = "expired"   // at or after ValidUntil
-	StatusRevoked   = "revoked"
 )
 
-// Status returns the link's status at now. Revoked wins over Inactive,
-// and Inactive wins over the window.
+// Status returns the link's status at now. Inactive wins over the window.
 func (l Link) Status(now time.Time) string {
 	switch {
-	case l.Revoked:
-		return StatusRevoked
 	case l.Inactive:
 		return StatusInactive
 	case !l.ValidFrom.IsZero() && now.Before(l.ValidFrom):

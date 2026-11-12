@@ -23,6 +23,8 @@ package migrate
 import (
 	"log/slog"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/igrybkov/ha-guest-access/internal/store"
 )
 
@@ -53,13 +55,74 @@ var ConfigFiles = []string{TemplatesFile}
 var ConfigSteps = []store.Step{}
 
 // DataCurrent is the schema version of the data set.
-const DataCurrent = 1
+//
+//   - v1: first version.
+//   - v2: a link has no "revoked" key. A revoked link is inactive and
+//     suggests a new URL.
+const DataCurrent = 2
 
 // DataFiles are the names of every file in the data set, of every version.
 var DataFiles = []string{LinksFile}
 
 // DataSteps takes the data set from version i+1 to i+2 at index i.
-var DataSteps = []store.Step{}
+var DataSteps = []store.Step{revokedToInactive}
+
+// cleanFalse reports whether n is a YAML false or null. Quoted text such
+// as "no" is not.
+func cleanFalse(n *yaml.Node) bool {
+	if n.Kind != yaml.ScalarNode {
+		return false
+	}
+	switch n.ShortTag() {
+	case "!!null":
+		return true
+	case "!!bool":
+		var b bool
+		return n.Decode(&b) == nil && !b
+	}
+	return false
+}
+
+func yamlTrue() *yaml.Node { return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "true"} }
+
+// revokedToInactive takes the data set from v1 to v2. Each link with a
+// "revoked" key loses it. A link that was revoked gets "inactive: true",
+// so it stays off, and "suggest_new_url: true", because its old URL was
+// meant to be dead. A revoked value that is not a clean false counts as
+// true: a revoked link must never come back on by itself.
+func revokedToInactive(t *store.Tree) error {
+	doc, _, ok := t.Get(LinksFile)
+	if !ok {
+		return nil
+	}
+	list := store.MapGet(doc, "links")
+	if list == nil || list.Kind != yaml.SequenceNode {
+		return nil
+	}
+	for _, l := range list.Content {
+		if l.Kind != yaml.MappingNode {
+			continue
+		}
+		found, off := false, false
+		for i := 0; i+1 < len(l.Content); i += 2 {
+			if l.Content[i].Value != "revoked" {
+				continue
+			}
+			found = true
+			if !cleanFalse(l.Content[i+1]) {
+				off = true
+			}
+		}
+		if off {
+			store.MapSet(l, "inactive", yamlTrue())
+			store.MapSet(l, "suggest_new_url", yamlTrue())
+		}
+		if found {
+			store.MapDelete(l, "revoked")
+		}
+	}
+	return nil
+}
 
 // OpenConfig returns the config set in dir.
 func OpenConfig(dir string, log *slog.Logger) *store.Set {

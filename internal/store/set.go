@@ -143,6 +143,9 @@ func (s *Set) load() {
 			errs = errors.Join(errs, fmt.Errorf("parse %s: %w", name, err))
 			continue
 		}
+		if len(doc.Content) == 0 {
+			continue // only comments: the same as an empty file
+		}
 		v := versionOf(doc.Content[0])
 		if v > s.current {
 			errs = errors.Join(errs, fmt.Errorf("%s has version %d, this app knows %d: %w", name, v, s.current, ErrNewerVersion))
@@ -362,6 +365,21 @@ func MapSet(m *yaml.Node, key string, v *yaml.Node) {
 		return
 	}
 	m.Content = append(m.Content, k, v)
+}
+
+// MapDelete removes every entry of key from a mapping node. Anything that
+// is not a mapping is left alone.
+func MapDelete(m *yaml.Node, key string) {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return
+	}
+	out := m.Content[:0]
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value != key {
+			out = append(out, m.Content[i], m.Content[i+1])
+		}
+	}
+	m.Content = out
 }
 
 func encodeNode(n *yaml.Node) ([]byte, error) {

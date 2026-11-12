@@ -512,7 +512,7 @@ func TestRequestAfterDenyWithoutPoll(t *testing.T) {
 	}
 }
 
-func TestRevokeTakesEffectAtOnce(t *testing.T) {
+func TestRemoveTakesEffectAtOnce(t *testing.T) {
 	e := newEnv(t, Options{})
 	l, b, id := e.claimed(both)
 	other := newBrowser(androidUA)
@@ -528,18 +528,18 @@ func TestRevokeTakesEffectAtOnce(t *testing.T) {
 	}
 	_, ok, res := e.admit(l.ID, b)
 	if ok {
-		t.Fatal("revoked device admitted")
+		t.Fatal("removed device admitted")
 	}
-	want(t, "revoked admit", res, 403, "approval_required")
-	want(t, "revoked lists", e.call(e.m.PendingForDevice, l.ID, b, ""), 403, "approval_required")
+	want(t, "removed admit", res, 403, "approval_required")
+	want(t, "removed lists", e.call(e.m.PendingForDevice, l.ID, b, ""), 403, "approval_required")
 	if _, ok, _ := e.admit(l.ID, other); !ok {
-		t.Error("revoke hit another device")
+		t.Error("remove hit another device")
 	}
 	if err := e.m.RemoveDevice(l.ID, id); !errors.Is(err, links.ErrNotFound) {
-		t.Errorf("revoke twice: %v", err)
+		t.Errorf("remove twice: %v", err)
 	}
 	if len(e.fired()) != 2 {
-		t.Error("revoke fired an event")
+		t.Error("remove fired an event")
 	}
 }
 
@@ -573,9 +573,9 @@ func TestResetDevices(t *testing.T) {
 	}
 }
 
-// An approval that is revoked before the browser picks it up gives no
+// An approval that is removed before the browser picks it up gives no
 // cookie.
-func TestRevokedBeforePickup(t *testing.T) {
+func TestRemovedBeforePickup(t *testing.T) {
 	e := newEnv(t, Options{})
 	l := e.newLink(manual)
 	b := newBrowser(iPhoneUA)
@@ -586,7 +586,7 @@ func TestRevokedBeforePickup(t *testing.T) {
 	}
 	want(t, "status", e.call(e.m.Status, l.ID, b, ""), 200, "approval_required")
 	if b.cookie(DeviceCookieName(l.ID)) != nil {
-		t.Error("cookie for a revoked device")
+		t.Error("cookie for a removed device")
 	}
 }
 
@@ -841,7 +841,7 @@ func FuzzHandleDecisionEvent(f *testing.F) {
 	})
 }
 
-// StillValid follows the stored link: a revoke, a reset, or approval
+// StillValid follows the stored link: a removal, a reset, or approval
 // turned on ends what it said before.
 func TestStillValid(t *testing.T) {
 	e := newEnv(t, Options{})
@@ -867,6 +867,6 @@ func TestStillValid(t *testing.T) {
 		t.Fatal(err)
 	}
 	if e.m.StillValid(e.link(l.ID), id) {
-		t.Error("revoked device still valid")
+		t.Error("removed device still valid")
 	}
 }

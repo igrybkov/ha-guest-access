@@ -125,7 +125,7 @@ func TestAuditEveryEventNeverLeaks(t *testing.T) {
 		ah.g(req{method: "GET", path: "/g/" + l.Slug, peer: "203.0.113.30:1"})
 	}
 
-	// Device approval: claim, request, approve, deny, revoke, reset.
+	// Device approval: claim, request, approve, deny, remove, reset.
 	ah.advance(time.Minute)
 	claim := ah.approvalLink(model.Approval{SelfService: true})
 	j1, j2, j3 := jar{}, jar{}, jar{}
@@ -154,8 +154,8 @@ func TestAuditEveryEventNeverLeaks(t *testing.T) {
 	for _, want := range []string{
 		"guest.password.ok", "guest.password.fail", "guest.lockout", "guest.act.allowed", "guest.act.denied",
 		"guest.session.invalid", "guest.near.ok", "guest.near.denied", "guest.slug.miss", "guest.rate_limited",
-		"device.claimed", "device.request", "device.approved", "device.denied", "device.revoked", "device.reset",
-		"admin.device.decide", "admin.device.revoke", "admin.device.reset", "admin.link.rotate", "admin.password.add",
+		"device.claimed", "device.request", "device.approved", "device.denied", "device.removed", "device.reset",
+		"admin.device.decide", "admin.device.remove", "admin.device.reset", "admin.link.rotate", "admin.password.add",
 		"admin.refused",
 	} {
 		if !seen[want] {
@@ -214,7 +214,7 @@ func TestAuditAdminUser(t *testing.T) {
 	ah := newAuditHarness(t)
 	l := ah.link("guest_room")
 	user := map[string]string{"X-Remote-User-Id": "u1", "X-Remote-User-Name": "illia", "X-Remote-User-Display-Name": "Illia"}
-	ah.a(req{method: "POST", path: "/api/links/" + l.ID + "/revoke", body: map[string]any{}, headers: user})
+	ah.a(req{method: "POST", path: "/api/links/" + l.ID + "/deactivate", body: map[string]any{}, headers: user})
 	ah.a(req{method: "GET", path: "/api/links", headers: user})
 	ah.a(req{method: "DELETE", path: "/api/links/nope", body: map[string]any{}, headers: user})
 	recs := ah.records()
@@ -222,9 +222,9 @@ func TestAuditAdminUser(t *testing.T) {
 		t.Fatalf("records = %+v", recs)
 	}
 	r := recs[0]
-	if r.Event != "admin.link.revoke" || r.Result != audit.ResultOK || r.LinkID != l.ID || r.LinkName != l.Name ||
+	if r.Event != "admin.link.deactivate" || r.Result != audit.ResultOK || r.LinkID != l.ID || r.LinkName != l.Name ||
 		r.User == nil || r.User.ID != "u1" || r.User.Name != "illia" || r.User.DisplayName != "Illia" {
-		t.Errorf("revoke record = %+v", r)
+		t.Errorf("deactivate record = %+v", r)
 	}
 	if r := recs[1]; r.Event != "admin.link.delete" || r.Result != audit.ResultFailed || r.Reason != "not_found" || r.Status != 404 {
 		t.Errorf("failed delete record = %+v", r)
@@ -293,10 +293,10 @@ func TestAuditAdminDevPeerUser(t *testing.T) {
 	ah := newAuditHarness(t, func(_ *config.Options, d *Deps) { d.DevAdminAnyPeer = true })
 	l := ah.link("guest_room")
 	user := map[string]string{"X-Remote-User-Id": "u1", "X-Remote-User-Name": "illia", "X-Remote-User-Display-Name": "Illia"}
-	if c := ah.a(req{method: "POST", path: "/api/links/" + l.ID + "/revoke", body: map[string]any{}, headers: user, peer: "192.0.2.5:4000"}).Code; c != 200 {
+	if c := ah.a(req{method: "POST", path: "/api/links/" + l.ID + "/deactivate", body: map[string]any{}, headers: user, peer: "192.0.2.5:4000"}).Code; c != 200 {
 		t.Fatalf("dev peer: %d", c)
 	}
-	ah.a(req{method: "POST", path: "/api/links/" + l.ID + "/revoke", body: map[string]any{}, headers: user})
+	ah.a(req{method: "POST", path: "/api/links/" + l.ID + "/deactivate", body: map[string]any{}, headers: user})
 	recs := ah.records()
 	if len(recs) != 2 {
 		t.Fatalf("records = %+v", recs)
@@ -325,8 +325,8 @@ func TestAuditDenialFloodKeepsAdminRecords(t *testing.T) {
 	})
 	l := h.link("guest_room")
 	other := h.link("guest_room")
-	if c := h.a(req{method: "POST", path: "/api/links/" + other.ID + "/revoke", body: map[string]any{}}).Code; c != 200 {
-		t.Fatalf("revoke: %d", c)
+	if c := h.a(req{method: "POST", path: "/api/links/" + other.ID + "/deactivate", body: map[string]any{}}).Code; c != 200 {
+		t.Fatalf("deactivate: %d", c)
 	}
 	for i := range 500 {
 		if c := h.act(l, "light.bedroom", "light.turn_on", nil).Code; c != 403 {
@@ -339,7 +339,7 @@ func TestAuditDenialFloodKeepsAdminRecords(t *testing.T) {
 		raw, _ := os.ReadFile(p)
 		all = append(all, raw...)
 	}
-	if !bytes.Contains(all, []byte(`"event":"admin.link.revoke"`)) {
+	if !bytes.Contains(all, []byte(`"event":"admin.link.deactivate"`)) {
 		t.Error("the admin record was rotated out")
 	}
 	if n := bytes.Count(all, []byte(`"event":"guest.act.denied"`)); n > 5 {
@@ -365,7 +365,7 @@ func TestAuditCapsDenialFloodFromManyIPs(t *testing.T) {
 	for range acts {
 		ah.act(l, "light.guest_room", "light.turn_off", nil) // a discrete action: no slider throttle
 	}
-	ah.a(req{method: "POST", path: "/api/links/" + l.ID + "/revoke", body: map[string]any{}})
+	ah.a(req{method: "POST", path: "/api/links/" + l.ID + "/deactivate", body: map[string]any{}})
 	count := func(event string) (n int, sum int) {
 		for _, r := range ah.records() {
 			if r.Event == event {
@@ -384,7 +384,7 @@ func TestAuditCapsDenialFloodFromManyIPs(t *testing.T) {
 	if n, _ := count("guest.act.allowed"); n != acts {
 		t.Errorf("%d allowed records, want %d", n, acts)
 	}
-	if n, _ := count("admin.link.revoke"); n != 1 {
+	if n, _ := count("admin.link.deactivate"); n != 1 {
 		t.Errorf("%d admin records", n)
 	}
 	// The next record, of any kind, after the minute writes the summary.

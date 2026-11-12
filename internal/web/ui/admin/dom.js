@@ -87,16 +87,73 @@ export async function run(btn, fn) {
 // window.confirm, which HA's iframe may block.
 export function ask(title, message, { ok = 'OK', danger = false } = {}) {
   const dlg = document.getElementById('confirm');
+  const opener = document.activeElement;
   const okBtn = h('button', { type: 'submit', value: 'ok', class: danger ? 'danger' : 'primary', text: ok });
+  dlg.className = '';
+  dlg.oncancel = null;
+  dlg.setAttribute('aria-label', title);
   dlg.replaceChildren(h('form', { method: 'dialog', class: 'stack' },
     h('h2', { text: title }),
     message && h('p', { text: message }),
     h('div', { class: 'actions' }, okBtn, h('button', { type: 'submit', value: 'cancel', text: 'Cancel' }))));
   dlg.returnValue = '';
   return new Promise((resolve) => {
-    dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
+    dlg.addEventListener('close', () => {
+      returnFocus(opener);
+      resolve(dlg.returnValue === 'ok');
+    }, { once: true });
     dlg.showModal();
     okBtn.focus();
+  });
+}
+
+// returnFocus moves focus back to the control that opened a dialog, if
+// it is still on the page.
+function returnFocus(el) {
+  if (el && el.isConnected && typeof el.focus === 'function') el.focus();
+}
+
+// dialog shows a modal form in the shared dialog. body is the form's
+// content. onOk runs on submit; if it throws, the message shows in the
+// dialog and it stays open. It resolves to onOk's result, or undefined
+// on Cancel or Escape. The native modal keeps focus inside and Escape
+// cancels; focus goes back to the opener on close.
+export function dialog({ title, body, ok = 'OK', danger = false, onOk, wide = false }) {
+  const dlg = document.getElementById('confirm');
+  const opener = document.activeElement;
+  const err = h('p', { class: 'error small', role: 'alert', hidden: true });
+  const okBtn = h('button', { type: 'submit', class: danger ? 'danger' : 'primary', text: ok });
+  const cancel = h('button', { type: 'button', text: 'Cancel', onclick: () => dlg.close('cancel') });
+  let result;
+  let busy = false;
+  const form = h('form', { class: 'stack', novalidate: true, onsubmit: async (ev) => {
+    ev.preventDefault();
+    if (busy) return;
+    err.hidden = true;
+    busy = okBtn.disabled = cancel.disabled = true;
+    try {
+      result = await onOk();
+      dlg.close('ok');
+    } catch (e) {
+      err.textContent = e.message;
+      err.hidden = false;
+    } finally {
+      busy = okBtn.disabled = cancel.disabled = false;
+    }
+  } }, h('h2', { text: title }), body, err, h('div', { class: 'actions' }, okBtn, cancel));
+  // Escape cancels, but not while the call runs: its answer must land.
+  dlg.oncancel = (e) => { if (busy) e.preventDefault(); };
+  dlg.className = wide ? 'wide' : '';
+  dlg.setAttribute('aria-label', title);
+  dlg.replaceChildren(form);
+  dlg.returnValue = '';
+  return new Promise((resolve) => {
+    dlg.addEventListener('close', () => {
+      returnFocus(opener);
+      resolve(dlg.returnValue === 'ok' ? result : undefined);
+    }, { once: true });
+    dlg.showModal();
+    (form.querySelector('input:checked') || okBtn).focus();
   });
 }
 

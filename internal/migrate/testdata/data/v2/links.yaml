@@ -1,0 +1,52 @@
+version: 2
+links:
+  - id: l-anna
+    name: Anna
+    note: Visiting for the weekend
+    slug: k3Xq9vTzR0aW1bN2cD4eFg
+    created_at: 2026-11-10T09:00:00Z
+    valid_from: 2026-11-14T12:00:00Z
+    valid_until: 2026-11-16T18:00:00Z
+    templates: [house_entry, guest_room]
+    extra:
+      - select: {entities: [switch.guest_heater]}
+        actions: [switch.turn_on, switch.turn_off]
+        access: {network: any}
+    one_time: false
+    passwords:
+      - id: p-anna
+        label: Anna
+        hash: $argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g
+        created_at: 2026-11-10T09:00:00Z
+    approval: {manual: true, self_service: true}
+    devices:
+      - id: 3f9a1c0d7e2b4a65
+        label: Anna
+        device: iPhone, Safari
+        approved_at: 2026-11-14T12:05:00Z
+        approved_by: ha
+        last_seen_at: 2026-11-14T12:30:00Z
+      - id: 8b2e6d4f1a0c9e37
+        label: Anna
+        device: Android, Chrome
+        approved_at: 2026-11-14T13:00:00Z
+        approved_by: device:3f9a1c0d7e2b4a65
+    use_count: 3
+    last_used_at: 2026-11-14T12:30:00Z
+  - id: l-plumber
+    name: Plumber
+    slug: plumber-visit-2026
+    created_at: 2026-11-10T09:00:00Z
+    valid_until: 2026-11-12T17:00:00Z
+    inactive: true
+    suggest_new_url: true
+    templates: [house_entry]
+    one_time: true
+    used:
+      - {entity_id: lock.front_door, action: lock.unlock, at: 2026-11-11T08:05:00Z}
+  - id: l-draft
+    name: Draft
+    slug: draft-link-no-window
+    created_at: 2026-11-10T09:00:00Z
+    inactive: true
+    templates: [house_entry]

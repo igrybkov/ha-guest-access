@@ -287,3 +287,38 @@ func TestRev(t *testing.T) {
 		t.Error("Rev moved on a broken file; the content did not change")
 	}
 }
+
+// A file that holds only comments or blank space reads like a missing
+// one. It must not panic.
+func TestCommentOnlyFile(t *testing.T) {
+	for _, content := range []string{"#00", "# a note\n\n# another\n", "   \n"} {
+		dir := t.TempDir()
+		write(t, dir, "a.yaml", content)
+		got, err := In(newTestSet(dir, 3), "a.yaml", func() v3doc { return v3doc{Items: []string{"default"}} }).Load()
+		if err != nil || len(got.Items) != 1 || got.Items[0] != "default" {
+			t.Errorf("%q: %+v, %v", content, got, err)
+		}
+	}
+}
+
+func TestMapDelete(t *testing.T) {
+	m := &yaml.Node{Kind: yaml.MappingNode}
+	MapSet(m, "a", &yaml.Node{Kind: yaml.ScalarNode, Value: "1"})
+	MapSet(m, "b", &yaml.Node{Kind: yaml.ScalarNode, Value: "2"})
+	// A duplicate key goes too.
+	m.Content = append(m.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "a"}, &yaml.Node{Kind: yaml.ScalarNode, Value: "3"})
+	MapDelete(m, "a")
+	if len(m.Content) != 2 || m.Content[0].Value != "b" || MapGet(m, "a") != nil {
+		t.Errorf("after delete: %v", m.Content)
+	}
+	MapDelete(m, "missing")
+	if len(m.Content) != 2 {
+		t.Error("deleting a missing key changed the map")
+	}
+	seq := &yaml.Node{Kind: yaml.SequenceNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "a"}}}
+	MapDelete(seq, "a")
+	MapDelete(nil, "a")
+	if len(seq.Content) != 1 {
+		t.Error("a sequence changed")
+	}
+}

@@ -44,7 +44,8 @@ func TestAdminWritesNeedJSON(t *testing.T) {
 	h := newHarness(t)
 	l := h.link("guest_room")
 	for _, r := range []req{
-		{method: "POST", path: "/api/links/" + l.ID + "/revoke"},
+		{method: "POST", path: "/api/links/" + l.ID + "/deactivate"},
+		{method: "POST", path: "/api/links/" + l.ID + "/activate", body: `{"rotate":true}`, ctype: "text/plain"},
 		{method: "DELETE", path: "/api/links/" + l.ID},
 		{method: "POST", path: "/api/templates", body: `{"id":"x"}`, ctype: "text/plain"},
 		{method: "POST", path: "/api/links", body: "name=x", ctype: "application/x-www-form-urlencoded"},
@@ -53,8 +54,8 @@ func TestAdminWritesNeedJSON(t *testing.T) {
 			t.Errorf("%s %s: %d", r.method, r.path, rec.Code)
 		}
 	}
-	if got, _ := h.links.Get(l.ID); got.Revoked {
-		t.Error("revoked without JSON")
+	if got, _ := h.links.Get(l.ID); got.Inactive || got.Slug != l.Slug {
+		t.Error("changed without JSON")
 	}
 }
 
@@ -243,8 +244,11 @@ func TestAdminLinks(t *testing.T) {
 	if img, err := png.Decode(bytes.NewReader(rec.Body.Bytes())); rec.Code != 200 || err != nil || img.Bounds().Dx() < 100 {
 		t.Errorf("qr png: %d %v", rec.Code, err)
 	}
-	if rec := h.a(req{method: "POST", path: "/api/links/" + l.ID + "/revoke", body: map[string]any{}}); rec.Code != 200 || decode[linkView](t, rec).Status != "revoked" {
-		t.Errorf("revoke: %d", rec.Code)
+	if rec := h.a(req{method: "POST", path: "/api/links/" + l.ID + "/deactivate", body: map[string]any{}}); rec.Code != 200 || decode[linkView](t, rec).Status != "inactive" {
+		t.Errorf("deactivate: %d", rec.Code)
+	}
+	if rec := h.a(req{method: "POST", path: "/api/links/" + l.ID + "/activate", body: map[string]any{}}); rec.Code != 200 || decode[linkView](t, rec).Status != "active" {
+		t.Errorf("activate: %d", rec.Code)
 	}
 	if rec := h.a(req{method: "DELETE", path: "/api/links/" + l.ID, body: map[string]any{}}); rec.Code != 200 {
 		t.Errorf("delete: %d", rec.Code)

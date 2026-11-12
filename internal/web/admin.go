@@ -46,7 +46,8 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.HandleFunc("GET /api/links/{id}", s.getLink)
 	mux.HandleFunc("PUT /api/links/{id}", s.updateLink)
 	mux.HandleFunc("DELETE /api/links/{id}", s.deleteLink)
-	mux.HandleFunc("POST /api/links/{id}/revoke", s.revokeLink)
+	mux.HandleFunc("POST /api/links/{id}/deactivate", s.deactivateLink)
+	mux.HandleFunc("POST /api/links/{id}/activate", s.activateLink)
 	mux.HandleFunc("POST /api/links/{id}/rotate", s.rotateLink)
 	mux.HandleFunc("POST /api/links/{id}/passwords", s.addPassword)
 	mux.HandleFunc("DELETE /api/links/{id}/passwords/{pid}", s.removePassword)
@@ -143,6 +144,10 @@ func (s *Server) decodeAdmin(w http.ResponseWriter, r *http.Request, v any) bool
 	return err == nil
 }
 
+// msgNoWindow is the answer to an Activate whose window does not end in
+// the future. The admin UI shows it as is.
+const msgNoWindow = "Pick when it works first."
+
 // writeAdminErr maps an error to a status. Admin errors may carry detail:
 // only the ingress proxy reaches this port.
 func (s *Server) writeAdminErr(w http.ResponseWriter, r *http.Request, err error) {
@@ -155,6 +160,10 @@ func (s *Server) writeAdminErr(w http.ResponseWriter, r *http.Request, err error
 		return
 	case errors.Is(err, links.ErrNotFound), errors.Is(err, errNoTemplate), errors.Is(err, approval.ErrUnknownRequest):
 		status = http.StatusNotFound
+	case errors.Is(err, links.ErrNoWindow):
+		adminAudit(r).Reason = adminReason(err, http.StatusConflict)
+		writeError(w, http.StatusConflict, msgNoWindow)
+		return
 	case errors.Is(err, links.ErrSlugTaken), errors.Is(err, links.ErrTooManyDevices), errors.Is(err, errTemplateDup), errors.Is(err, errNoBaseURL):
 		status = http.StatusConflict
 	case errors.Is(err, access.ErrBadSlug), errors.Is(err, access.ErrEmptyPassword), errors.Is(err, access.ErrPasswordTooLong):
