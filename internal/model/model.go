@@ -305,6 +305,9 @@ func (t Template) UsesLocalNetwork() bool {
 type Templates struct {
 	Version   int        `yaml:"version" json:"version"`
 	Templates []Template `yaml:"templates" json:"templates"`
+	// Entities holds the admin's own name and description per entity
+	// id. It is app-wide, not per template.
+	Entities map[string]EntityText `yaml:"entities,omitempty" json:"entities,omitempty"`
 }
 
 // Find returns the template with id.
@@ -317,7 +320,8 @@ func (ts Templates) Find(id string) (Template, bool) {
 	return Template{}, false
 }
 
-// Validate checks every template and that ids are unique.
+// Validate checks every template, that ids are unique, and every
+// entity text entry.
 func (ts Templates) Validate() error {
 	var p problems
 	seen := map[string]bool{}
@@ -329,5 +333,6 @@ func (ts Templates) Validate() error {
 		}
 		seen[t.ID] = true
 	}
+	validateEntityTexts(&p, ts.Entities)
 	return p.err()
 }

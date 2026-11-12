@@ -246,6 +246,7 @@ var adminEvents = map[string]string{
 	"POST /api/templates":                    "admin.template.create",
 	"PUT /api/templates/{id}":                "admin.template.update",
 	"DELETE /api/templates/{id}":             "admin.template.delete",
+	"PUT /api/entity-text/{id}":              "admin.entity_text.update",
 	"POST /api/links":                        "admin.link.create",
 	"PUT /api/links/{id}":                    "admin.link.update",
 	"DELETE /api/links/{id}":                 "admin.link.delete",

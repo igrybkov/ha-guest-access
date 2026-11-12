@@ -6,6 +6,7 @@ import {
 } from './dom.js';
 import { paths, buildTemplate, buildRule, slugifyID, normalizeTemplatePath, grantedEntities } from './lib.js';
 import { Slots, ruleEditor, loadInventory, accessEditor, localOffNote, entityEditor, moveRule } from './rules.js';
+import { loadEntityTexts } from './entitytext.js';
 
 export async function render(view, rest) {
   const data = await get(paths.templates);
@@ -39,7 +40,7 @@ const ruleCount = (n) => (n === 0 ? 'no rules yet' : n === 1 ? '1 rule' : `${n} 
 async function editor(view, tpl, all) {
   const isNew = !tpl;
   if (!isNew && !tpl.id) throw new Error('no such template');
-  const [catalog, inv] = await Promise.all([get(paths.catalog), loadInventory()]);
+  const [catalog, inv, texts] = await Promise.all([get(paths.catalog), loadInventory(), loadEntityTexts()]);
   const src = tpl || { id: '', name: '', rules: [] };
   const f = {
     id: src.id,
@@ -54,7 +55,7 @@ async function editor(view, tpl, all) {
   // template gets a stand-in id until it has one.
   const probeID = () => f.id || 'new-template';
   const entities = entityEditor({
-    form: f, inv, catalog,
+    form: f, inv, catalog, texts,
     rules: () => editors.map((e) => e.st),
     group: probeID,
     empty: 'Nothing yet. Entities this template grants show here.',
@@ -166,7 +167,7 @@ async function editor(view, tpl, all) {
   } })),
   warnings,
   h('fieldset', {}, h('legend', { text: 'Entities on the guest page' }),
-    h('p', { class: 'muted small', text: 'Guests see Shown in this order. Drag by the handle, or use Alt+Up and Alt+Down. Until you move one, they go by name. Removing an entity takes its access away: it goes on the exclude list of the rules that pick it.' }),
+    h('p', { class: 'muted small', text: 'Guests see Shown in this order. Drag by the handle, or use Alt+Up and Alt+Down. Until you move one, they go by name. Removing an entity takes its access away: it goes on the exclude list of the rules that pick it. The ✎ button sets the name and description guests see; it saves at once, for every template and link.' }),
     entities.el, slots.slot('entity_order')),
   h('div', { class: 'actions sticky' },
     save,

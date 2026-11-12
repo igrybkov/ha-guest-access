@@ -30,6 +30,8 @@ export const paths = {
   pending: (link) => (link ? `api/devices/pending?link=${enc(link)}` : 'api/devices/pending'),
   decide: (rid) => `api/devices/pending/${enc(rid)}`,
   audit: (q) => `api/audit${q ? `?${q}` : ''}`,
+  entityTexts: 'api/entity-text',
+  entityText: (id) => `api/entity-text/${enc(id)}`,
 };
 
 // ---- Patterns ----
@@ -1084,4 +1086,51 @@ export function pendingRows(reqs, nowMs) {
 export function pendingBadge(n) {
   if (!Number.isInteger(n) || n <= 0) return '';
   return n > 99 ? '99+' : String(n);
+}
+
+// ---- Entity text ----
+//
+// The admin's own name and description of an entity. Guests see them on
+// its card, in every template and link.
+
+// Caps of model.EntityText, in bytes.
+export const ENTITY_NAME_MAX = 120;
+export const ENTITY_DESCRIPTION_MAX = 300;
+
+const utf8Len = (s) => new TextEncoder().encode(s).length;
+// CONTROL matches what Go's unicode.IsControl does: C0, DEL and C1.
+const CONTROL = /\p{Cc}/u;
+
+// entityTextProblems checks text as model.EntityText.Validate does,
+// after the trim the server makes. It returns {name, description} with a
+// message for each field that fails, or '' when it passes.
+export function entityTextProblems({ name = '', description = '' } = {}) {
+  const n = name.trim();
+  const d = description.trim();
+  return {
+    name: utf8Len(n) > ENTITY_NAME_MAX ? `Too long: at most ${ENTITY_NAME_MAX} bytes.`
+      : CONTROL.test(n) ? 'Use one line, with no tabs or control characters.' : '',
+    description: utf8Len(d) > ENTITY_DESCRIPTION_MAX ? `Too long: at most ${ENTITY_DESCRIPTION_MAX} bytes.`
+      : CONTROL.test(d.replace(/\r?\n/g, '')) ? 'No tabs or control characters. Line breaks are fine.' : '',
+  };
+}
+
+// entityRow is how an editor row shows an entity. name is the admin's
+// name, else the HA name, else the id. sub names the HA side in muted
+// text: the HA name and the id when the admin renamed it, else the id.
+// desc is the admin's description, or ''. text may be undefined.
+export function entityRow(id, haName, text) {
+  const own = (text?.name || '').trim();
+  const ha = haName || id;
+  return {
+    name: own || ha,
+    sub: own && ha !== id ? `${ha} · ${id}` : id,
+    desc: (text?.description || '').trim(),
+    custom: !!own,
+  };
+}
+
+// entityTextMap turns GET api/entity-text into a Map by entity id.
+export function entityTextMap(body) {
+  return new Map(Object.entries(body?.entities || {}));
 }

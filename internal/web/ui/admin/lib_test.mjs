@@ -11,6 +11,7 @@ import {
   linkProblems, removePasswordPrompt, wallToUTC, wallParts, usableZone, browserZone, zoneNote, fmtTime, fmtWindow,
   PENDING_ROUTE, wantsPending, haRoutePath, pollMs, ago, pendingRows, pendingBadge,
   pickPreset, formPreset, needsEnd, INACTIVE_HINT, STATUS_LABELS,
+  entityTextProblems, entityRow, entityTextMap, ENTITY_NAME_MAX, ENTITY_DESCRIPTION_MAX,
 } from './lib.js';
 
 // ---- Patterns ----
@@ -1014,4 +1015,50 @@ test('suggestName gives an unused friendly name', () => {
   const all = a.flatMap((x) => b.map((y) => `${x} ${y}`));
   assert.match(suggestName(all, () => 0), new RegExp(`^${a[0]} ${b[0]} 2$`));
   for (let i = 0; i < 50; i++) assert.ok(all.includes(suggestName([])));
+});
+
+// ---- Entity text ----
+
+test('entity text paths escape the id', () => {
+  assert.equal(paths.entityTexts, 'api/entity-text');
+  assert.equal(paths.entityText('light.guest_room'), 'api/entity-text/light.guest_room');
+  assert.equal(paths.entityText('a/b'), 'api/entity-text/a%2Fb');
+});
+
+test('entityTextProblems mirrors model.EntityText.Validate', () => {
+  const ok = { name: '', description: '' };
+  assert.deepEqual(entityTextProblems({}), ok);
+  assert.deepEqual(entityTextProblems({ name: 'Reading lamp', description: 'By the bed\nDimmable\r\nWarm' }), ok);
+  assert.deepEqual(entityTextProblems({ name: 'a'.repeat(ENTITY_NAME_MAX) }), ok);
+  // The server trims first, so spaces around do not count.
+  assert.deepEqual(entityTextProblems({ name: ` ${'a'.repeat(ENTITY_NAME_MAX)} ` }), ok);
+  assert.match(entityTextProblems({ name: 'a'.repeat(ENTITY_NAME_MAX + 1) }).name, /120 bytes/);
+  // Bytes, not letters: é is two bytes.
+  assert.match(entityTextProblems({ name: 'é'.repeat(ENTITY_NAME_MAX / 2 + 1) }).name, /bytes/);
+  assert.match(entityTextProblems({ name: 'a\nb' }).name, /one line/);
+  assert.match(entityTextProblems({ name: 'a\tb' }).name, /one line/);
+  assert.match(entityTextProblems({ description: 'a'.repeat(ENTITY_DESCRIPTION_MAX + 1) }).description, /300 bytes/);
+  assert.equal(entityTextProblems({ description: 'a'.repeat(ENTITY_DESCRIPTION_MAX) }).description, '');
+  for (const bad of ['a\tb', 'a\rb', 'a\u001bb', 'a\u0085b', 'a\u0000b']) {
+    assert.notEqual(entityTextProblems({ description: bad }).description, '', JSON.stringify(bad));
+  }
+});
+
+test('entityRow shows the admin name with the HA side muted', () => {
+  assert.deepEqual(entityRow('light.a', 'Guest lamp', undefined), { name: 'Guest lamp', sub: 'light.a', desc: '', custom: false });
+  assert.deepEqual(entityRow('light.a', 'Guest lamp', { name: ' Reading lamp ', description: ' By the bed ' }),
+    { name: 'Reading lamp', sub: 'Guest lamp · light.a', desc: 'By the bed', custom: true });
+  assert.deepEqual(entityRow('light.a', 'Guest lamp', { description: 'By the bed' }),
+    { name: 'Guest lamp', sub: 'light.a', desc: 'By the bed', custom: false });
+  // No HA name: the id once, not twice.
+  assert.deepEqual(entityRow('light.a', '', { name: 'Lamp' }), { name: 'Lamp', sub: 'light.a', desc: '', custom: true });
+  assert.deepEqual(entityRow('light.a', '', undefined), { name: 'light.a', sub: 'light.a', desc: '', custom: false });
+  assert.equal(entityRow('light.a', 'Guest lamp', { name: '   ' }).name, 'Guest lamp');
+});
+
+test('entityTextMap reads the API body', () => {
+  const m = entityTextMap({ entities: { 'light.a': { name: 'Lamp' } } });
+  assert.equal(m.get('light.a').name, 'Lamp');
+  assert.equal(entityTextMap({}).size, 0);
+  assert.equal(entityTextMap(null).size, 0);
 });

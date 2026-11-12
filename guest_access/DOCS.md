@@ -49,6 +49,26 @@ The guest page shows one group per template. Inside a group, entities go by name
 
 The lists work with a mouse, touch and the keyboard. On a phone, drag by the handle; a swipe on the rest of the row scrolls the page.
 
+### Entity names and descriptions
+
+Press **✎** on a row in **Shown** to give the entity your own name and a short description. Guests see the name as the card title and the description as a small line under it. Leave the name empty to use the HA name. Clear both and save to remove the entry.
+
+- The text is per entity, for the whole app: the same entity reads the same in every template and link. The link editor's **Shown** list has the same button.
+- **Save** writes it at once. You do not need to save the template or link too.
+- The name is one line of at most 120 bytes. The description is at most 300 bytes and may hold line breaks. Both are plain text.
+- When the guest page sorts a group by name, it uses the name guests see.
+
+The text is stored in `templates.yaml` under `entities`, keyed by entity id:
+
+```yaml
+entities:
+  light.guest_room:
+    name: Reading lamp
+    description: By the bed. Tap to dim.
+```
+
+An entry for an entity HA does not know is kept and does nothing. Each change is in the audit log as `admin.entity_text.update`.
+
 ### Select and exclude
 
 `select` and `exclude` take four lists. The lists combine as a union.

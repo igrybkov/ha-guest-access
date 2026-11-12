@@ -38,6 +38,8 @@ func (s *Server) AdminHandler() http.Handler {
 	mux.HandleFunc("PUT /api/templates/{id}", s.updateTemplate)
 	mux.HandleFunc("DELETE /api/templates/{id}", s.deleteTemplate)
 	mux.HandleFunc("POST /api/preview", s.preview)
+	mux.HandleFunc("GET /api/entity-text", s.listEntityText)
+	mux.HandleFunc("PUT /api/entity-text/{id}", s.putEntityText)
 
 	mux.HandleFunc("GET /api/links", s.listLinks)
 	mux.HandleFunc("POST /api/links", s.createLink)

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Admin: give any entity your own name and a short description with
+  the ✎ button in the **Shown** lists of the template and link
+  editors. Guests see the name as the card title and the description
+  under it, in every template and link. The text is stored in
+  `templates.yaml` under `entities`.
+
 ## 0.4.1
 
 - Entity names follow HA's display name (`friendly_name`), so renames

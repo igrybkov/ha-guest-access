@@ -6,9 +6,10 @@ import {
 import {
   paths, PRESETS, pickPreset, formPreset, needsEnd, INACTIVE_HINT, toLocalInput, fromLocalInput, zoneNote, fmtTime, fmtWindow, buildLink, linkForm,
   approvalMode, linkLabel, suggestName, splitTemplates, templateLists, placeItem, dropItem, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
-  linkProblems, brokenLinkNote, removePasswordPrompt, ownRuleEntities,
+  linkProblems, brokenLinkNote, removePasswordPrompt, ownRuleEntities, entityRow,
 } from './lib.js';
 import { Slots, ruleEditor, loadInventory, entityEditor, moveRule } from './rules.js';
+import { loadEntityTexts } from './entitytext.js';
 import { dualList } from './dnd.js';
 
 export async function render(view, rest) {
@@ -98,12 +99,13 @@ async function list(view) {
 
 async function editor(view, id) {
   const isNew = !id;
-  const [linkView, tpls, catalog, inv, others] = await Promise.all([
+  const [linkView, tpls, catalog, inv, others, texts] = await Promise.all([
     isNew ? null : get(paths.link(id)),
     get(paths.templates),
     get(paths.catalog),
     loadInventory(),
     isNew ? get(paths.links).catch(() => ({ links: [] })) : null,
+    loadEntityTexts(),
   ]);
   const templates = tpls.templates || [];
   const f = linkForm(linkView || {});
@@ -224,7 +226,9 @@ async function editor(view, id) {
   // The group the guest page shows for the extra rules. It lists only
   // entities that no template of the link grants.
   const order = entityEditor({
-    form: f, inv, catalog,
+    form: f, inv, catalog, texts,
+    // The grants box shows the names too.
+    onTextChange: () => schedule(),
     rules: current,
     group: () => '',
     empty: 'Entities that only the extra rules grant show here.',
@@ -280,9 +284,13 @@ async function editor(view, id) {
       const groups = grantSummary(res.grants);
       fill(grantsBox, 
         groups.length
-          ? h('ul', { class: 'plain-list' }, groups.map((g) => h('li', {},
-            h('strong', { text: g.name }), ' ', h('code', { class: 'muted small', text: g.entity_id }),
-            h('div', { class: 'small', text: g.actions.join(', ') }))))
+          ? h('ul', { class: 'plain-list' }, groups.map((g) => {
+            const r = entityRow(g.entity_id, g.name, texts?.get(g.entity_id));
+            return h('li', {},
+              h('strong', { text: r.name }), ' ', h('code', { class: 'muted small', text: r.sub }),
+              r.desc && h('div', { class: 'small muted dl-desc', text: r.desc }),
+              h('div', { class: 'small', text: g.actions.join(', ') }));
+          }))
           : h('p', { class: 'muted', text: 'Nothing yet. Add a template or a rule.' }),
         res.warnings.length > 0 && h('ul', { class: 'warning small' }, res.warnings.map((w) => h('li', { text: w.template ? `${w.template}: ${w.message}` : w.message }))));
       slots.show(res.problems);
@@ -347,7 +355,7 @@ async function editor(view, id) {
         schedule();
       } })),
       h('fieldset', {}, h('legend', { text: 'Extra rule entities on the guest page' }),
-        h('p', { class: 'muted small', text: 'Guests see Shown in one group after the templates, in this order. Drag by the handle, or use Alt+Up and Alt+Down. Until you move one, they go by name. Removing an entity takes its access away: it goes on the exclude list of the extra rules that pick it.' }),
+        h('p', { class: 'muted small', text: 'Guests see Shown in one group after the templates, in this order. Drag by the handle, or use Alt+Up and Alt+Down. Until you move one, they go by name. Removing an entity takes its access away: it goes on the exclude list of the extra rules that pick it. The ✎ button sets the name and description guests see; it saves at once, for every template and link.' }),
         order.el, slots.slot('entity_order')),
       h('fieldset', {}, h('legend', { text: 'Options' }),
         check('One-time', oneTime, 'Each action on each entity works once.'),

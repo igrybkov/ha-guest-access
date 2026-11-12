@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"math"
@@ -174,6 +175,14 @@ func (s *Server) resolveLink(ctx context.Context, link model.Link) (authz.Grants
 // validTemplates returns the templates that pass Validate. A bad template
 // grants nothing; the admin API shows why.
 func (s *Server) validTemplates() []model.Template {
+	valid, _ := s.loadTemplates()
+	return valid
+}
+
+// loadTemplates reads templates.yaml once. It returns the templates that
+// pass Validate, and the whole file for its entity text. A load or
+// validation error still gives what could be read.
+func (s *Server) loadTemplates() ([]model.Template, model.Templates) {
 	ts, err := s.deps.Templates.Templates()
 	if err != nil {
 		s.log.Debug("templates", "err", err)
@@ -184,7 +193,7 @@ func (s *Server) validTemplates() []model.Template {
 			out = append(out, t)
 		}
 	}
-	return out
+	return out, ts
 }
 
 // Views sent by GET /g/{slug}/state.
@@ -217,9 +226,13 @@ type (
 		Entities []string `json:"entities"`
 	}
 	entityView struct {
-		Name    string       `json:"name"`
-		Domain  string       `json:"domain"`
-		Actions []actionView `json:"actions"`
+		// Name is the admin's name for the entity, else the HA name, else
+		// the entity id. Description is the admin's line under it. Both
+		// are plain text.
+		Name        string       `json:"name"`
+		Description string       `json:"description,omitempty"`
+		Domain      string       `json:"domain"`
+		Actions     []actionView `json:"actions"`
 	}
 	actionView struct {
 		ID     string                   `json:"id"`
@@ -249,7 +262,7 @@ func (s *Server) plan(ctx context.Context, g *guestReq) (guestPlan, error) {
 	if err != nil {
 		return guestPlan{}, err
 	}
-	ts := s.validTemplates()
+	ts, file := s.loadTemplates()
 	grants, _ := authz.Resolve(g.link, ts, inv)
 	acc := s.accessFor(g)
 
@@ -303,6 +316,10 @@ func (s *Server) plan(ctx context.Context, g *guestReq) (guestPlan, error) {
 		e := p.view.Entities[k.EntityID]
 		if e == nil {
 			e = &entityView{Name: inv.Entities[k.EntityID].Name, Domain: model.Domain(k.EntityID)}
+			if txt, ok := file.EntityText(k.EntityID); ok {
+				e.Name = cmp.Or(txt.Name, e.Name)
+				e.Description = txt.Description
+			}
 			if e.Name == "" {
 				e.Name = k.EntityID
 			}

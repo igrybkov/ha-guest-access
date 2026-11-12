@@ -130,6 +130,7 @@ input[type="password"] {
 .card .name { font-size: 1.1rem; margin: 0; overflow-wrap: anywhere; }
 .card .state { color: var(--muted); font-size: 0.95rem; text-align: right; flex: none; max-width: 50%; }
 .card .body:empty { display: none; }
+.card .desc { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.9rem; white-space: pre-line; overflow-wrap: anywhere; }
 .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
 .actions > button.big { flex: 1 1 10rem; width: auto; }
 .actions > button:not(.big):not(.toggle):not(.icon-button) { flex: 1 1 auto; }

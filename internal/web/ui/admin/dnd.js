@@ -21,15 +21,20 @@ const START_PX = 4;
 
 // dualList builds the control. opts:
 //   - label: the name of the whole group, for screen readers.
-//   - chosen: {title, empty, remove(name)}. remove gives the aria-label
-//     of the − button.
+//   - chosen: {title, empty, remove(name), edit}. remove gives the
+//     aria-label of the − button. edit is optional: {label(name),
+//     form(item, close)}. With it, each chosen row gets an edit button
+//     that opens form's element under the row. label gives the button's
+//     aria-label. form builds the element; close() shuts it. The open
+//     form is kept across set(), so a redraw never loses what was typed.
 //   - other: {title, empty, add(name)}. add gives the aria-label of the +
 //     button.
 //   - onMove(id, to, index): to is "chosen" or "other". index is the
 //     place in the chosen list, counted without the item; undefined
 //     means the end.
-// Items are {id, name, sub, locked, note}. A locked item has no handle
-// and no + button; note says why.
+// Items are {id, name, sub, desc, locked, note}. desc is a muted line
+// under the name. A locked item has no handle and no + button; note says
+// why.
 // Returns {el, set({chosen, other})}.
 export function dualList(opts) {
   const lists = {
@@ -50,6 +55,22 @@ export function dualList(opts) {
   // {id, role}. Without it, draw keeps the focus the page had.
   let focusNext = null;
   const announce = (msg) => { status.textContent = msg; };
+  // editing is the open inline form: {id, el}, or null.
+  let editing = null;
+  const edit = opts.chosen.edit;
+  const openEdit = (it) => {
+    let form = null;
+    const close = () => {
+      if (editing?.el !== form) return;
+      editing = null;
+      focusNext = { id: it.id, role: 'edit' };
+      draw();
+    };
+    form = edit.form(it, close);
+    editing = { id: it.id, el: form };
+    draw();
+    form.querySelector('input, textarea, button')?.focus();
+  };
 
   const move = (id, to, index, focus) => {
     focusNext = focus;
@@ -69,17 +90,32 @@ export function dualList(opts) {
         onclick: () => { announce(`${it.name} moved to ${lists.other.cfg.title}`); move(it.id, 'other', undefined, { id: it.id, role: 'add' }); } })
       : !it.locked && h('button', { type: 'button', class: 'icon dl-btn', 'data-role': 'add', text: '+', 'aria-label': l.cfg.add(it.name),
         onclick: () => { announce(`${it.name} moved to ${lists.chosen.cfg.title}`); move(it.id, 'chosen', undefined, { id: it.id, role: 'remove' }); } });
-    const li = h('li', { class: `dl-row${it.locked ? ' locked' : ''}`, 'data-id': it.id, 'data-drag-row': '', tabindex: -1 },
+    const open = key === 'chosen' && editing?.id === it.id;
+    const editBtn = key === 'chosen' && edit && h('button', {
+      type: 'button', class: 'icon dl-btn dl-edit', 'data-role': 'edit', text: '✎',
+      'aria-label': edit.label(it.name), 'aria-expanded': String(open), title: 'Edit the name and description guests see',
+      onclick: () => {
+        if (!open) return openEdit(it);
+        editing = null;
+        return draw();
+      },
+    });
+    const li = h('li', { class: `dl-row${it.locked ? ' locked' : ''}${open ? ' editing' : ''}`, 'data-id': it.id, 'data-drag-row': '', tabindex: -1 },
       handle || h('span', { class: 'dl-nohandle' }),
       h('span', { class: 'dl-text' },
         h('span', { class: 'dl-name', text: it.name }),
         it.sub && h('code', { class: 'muted small', text: it.sub }),
+        it.desc && h('span', { class: 'dl-desc small muted', text: it.desc }),
         it.note && h('span', { class: 'dl-note small muted', text: it.note })),
-      btn);
+      editBtn,
+      btn,
+      open && editing.el);
     if (handle) dragFrom(handle, li, key, it, i);
     if (key === 'chosen') {
       li.addEventListener('keydown', (ev) => {
         if (!ev.altKey || (ev.key !== 'ArrowUp' && ev.key !== 'ArrowDown')) return;
+        // Keys typed in the inline form belong to the form.
+        if (editing?.el.contains(ev.target)) return;
         ev.preventDefault();
         const to = i + (ev.key === 'ArrowUp' ? -1 : 1);
         if (to < 0 || to >= n) return;
@@ -92,10 +128,14 @@ export function dualList(opts) {
 
   function draw() {
     const active = el.contains(document.activeElement) ? document.activeElement : null;
-    const keep = focusNext || (active && {
+    // A control in the open form keeps the focus: the form element is
+    // reused, so the same control is still there after the redraw.
+    const inForm = !focusNext && active && editing?.el.contains(active) ? active : null;
+    const keep = focusNext || (!inForm && active && {
       id: active.closest('.dl-row')?.dataset.id, role: active.dataset.role || '', list: active.dataset.list || '',
     });
     focusNext = null;
+    if (editing && !lists.chosen.items.some((it) => it.id === editing.id)) editing = null;
     for (const key of ['chosen', 'other']) {
       const l = lists[key];
       l.count.textContent = String(l.items.length);
@@ -103,7 +143,8 @@ export function dualList(opts) {
         ? l.items.map((it, i) => row(key, it, i))
         : [h('li', { class: 'dl-empty muted small', text: l.cfg.empty })]));
     }
-    if (keep) restoreFocus(keep);
+    if (inForm?.isConnected) inForm.focus({ preventScroll: true });
+    else if (keep) restoreFocus(keep);
   }
 
   // restoreFocus finds the control by dataset, not by a selector built

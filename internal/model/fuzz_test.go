@@ -30,12 +30,19 @@ func FuzzTemplatesYAML(f *testing.F) {
 		f.Add(raw)
 	}
 	f.Add([]byte("templates: [{id: a, name: A, rules: [{select: {entities: ['*']}, actions: [script.run], variables: {x: [{code: 1}]}}]}]"))
+	f.Add([]byte("templates: []\nentities: {light.a: {name: Lamp, description: \"By the bed\\nDimmable\"}, Bad: {name: \"\\u0000\"}}"))
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		var ts Templates
 		if yaml.Unmarshal(raw, &ts) != nil {
 			return
 		}
 		_ = ts.Validate()
+		// Text guests may see always passes the shape check.
+		for id := range ts.Entities {
+			if txt, ok := ts.EntityText(id); ok && (txt.Validate() != nil || txt.Empty() || !ValidEntityID(id)) {
+				t.Fatalf("%q gave bad text %+v", id, txt)
+			}
+		}
 	})
 }
 

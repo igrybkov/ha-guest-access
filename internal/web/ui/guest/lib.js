@@ -77,7 +77,10 @@ export function cards(view) {
     for (const id of g.entities || []) {
       const e = (view.entities || {})[id];
       if (!e || !Array.isArray(e.actions) || e.actions.length === 0) continue;
-      entities.push({ id, name: e.name || id, domain: e.domain || id.split('.')[0], actions: e.actions });
+      const card = { id, name: e.name || id, domain: e.domain || id.split('.')[0], actions: e.actions };
+      // The admin's description, plain text. Only a non-empty string counts.
+      if (typeof e.description === 'string' && e.description.trim()) card.description = e.description.trim();
+      entities.push(card);
     }
     if (entities.length > 0) out.push({ name: g.name || 'More', entities });
   }

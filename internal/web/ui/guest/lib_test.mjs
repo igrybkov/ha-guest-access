@@ -54,6 +54,23 @@ test('cards keeps every action, in group order', () => {
   assert.deepEqual(cards(null), []);
 });
 
+test('cards carries the admin description, and only a real one', () => {
+  const act = [{ id: 'light.turn_on', ui: 'button' }];
+  const view = {
+    groups: [{ name: 'Room', entities: ['light.a', 'light.b', 'light.c', 'light.d'] }],
+    entities: {
+      'light.a': { name: 'Reading lamp', domain: 'light', description: ' By the bed\nDimmable ', actions: act },
+      'light.b': { name: 'B', domain: 'light', description: '   ', actions: act },
+      'light.c': { name: 'C', domain: 'light', description: { html: '<b>x</b>' }, actions: act },
+      'light.d': { name: 'D', domain: 'light', actions: act },
+    },
+  };
+  const [g] = cards(view);
+  assert.equal(g.entities[0].name, 'Reading lamp');
+  assert.equal(g.entities[0].description, 'By the bed\nDimmable');
+  for (const e of g.entities.slice(1)) assert.equal('description' in e, false, e.id);
+});
+
 test('splitActions', () => {
   const r = splitActions([{ id: 'a' }, { id: 'b', needs_location: true }]);
   assert.deepEqual(r.now.map((a) => a.id), ['a']);

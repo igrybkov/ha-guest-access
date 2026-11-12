@@ -6,9 +6,10 @@ import { h, fill, get, check, localEnabled, docsLink } from './dom.js';
 import {
   paths, SELECTOR_KEYS, patternProblem, searchOptions, pickedEntities, actionChoices,
   domainOf, ruleState, buildRule, groupProblems, isExact, entityLists, rulesPicking, grantRules,
-  excludeEntity, includeEntity, placeItem, dropItem, lockedNote, rekeyPath, moveIndex, indexMap,
+  excludeEntity, includeEntity, placeItem, dropItem, lockedNote, rekeyPath, moveIndex, indexMap, entityRow,
 } from './lib.js';
 import { dualList, sortHandle } from './dnd.js';
+import { entityTextForm } from './entitytext.js';
 
 // ---- Problem slots ----
 
@@ -160,10 +161,14 @@ function selectorBox(title, sel, inSelect, inv, base, slots, onChange) {
 //   - onRulesChange(indexes): runs after the excludes of those rules
 //     changed. The caller redraws those rule editors and runs the
 //     preview.
+//   - texts: the admin's entity text, a Map by entity id (loadEntityTexts),
+//     or null when it did not load. With a Map, Shown rows show it and
+//     get an edit button. A save changes the Map in place.
+//   - onTextChange(): optional; runs after a text save.
 // set(grants, granted, hide) takes a new preview: its grants, the
 // group's entities and ids to leave out of Removed.
 export function entityEditor(opts) {
-  const { form, inv } = opts;
+  const { form, inv, texts } = opts;
   const known = opts.catalog?.actions ? new Set(opts.catalog.actions.map((a) => a.id)) : null;
   let grants = [];
   let granted = [];
@@ -173,9 +178,10 @@ export function entityEditor(opts) {
   const draw = () => {
     const lists = entityLists({ rules: opts.rules(), inv, known, granted, hide, order: form.entity_order });
     shown = lists.shown;
+    const row = (e) => ({ id: e.entity_id, haName: e.name, ...entityRow(e.entity_id, e.name, texts?.get(e.entity_id)) });
     list.set({
-      chosen: lists.shown.map((e) => ({ id: e.entity_id, name: e.name, sub: e.entity_id })),
-      other: lists.removed.map((e) => ({ id: e.entity_id, name: e.name, sub: e.entity_id, locked: e.locked, note: e.locked ? lockedNote(e.by) : '' })),
+      chosen: lists.shown.map(row),
+      other: lists.removed.map((e) => ({ ...row(e), locked: e.locked, note: e.locked ? lockedNote(e.by) : '' })),
     });
   };
 
@@ -213,7 +219,21 @@ export function entityEditor(opts) {
 
   const list = dualList({
     label: 'Entities on the guest page',
-    chosen: { title: 'Shown', empty: opts.empty, remove: (n) => `Remove ${n} and take its access away` },
+    chosen: {
+      title: 'Shown', empty: opts.empty, remove: (n) => `Remove ${n} and take its access away`,
+      edit: texts && {
+        label: (n) => `Edit the name and description of ${n}`,
+        form: (it, close) => entityTextForm({
+          id: it.id, haName: it.haName, text: texts.get(it.id), close,
+          onSaved: (t) => {
+            if (t.name || t.description) texts.set(it.id, t);
+            else texts.delete(it.id);
+            draw();
+            opts.onTextChange?.();
+          },
+        }),
+      },
+    },
     other: {
       title: 'Removed',
       empty: inv ? 'Nothing removed.' : 'The entity list is not loaded, so removed entities do not show.',

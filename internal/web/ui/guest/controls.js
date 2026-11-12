@@ -31,8 +31,13 @@ export function makeCard(entity, state, ctx) {
   const live = kind === 'lock' || kind === 'alarm' || kind === 'script' || kind === 'cover';
   const stateText = el('span', { className: 'state', attrs: live ? { 'aria-live': 'polite' } : {} });
   const body = el('div', { className: 'body' });
-  const node = el('section', { className: 'card', attrs: { 'aria-labelledby': headId } },
-    el('div', { className: 'head' }, name, stateText), body);
+  // The admin's description is a muted line under the head. Plain text;
+  // line breaks show.
+  const desc = entity.description
+    ? el('p', { className: 'desc', id: headId + '-desc' }, entity.description)
+    : null;
+  const node = el('section', { className: 'card', attrs: { 'aria-labelledby': headId, 'aria-describedby': desc ? desc.id : null } },
+    el('div', { className: 'head' }, name, stateText), desc, body);
 
   let current = state;
   let holding = 0; // sliders under the guest's finger
