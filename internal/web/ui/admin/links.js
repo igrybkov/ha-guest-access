@@ -33,8 +33,11 @@ async function rotate(l, btn, after) {
   const msg = `The old URL stops working at once. Send the new one to your guests.${warn ? ` ${warn}` : ''}`;
   if (!(await ask(`New URL for ${linkLabel(l)}?`, msg, { ok: 'Make new URL', danger: true }))) return;
   await run(btn, async () => {
-    await post(paths.rotate(l.id), {});
+    const saved = await post(paths.rotate(l.id), {});
     toast('New URL made');
+    // Copy it at once, since the old one no longer works. If the browser
+    // refuses, copyText shows the URL instead.
+    await copyText(saved.url || saved.path);
     after();
   });
 }
