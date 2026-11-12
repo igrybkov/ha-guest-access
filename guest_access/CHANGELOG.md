@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Guest page: a favicon and a home screen icon (a plain house, nothing
+  that names the app). The not-found page has none.
 - Admin: give any entity your own name and a short description with
   the ✎ button in the **Shown** lists of the template and link
   editors. Guests see the name as the card title and the description
