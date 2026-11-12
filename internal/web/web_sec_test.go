@@ -282,7 +282,7 @@ func TestSecAdminRejectsNonJSONWrites(t *testing.T) {
 	h := newHarness(t)
 	l := h.link("guest_room")
 	for _, ct := range []string{"text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x", "application/jsonx", "text/json", ""} {
-		for _, p := range []string{"/api/links/" + l.ID + "/revoke", "/api/links/" + l.ID, "/api/templates"} {
+		for _, p := range []string{"/api/links/" + l.ID + "/deactivate", "/api/links/" + l.ID, "/api/templates"} {
 			m := "POST"
 			if p == "/api/links/"+l.ID {
 				m = "DELETE"
@@ -293,8 +293,8 @@ func TestSecAdminRejectsNonJSONWrites(t *testing.T) {
 			}
 		}
 	}
-	if got, _ := h.links.Get(l.ID); got.Revoked {
-		t.Fatal("a non-JSON write revoked the link")
+	if got, _ := h.links.Get(l.ID); got.Inactive {
+		t.Fatal("a non-JSON write turned the link off")
 	}
 }
 
@@ -438,11 +438,11 @@ func TestSecSessionReplay(t *testing.T) {
 	// A rotated slug keeps sessions (by design) but the old slug is dead.
 	rec = h.g(req{method: "POST", path: "/g/" + l.Slug + "/password", body: map[string]any{"password": "pw"}})
 	ses = cookie(rec, sessionCookie)
-	if rec := h.a(req{method: "POST", path: "/api/links/" + l.ID + "/revoke", body: map[string]any{}}); rec.Code != 200 {
-		t.Fatalf("revoke: %d", rec.Code)
+	if rec := h.a(req{method: "POST", path: "/api/links/" + l.ID + "/deactivate", body: map[string]any{}}); rec.Code != 200 {
+		t.Fatalf("deactivate: %d", rec.Code)
 	}
 	if c := call(l, ses); c != 410 {
-		t.Errorf("session on a revoked link: %d", c)
+		t.Errorf("session on an inactive link: %d", c)
 	}
 	h.advance(48 * time.Hour)
 	if c := call(l2, &http.Cookie{Name: access.LinkCookie(sessionCookie, l2.ID), Value: h.srv.deps.Signer.SignSession(l2.ID, "x", t0.Add(time.Hour))}); c == 200 {

@@ -7,7 +7,7 @@
 // guest_access_device_decision, from the admin API, or from an approved
 // device of the same link (self-service). An approved device is stored on
 // the link and gets a signed cookie. Every request checks that the device
-// is still on the link, so a revoke or reset works at once.
+// is still on the link, so a removal or reset works at once.
 //
 // The guest handlers run after web checked the slug, the link window and
 // the password session. web also checks Origin and the JSON content type
@@ -297,7 +297,7 @@ func (m *Manager) Admit(w http.ResponseWriter, r *http.Request, link model.Link,
 // StillValid reports whether deviceID may still use link, without writing
 // anything. Open event streams call it with the device that Admit
 // returned. With approval off it is true. With approval on, the device
-// must still be on the link, so a revoke or reset ends the stream, and so
+// must still be on the link, so a removal or reset ends the stream, and so
 // does turning approval on while a stream with no device is open.
 func (m *Manager) StillValid(link model.Link, deviceID string) bool {
 	if !link.Approval.On() {
@@ -347,7 +347,7 @@ func (m *Manager) RequestAccess(w http.ResponseWriter, r *http.Request, link mod
 				writeJSON(w, http.StatusOK, map[string]string{"status": "approved"})
 				return
 			}
-			// The device was revoked before pickup; ask again.
+			// The device was removed before pickup; ask again.
 		case stateDenied:
 			m.drop(req) // a denied guest may ask again; the event cap still holds
 		}
@@ -586,12 +586,12 @@ func (m *Manager) Decide(requestID string, approve bool) error {
 	return m.decide(requestID, approve, model.ApprovedByAdmin, "")
 }
 
-// RemoveDevice revokes one device from the admin API. Its cookie fails on
+// RemoveDevice removes one device from the admin API. Its cookie fails on
 // the next request. Nothing goes to HA.
 func (m *Manager) RemoveDevice(linkID, deviceID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	rec := audit.Record{Event: "device.revoked", Result: audit.ResultOK, LinkID: linkID, DeviceID: deviceID}
+	rec := audit.Record{Event: "device.removed", Result: audit.ResultOK, LinkID: linkID, DeviceID: deviceID}
 	if l, err := m.opts.Links.Get(linkID); err == nil {
 		rec.LinkName = l.DisplayName()
 		if d, ok := l.Device(deviceID); ok {
@@ -606,12 +606,12 @@ func (m *Manager) RemoveDevice(linkID, deviceID string) error {
 			m.drop(req)
 		}
 	}
-	m.log.Info("device revoked", "link", linkID, "device", deviceID)
+	m.log.Info("device removed", "link", linkID, "device", deviceID)
 	m.record(rec, access.Client{})
 	return nil
 }
 
-// ResetDevices revokes every device of a link and drops its requests,
+// ResetDevices removes every device of a link and drops its requests,
 // from the admin API. In claim mode the next device claims the link again.
 // Nothing goes to HA.
 func (m *Manager) ResetDevices(linkID string) error {
@@ -739,7 +739,7 @@ func (m *Manager) deviceFromCookie(w http.ResponseWriter, r *http.Request, link 
 			continue
 		}
 		if _, ok := link.Device(id); !ok {
-			continue // revoked
+			continue // removed
 		}
 		if err := m.opts.Links.TouchDevice(link.ID, id, now, m.opts.TouchThrottle); err != nil {
 			m.log.Debug("touch device", "link", link.ID, "device", id, "err", err)

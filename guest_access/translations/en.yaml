@@ -238,7 +238,7 @@ configuration:
     fields:
       recheck_s:
         name: Check link every
-        description: Seconds between checks that an open guest page may still see the link. A revoke ends the page's updates within this time.
+        description: Seconds between checks that an open guest page may still see the link. Deactivating a link ends the page's updates within this time.
       heartbeat_s:
         name: Keep-alive every
         description: Seconds between keep-alive messages, so proxies keep the connection open.

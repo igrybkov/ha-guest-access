@@ -398,13 +398,12 @@ func TestLinkStatus(t *testing.T) {
 		{"at end", l, until, StatusExpired},
 		{"after", l, until.Add(time.Hour), StatusExpired},
 		{"no start", Link{ValidUntil: until}, from.Add(-24 * time.Hour), StatusActive},
-		{"revoked inside", Link{ValidFrom: from, ValidUntil: until, Revoked: true}, from.Add(time.Hour), StatusRevoked},
 		{"no end is expired", Link{}, from, StatusExpired},
 		{"inactive inside", Link{ValidFrom: from, ValidUntil: until, Inactive: true}, from.Add(time.Hour), StatusInactive},
 		{"inactive before", Link{ValidFrom: from, ValidUntil: until, Inactive: true}, from.Add(-time.Hour), StatusInactive},
 		{"inactive after", Link{ValidFrom: from, ValidUntil: until, Inactive: true}, until.Add(time.Hour), StatusInactive},
 		{"inactive with no window", Link{Inactive: true}, from, StatusInactive},
-		{"revoked wins over inactive", Link{ValidUntil: until, Inactive: true, Revoked: true}, from, StatusRevoked},
+		{"inactive at end", Link{ValidFrom: from, ValidUntil: until, Inactive: true}, until, StatusInactive},
 	} {
 		if got := tc.l.Status(tc.now); got != tc.want {
 			t.Errorf("%s: Status = %s, want %s", tc.name, got, tc.want)

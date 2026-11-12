@@ -148,11 +148,11 @@ func TestBrandingHiddenWhenInactive(t *testing.T) {
 		ownText(l)
 		l.ValidFrom, l.ValidUntil = t0.Add(time.Hour), t0.Add(2*time.Hour)
 	})
-	revoked := h.brandLink(ownText)
-	if err := h.links.Revoke(revoked.ID); err != nil {
+	off := h.brandLink(ownText)
+	if _, err := h.links.Deactivate(off.ID); err != nil {
 		t.Fatal(err)
 	}
-	for name, l := range map[string]model.Link{"scheduled": later, "revoked": revoked} {
+	for name, l := range map[string]model.Link{"scheduled": later, "inactive": off} {
 		base := "/g/" + l.Slug
 		noLinkText(t, name+" page", h.g(req{method: "GET", path: base}))
 		if rec := h.g(req{method: "GET", path: base + "/state"}); rec.Code != 410 {

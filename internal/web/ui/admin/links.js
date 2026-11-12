@@ -1,10 +1,12 @@
 // Links screen: the list and the editor. After a save the editor also
 // shows the URL and QR code, passwords, devices and recent activity.
 import {
-  h, fill, get, post, put, del, toast, run, ask, field, check, back, debounce, table, copyText, settings, haZone, APIError,
+  h, fill, get, post, put, del, toast, run, ask, dialog, field, check, back, debounce, table, copyText, settings, haZone, APIError,
 } from './dom.js';
 import {
-  paths, PRESETS, pickPreset, formPreset, needsEnd, INACTIVE_HINT, toLocalInput, fromLocalInput, zoneNote, fmtTime, fmtWindow, buildLink, linkForm,
+  paths, PRESETS, PRESET_HINTS, DAYS_MAX, DAYS_DEFAULT, daysValue, daysEnd, fmtUntil, pickPreset, formPreset, needsEnd, INACTIVE_HINT,
+  DEACTIVATE_NOTE, activateChoices, activateBody, activateSummary,
+  toLocalInput, fromLocalInput, zoneNote, fmtTime, fmtWindow, buildLink, linkForm,
   approvalMode, linkLabel, suggestName, splitTemplates, templateLists, placeItem, dropItem, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
   linkProblems, brokenLinkNote, removePasswordPrompt, ownRuleEntities, entityRow,
 } from './lib.js';
@@ -20,13 +22,99 @@ export async function render(view, rest) {
 
 // ---- Shared actions ----
 
-async function revoke(l, btn, after) {
-  if (!(await ask(`Revoke ${linkLabel(l)}?`, 'The link stops working at once. This cannot be undone.', { ok: 'Revoke', danger: true }))) return;
+async function deactivate(l, btn, after) {
+  if (!(await ask(`Deactivate ${linkLabel(l)}?`, DEACTIVATE_NOTE, { ok: 'Deactivate', danger: true }))) return;
   await run(btn, async () => {
-    await post(paths.revoke(l.id), {});
-    toast(`Revoked ${linkLabel(l)}`);
+    await post(paths.deactivate(l.id), {});
+    toast(`Deactivated ${linkLabel(l)}`);
     after();
   });
+}
+
+// daysInput is the Days count with the end it gives shown next to it.
+// onInput runs on each change.
+function daysInput(value, tz, onInput) {
+  const input = h('input', {
+    type: 'number', min: 1, max: DAYS_MAX, step: 1, value, inputmode: 'numeric', class: 'days', 'aria-label': 'Number of days',
+  });
+  const out = h('span', { class: 'muted small', 'aria-live': 'polite' });
+  const draw = () => {
+    const n = daysValue(input.value);
+    out.textContent = n ? fmtUntil(daysEnd(n, new Date(), tz), tz) : `Enter 1 to ${DAYS_MAX} days.`;
+  };
+  input.addEventListener('input', () => { draw(); onInput(input.value); });
+  draw();
+  return { input, el: h('span', { class: 'inline days-row' }, input, h('span', { text: 'days' }), out), draw };
+}
+
+// activate opens the Activate dialog: which URL, and when the link
+// works. One call turns the link on. A new URL is copied at once.
+async function activate(l, after) {
+  const tz = haZone();
+  const choices = activateChoices(l, new Date());
+  const c = { url: choices.url, window: choices.window, days: String(DAYS_DEFAULT), from: '', until: '' };
+  const group = `activate-${l.id}`;
+  const summary = h('p', { class: 'note small', role: 'status' });
+  const days = daysInput(c.days, tz, (v) => { c.days = v; pick('window', 'days'); });
+  const from = h('input', { type: 'datetime-local', value: l.valid_from ? toLocalInput(new Date(l.valid_from), tz) : '' });
+  const until = h('input', { type: 'datetime-local' });
+  // c follows what the inputs show, so a saved start counts as shown.
+  c.from = from.value;
+  for (const [input, key] of [[from, 'from'], [until, 'until']]) {
+    input.addEventListener('change', () => { c[key] = input.value; pick('window', 'custom'); });
+  }
+  const customBox = h('div', { class: 'grid2' }, field('From', from, 'Empty means now.'), field('Until', until));
+  const radios = [];
+  const pick = (name, value) => {
+    c[name] = value;
+    for (const r of radios) if (r.name === `${group}-${name}`) r.checked = r.value === value;
+    draw();
+  };
+  const radio = (name, value, label, extra) => {
+    const input = h('input', { type: 'radio', name: `${group}-${name}`, value, checked: c[name] === value });
+    input.addEventListener('change', () => pick(name, value));
+    radios.push(input);
+    return h('div', {}, h('label', { class: 'check' }, input, h('span', { text: label })), extra);
+  };
+  const draw = () => {
+    customBox.hidden = c.window !== 'custom';
+    days.draw();
+    summary.textContent = activateSummary(c, l, new Date(), tz);
+  };
+  const windowHint = {
+    keep: fmtWindow(l, tz),
+    ...PRESET_HINTS,
+  };
+  const body = h('div', { class: 'stack' },
+    h('fieldset', {}, h('legend', { text: 'URL' }),
+      radio('url', 'keep', 'Keep the current URL'),
+      radio('url', 'new', 'Make a new URL', h('small', { class: 'muted hint', text: 'The old URL stops working.' })),
+      choices.urlNote && h('p', { class: 'warning small', text: choices.urlNote })),
+    h('fieldset', {}, h('legend', { text: 'When it works' }),
+      choices.windows.map(([k, label]) => radio('window', k, label,
+        k === 'days' ? days.el : windowHint[k] && h('small', { class: 'muted hint', text: windowHint[k] }))),
+      customBox,
+      h('p', { class: 'muted small', text: zoneNote(tz) })),
+    summary);
+  draw();
+  const saved = await dialog({
+    title: `Activate ${linkLabel(l)}?`, body, ok: 'Activate', wide: true,
+    onOk: async () => {
+      const r = activateBody(c, l, new Date(), tz);
+      if (r.problem) throw new Error(r.problem.message);
+      try {
+        return { link: await post(paths.activate(l.id), r.body), rotated: !!r.body.rotate };
+      } catch (e) {
+        if (e instanceof APIError && e.problems.length) throw new Error(e.problems.map((p) => `${p.path}: ${p.message}`).join(' '));
+        throw e;
+      }
+    },
+  });
+  if (!saved) return;
+  toast(saved.rotated ? `Activated ${linkLabel(saved.link)} with a new URL` : `Activated ${linkLabel(saved.link)}`);
+  // Copy a new URL at once, as New URL does: the old one no longer works.
+  if (saved.rotated) await copyText(saved.link.url || saved.link.path);
+  after();
 }
 
 async function rotate(l, btn, after) {
@@ -53,16 +141,20 @@ async function remove(l, btn, after) {
 }
 
 // linkActions are the buttons for one link. afterDelete defaults to after.
+// An inactive or expired link gets Activate, to use it again. An active
+// or scheduled one gets Deactivate.
 function linkActions(l, after, { open = true, copy = false, afterDelete = after } = {}) {
-  const live = l.status !== 'revoked';
+  const off = l.status === 'inactive' || l.status === 'expired';
   return h('div', { class: 'actions' },
     open && h('a', { class: 'button', href: `#/links/edit/${encodeURIComponent(l.id)}`, text: 'Open' }),
-    copy && live && h('button', {
+    copy && h('button', {
       type: 'button', text: l.url ? 'Copy URL' : 'Copy path', 'aria-label': `Copy the URL of ${linkLabel(l)}`,
       onclick: () => copyText(l.url || l.path),
     }),
-    live && h('button', { type: 'button', text: 'New URL', onclick: (e) => rotate(l, e.currentTarget, after) }),
-    live && h('button', { type: 'button', class: 'danger', text: 'Revoke', onclick: (e) => revoke(l, e.currentTarget, after) }),
+    h('button', { type: 'button', text: 'New URL', onclick: (e) => rotate(l, e.currentTarget, after) }),
+    off
+      ? h('button', { type: 'button', class: 'primary', text: 'Activate', onclick: () => activate(l, after) })
+      : h('button', { type: 'button', class: 'danger', text: 'Deactivate', onclick: (e) => deactivate(l, e.currentTarget, after) }),
     h('button', { type: 'button', class: 'danger', text: 'Delete', onclick: (e) => remove(l, e.currentTarget, afterDelete) }));
 }
 
@@ -147,10 +239,12 @@ async function editor(view, id) {
   const markPreset = () => {
     for (const b of presetBtns.children) b.setAttribute('aria-pressed', String(b.dataset.preset === picked));
     inactiveHint.hidden = !f.inactive;
+    days.el.classList.toggle('picked', picked === 'days');
   };
+  let daysCount = String(DAYS_DEFAULT);
   const applyPreset = (p) => {
     picked = p;
-    const w = pickPreset(f, p, new Date(), tz);
+    const w = pickPreset(f, p, new Date(), tz, daysCount);
     if (w) {
       from.value = w.from ? toLocalInput(w.from, tz) : '';
       until.value = toLocalInput(w.until, tz);
@@ -158,7 +252,11 @@ async function editor(view, id) {
     }
     markPreset();
   };
-  presetBtns.append(...PRESETS.map(([p, label]) => h('button', { type: 'button', 'data-preset': p, text: label, onclick: () => applyPreset(p) })));
+  // Days: a count of days. Typing a count picks Days.
+  const days = daysInput(daysCount, tz, (v) => { daysCount = v; applyPreset('days'); });
+  presetBtns.append(...PRESETS.map(([p, label]) => h('button', {
+    type: 'button', 'data-preset': p, text: label, title: PRESET_HINTS[p], onclick: () => applyPreset(p),
+  })));
   markPreset();
   // Editing a date picks Custom, which turns the link on.
   const readWindow = () => {
@@ -341,6 +439,7 @@ async function editor(view, id) {
       h('div', {}, field('Note', note), slots.slot('note')),
       h('fieldset', {}, h('legend', { text: 'When it works' }),
         presetBtns,
+        days.el,
         inactiveHint,
         h('p', { class: 'muted small', text: zoneNote(tz) }),
         h('div', { class: 'grid2' },
@@ -449,10 +548,10 @@ function devicesSection(l, reload) {
         h('td', { class: 'small', text: fmtTime(d.approved_at, haZone()) }),
         h('td', { class: 'small', text: d.approved_by || '' }),
         h('td', { class: 'small', text: d.last_seen_at ? fmtTime(d.last_seen_at, haZone()) : 'Never' }),
-        h('td', {}, h('button', { type: 'button', class: 'danger', text: 'Revoke', onclick: async (ev) => {
+        h('td', {}, h('button', { type: 'button', class: 'danger', text: 'Remove', onclick: async (ev) => {
           const btn = ev.currentTarget;
-          if (!(await ask('Revoke this device?', 'It loses access at once.', { ok: 'Revoke', danger: true }))) return;
-          run(btn, async () => { await del(paths.linkDevice(l.id, d.id)); toast('Device revoked'); reload(); });
+          if (!(await ask('Remove this device?', 'It loses access at once.', { ok: 'Remove', danger: true }))) return;
+          run(btn, async () => { await del(paths.linkDevice(l.id, d.id)); toast('Device removed'); reload(); });
         } })))))
       : h('p', { class: 'muted', text: 'No approved devices.' }),
     h('div', { class: 'actions' }, h('button', { type: 'button', class: 'danger', text: 'Reset devices', onclick: async (ev) => {

@@ -449,16 +449,16 @@ func TestE2EEscapes(t *testing.T) {
 func TestE2ELinkWindow(t *testing.T) {
 	a := startApp(t, appOpts{})
 	expiring := a.newLink(map[string]any{"templates": []string{"guest_room"}, "valid_until": t0.Add(time.Hour)})
-	revoked := a.newLink(map[string]any{"templates": []string{"guest_room"}})
+	off := a.newLink(map[string]any{"templates": []string{"guest_room"}})
 	scheduled := a.newLink(map[string]any{"templates": []string{"guest_room"}, "valid_from": t0.Add(time.Hour), "valid_until": t0.Add(2 * time.Hour)})
 	if r := a.act(expiring, "light.guest_room", "light.turn_on", nil); r.code != 200 {
 		t.Fatalf("before expiry: %d", r.code)
 	}
-	if r := a.adminJSON("POST", "/api/links/"+revoked.ID+"/revoke", nil); r.code != 200 {
-		t.Fatalf("revoke: %d %s", r.code, r.body)
+	if r := a.adminJSON("POST", "/api/links/"+off.ID+"/deactivate", nil); r.code != 200 {
+		t.Fatalf("deactivate: %d %s", r.code, r.body)
 	}
-	if r := a.act(revoked, "light.guest_room", "light.turn_on", nil); r.code != http.StatusGone {
-		t.Errorf("revoked: %d", r.code)
+	if r := a.act(off, "light.guest_room", "light.turn_on", nil); r.code != http.StatusGone {
+		t.Errorf("inactive: %d", r.code)
 	}
 	if r := a.act(scheduled, "light.guest_room", "light.turn_on", nil); r.code != http.StatusGone {
 		t.Errorf("scheduled: %d", r.code)
@@ -470,8 +470,18 @@ func TestE2ELinkWindow(t *testing.T) {
 	if r := a.act(scheduled, "light.guest_room", "light.turn_on", nil); r.code != 200 {
 		t.Errorf("scheduled, now active: %d", r.code)
 	}
-	if n := len(a.fake.ServiceCalls()); n != 2 {
-		t.Errorf("%d HA calls, want 2", n)
+	// An expired link needs a new end before it can be activated.
+	if r := a.adminJSON("POST", "/api/links/"+expiring.ID+"/activate", map[string]any{}); r.code != http.StatusConflict {
+		t.Errorf("activate with a past end: %d %s", r.code, r.body)
+	}
+	if r := a.adminJSON("POST", "/api/links/"+expiring.ID+"/activate", map[string]any{"valid_until": t0.Add(3 * time.Hour)}); r.code != 200 {
+		t.Fatalf("activate with a new end: %d %s", r.code, r.body)
+	}
+	if r := a.act(expiring, "light.guest_room", "light.turn_on", nil); r.code != 200 {
+		t.Errorf("activated again: %d", r.code)
+	}
+	if n := len(a.fake.ServiceCalls()); n != 3 {
+		t.Errorf("%d HA calls, want 3", n)
 	}
 }
 

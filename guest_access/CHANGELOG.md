@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- Links are on or off now. **Revoke** is gone. **Deactivate** turns a
+  link off, and **Activate** turns it on again, as often as you like.
+  Activate opens a dialog: keep the URL or make a new one, and keep the
+  window or pick a new one. Uses, devices, passwords and sessions stay.
+  On upgrade, a revoked link becomes inactive and can be activated
+  again; its dialog offers a new URL first. The admin API has
+  `POST /api/links/{id}/deactivate` and `/activate` in place of
+  `/revoke`. The audit events are `admin.link.deactivate` and
+  `admin.link.activate`. Removing a device now logs `device.removed`
+  and `admin.device.remove` (before: `device.revoked` and
+  `admin.device.revoke`).
+- Admin: a **Days** choice under **When it works**, in the editor and
+  in the Activate dialog. N days starts now and ends at midnight after
+  day N, where today is day 1. The end shows next to the number. Each
+  preset says what it does when you hover it.
+- Fix: a `links.yaml` or `templates.yaml` that holds only comments no
+  longer crashes the app. It reads as an empty file.
+
 - Admin: give any entity your own name and a short description with
   the ✎ button in the **Shown** lists of the template and link
   editors. Guests see the name as the card title and the description

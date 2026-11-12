@@ -100,8 +100,8 @@ func TestGuestEventsFilter(t *testing.T) {
 			t.Fatal("granted change never arrived")
 		}
 	}
-	// A revoke ends the stream within a check.
-	if err := h.links.Revoke(l.ID); err != nil {
+	// A deactivation ends the stream within a check.
+	if _, err := h.links.Deactivate(l.ID); err != nil {
 		t.Fatal(err)
 	}
 	for {

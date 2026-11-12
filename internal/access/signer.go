@@ -95,7 +95,7 @@ func (s *Signer) VerifySession(linkID, token string, now time.Time) (passwordID 
 
 // SignDevice returns a device token for device deviceID of linkID. It
 // expires at exp, the link's end. The caller must also check that the
-// device is still on the link, so a revoke works at once. It panics on an
+// device is still on the link, so a removal works at once. It panics on an
 // empty deviceID or one over 255 bytes.
 func (s *Signer) SignDevice(linkID, deviceID string, exp time.Time) string {
 	if deviceID == "" || len(deviceID) > maxPasswordIDLen {

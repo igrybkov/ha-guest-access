@@ -122,7 +122,11 @@ legend { padding: 0 4px; font-weight: 600; }
 .status.scheduled { color: var(--primary); border-color: var(--primary); }
 .status.expired { color: var(--muted); }
 .status.inactive { color: var(--warn-line); border-color: var(--warn-line); border-style: dashed; }
-.status.revoked { color: var(--danger); border-color: var(--danger); }
+
+/* Days window: a count and the end it gives. */
+.days-row { align-items: center; flex-wrap: wrap; }
+.days-row > input.days { flex: 0 0 6em; width: 6em; }
+.days-row.picked > input.days { border-color: var(--primary); }
 
 /* Lists */
 .list { list-style: none; margin: 0; padding: 0; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
@@ -209,10 +213,12 @@ tr.denied td { background: var(--danger-bg); }
 .qr { display: block; margin-top: 12px; background: #fff; padding: 8px; border-radius: var(--radius); }
 
 /* Confirm dialog */
-dialog { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--fg); max-width: min(92vw, 440px); padding: 16px; }
+dialog { border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--fg); max-width: min(92vw, 440px); max-height: 90vh; overflow: auto; padding: 16px; }
+dialog.wide { width: min(92vw, 560px); max-width: min(92vw, 560px); box-sizing: border-box; }
 dialog::backdrop { background: rgb(0 0 0 / 0.4); }
 dialog h2 { margin: 0; }
 dialog p { margin: 0; }
+dialog .days-row { margin: 0 0 4px 26px; }
 
 /* Toasts */
 #toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 10; width: min(92vw, 420px); }

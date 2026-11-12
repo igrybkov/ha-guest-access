@@ -26,10 +26,10 @@ const (
 //   - "reload": what the link offers changed (templates, access, a
 //     one-time use, an expired location). The page reloads /state. The
 //     stream ends.
-//   - "end": the link ended, was revoked, or its slug or password went
+//   - "end": the link ended, was set inactive, or its slug or password went
 //     away. The stream ends.
 //
-// Every few seconds the stream checks its link again, so a revoke, a
+// Every few seconds the stream checks its link again, so a deactivation, a
 // rotated slug or a removed password ends it quickly.
 func (s *Server) guestEvents(g *guestReq) {
 	ctx, cancel := context.WithCancel(g.r.Context())

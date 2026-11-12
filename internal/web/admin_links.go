@@ -2,13 +2,16 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/igrybkov/ha-guest-access/internal/access"
 	"github.com/igrybkov/ha-guest-access/internal/approval"
 	"github.com/igrybkov/ha-guest-access/internal/authz"
+	"github.com/igrybkov/ha-guest-access/internal/links"
 	"github.com/igrybkov/ha-guest-access/internal/model"
 	"github.com/igrybkov/ha-guest-access/internal/policy"
 )
@@ -173,19 +176,98 @@ func (s *Server) deleteLink(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (s *Server) revokeLink(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if err := s.deps.Links.Revoke(id); err != nil {
-		s.writeAdminErr(w, r, err)
+// deactivateLink is POST /api/links/{id}/deactivate with an empty or {}
+// body. Guests lose access until the link is activated again.
+func (s *Server) deactivateLink(w http.ResponseWriter, r *http.Request) {
+	var b struct{}
+	if r.ContentLength != 0 && !s.decodeAdmin(w, r, &b) {
 		return
 	}
-	s.log.Info("link revoked", "link", id)
-	l, err := s.deps.Links.Get(id)
+	l, err := s.deps.Links.Deactivate(r.PathValue("id"))
 	if err != nil {
 		s.writeAdminErr(w, r, err)
 		return
 	}
+	s.log.Info("link deactivated", "link", l.ID)
+	rec := adminAudit(r)
+	rec.LinkID, rec.LinkName = l.ID, l.DisplayName()
 	s.writeLink(w, r, http.StatusOK, l)
+}
+
+// activateBody is POST /api/links/{id}/activate. Rotate gives the link a
+// new URL: Slug, or a random one when Slug is empty. A window field that
+// is left out keeps the saved value. valid_from may be null to clear it.
+type activateBody struct {
+	Rotate     bool            `json:"rotate"`
+	Slug       string          `json:"slug"`
+	ValidFrom  json.RawMessage `json:"valid_from"`
+	ValidUntil json.RawMessage `json:"valid_until"`
+}
+
+// activateLink turns a link on in one write. The window must end in the
+// future (409 otherwise) and pass the same checks as a save (400). The
+// audit record lists what changed, never the slug.
+func (s *Server) activateLink(w http.ResponseWriter, r *http.Request) {
+	var b activateBody
+	if r.ContentLength != 0 && !s.decodeAdmin(w, r, &b) {
+		return
+	}
+	a := links.Activation{NewURL: b.Rotate, CustomSlug: b.Slug}
+	var err error
+	if a.SetFrom, a.ValidFrom, err = optionalTime(b.ValidFrom); err != nil {
+		s.writeAdminErr(w, r, timeProblem("valid_from"))
+		return
+	}
+	if a.SetUntil, a.ValidUntil, err = optionalTime(b.ValidUntil); err != nil {
+		s.writeAdminErr(w, r, timeProblem("valid_until"))
+		return
+	}
+	if b.Slug != "" && !b.Rotate {
+		s.writeAdminErr(w, r, &model.ValidationError{Problems: []model.Problem{{Path: "slug", Message: "needs rotate"}}})
+		return
+	}
+	id := r.PathValue("id")
+	rec := adminAudit(r)
+	rec.LinkID = id
+	// The same policy checks as a save. Activate never changes rules, so
+	// a check of the stored link holds for the result.
+	cur, err := s.deps.Links.Get(id)
+	if err != nil {
+		s.writeAdminErr(w, r, err)
+		return
+	}
+	rec.LinkName = cur.DisplayName()
+	if err := s.checkLink(r.Context(), cur); err != nil {
+		s.writeAdminErr(w, r, err)
+		return
+	}
+	l, changed, err := s.deps.Links.Activate(id, a, s.now())
+	if err != nil {
+		s.writeAdminErr(w, r, err)
+		return
+	}
+	s.log.Info("link activated", "link", l.ID, "changed", changed)
+	rec.LinkName, rec.DataKeys = l.DisplayName(), changed
+	s.writeLink(w, r, http.StatusOK, l)
+}
+
+// optionalTime reads one optional RFC 3339 time. Left out gives set
+// false. null gives set true and a zero time.
+func optionalTime(raw json.RawMessage) (set bool, t time.Time, err error) {
+	if raw == nil {
+		return false, time.Time{}, nil
+	}
+	if string(raw) == "null" {
+		return true, time.Time{}, nil
+	}
+	if err := json.Unmarshal(raw, &t); err != nil {
+		return false, time.Time{}, err
+	}
+	return true, t, nil
+}
+
+func timeProblem(path string) error {
+	return &model.ValidationError{Problems: []model.Problem{{Path: path, Message: "must be an RFC 3339 time"}}}
 }
 
 // rotateBody is POST /api/links/{id}/rotate. An empty or missing slug

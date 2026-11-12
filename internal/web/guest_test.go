@@ -223,11 +223,11 @@ func TestGuestLinkWindow(t *testing.T) {
 	h := newHarness(t)
 	l := h.link("guest_room")
 	sched, _ := h.links.Create(model.Link{Name: "Later", ValidFrom: t0.Add(time.Hour), ValidUntil: t0.Add(2 * time.Hour), TemplateIDs: []string{"guest_room"}}, "")
-	revoked := h.link("guest_room")
-	if err := h.links.Revoke(revoked.ID); err != nil {
+	off := h.link("guest_room")
+	if _, err := h.links.Deactivate(off.ID); err != nil {
 		t.Fatal(err)
 	}
-	for name, slug := range map[string]string{"scheduled": sched.Slug, "revoked": revoked.Slug} {
+	for name, slug := range map[string]string{"scheduled": sched.Slug, "inactive": off.Slug} {
 		if rec := h.act(model.Link{Slug: slug}, "light.guest_room", "light.turn_on", nil); rec.Code != http.StatusGone {
 			t.Errorf("%s act: %d", name, rec.Code)
 		}

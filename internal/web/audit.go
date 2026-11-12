@@ -250,11 +250,12 @@ var adminEvents = map[string]string{
 	"POST /api/links":                        "admin.link.create",
 	"PUT /api/links/{id}":                    "admin.link.update",
 	"DELETE /api/links/{id}":                 "admin.link.delete",
-	"POST /api/links/{id}/revoke":            "admin.link.revoke",
+	"POST /api/links/{id}/deactivate":        "admin.link.deactivate",
+	"POST /api/links/{id}/activate":          "admin.link.activate",
 	"POST /api/links/{id}/rotate":            "admin.link.rotate",
 	"POST /api/links/{id}/passwords":         "admin.password.add",
 	"DELETE /api/links/{id}/passwords/{pid}": "admin.password.remove",
-	"DELETE /api/links/{id}/devices/{did}":   "admin.device.revoke",
+	"DELETE /api/links/{id}/devices/{did}":   "admin.device.remove",
 	"POST /api/links/{id}/devices/reset":     "admin.device.reset",
 	"POST /api/devices/pending/{id}":         "admin.device.decide",
 	"POST /api/preview":                      "", // reads only
@@ -399,6 +400,8 @@ func adminReason(err error, status int) string {
 		return "not_found"
 	case errors.Is(err, links.ErrTooManyDevices):
 		return "too_many_devices"
+	case errors.Is(err, links.ErrNoWindow):
+		return "no_window"
 	case errors.Is(err, links.ErrSlugTaken), errors.Is(err, errTemplateDup):
 		return "taken"
 	case status >= 500:
