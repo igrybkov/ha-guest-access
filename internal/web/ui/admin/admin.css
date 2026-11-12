@@ -121,6 +121,7 @@ legend { padding: 0 4px; font-weight: 600; }
 .status.active { color: var(--ok); border-color: var(--ok); }
 .status.scheduled { color: var(--primary); border-color: var(--primary); }
 .status.expired { color: var(--muted); }
+.status.inactive { color: var(--warn-line); border-color: var(--warn-line); border-style: dashed; }
 .status.revoked { color: var(--danger); border-color: var(--danger); }
 
 /* Lists */

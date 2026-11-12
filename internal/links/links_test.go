@@ -326,6 +326,69 @@ func TestGuestTextIsEditable(t *testing.T) {
 	}
 }
 
+// An inactive link saves with no end, and every write path keeps it
+// valid. It refuses uses and devices until the admin turns it on again.
+func TestInactiveLink(t *testing.T) {
+	dir := t.TempDir()
+	s := newStore(t, dir)
+	d := draft()
+	d.Inactive, d.ValidUntil = true, time.Time{}
+	l := mustCreate(t, s, d, "")
+	if !l.Inactive || !l.ValidUntil.IsZero() || l.Status(t0) != model.StatusInactive {
+		t.Fatalf("create: %+v", l)
+	}
+	if _, err := s.Consume(l.ID, "lock.a", "lock.unlock", t0); !errors.Is(err, ErrInactive) {
+		t.Errorf("consume: %v", err)
+	}
+	if _, err := s.AddDevice(l.ID, newDevice(model.ApprovedByAdmin), maxDev); !errors.Is(err, ErrInactive) {
+		t.Errorf("add device: %v", err)
+	}
+	if _, err := s.AddPassword(l.ID, "Anna", hash); err != nil {
+		t.Errorf("add password: %v", err)
+	}
+	if _, err := s.RotateSlug(l.ID, ""); err != nil {
+		t.Errorf("rotate: %v", err)
+	}
+	got, _ := s.Get(l.ID)
+	if got.UseCount != 0 || len(got.Used) != 0 || len(got.Devices) != 0 {
+		t.Errorf("inactive link changed: %+v", got)
+	}
+	if again, err := newStore(t, dir).Get(l.ID); err != nil || !again.Inactive || !again.ValidUntil.IsZero() {
+		t.Errorf("reload: %+v %v", again, err)
+	}
+
+	// An active link still needs an end.
+	edit := draft()
+	edit.ValidUntil = time.Time{}
+	if _, err := s.Update(l.ID, edit); err == nil {
+		t.Error("saved an active link with no end")
+	}
+	// Turning it on with a window makes it work.
+	on, err := s.Update(l.ID, draft())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if on.Inactive || on.Status(t0) != model.StatusActive {
+		t.Errorf("activate: %+v", on)
+	}
+	if _, err := s.Consume(l.ID, "lock.a", "lock.unlock", t0); err != nil {
+		t.Errorf("consume after activate: %v", err)
+	}
+	// Turning it off again keeps the window.
+	off := draft()
+	off.Inactive = true
+	got, err = s.Update(l.ID, off)
+	if err != nil || !got.Inactive || !got.ValidUntil.Equal(off.ValidUntil) {
+		t.Errorf("deactivate: %+v %v", got, err)
+	}
+	if err := s.Revoke(l.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Get(l.ID); got.Status(t0) != model.StatusRevoked {
+		t.Errorf("revoked inactive link: %s", got.Status(t0))
+	}
+}
+
 func TestRevoke(t *testing.T) {
 	s := newStore(t, t.TempDir())
 	l := mustCreate(t, s, draft(), "")

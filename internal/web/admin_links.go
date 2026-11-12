@@ -122,8 +122,8 @@ func (s *Server) checkLink(ctx context.Context, l model.Link) error {
 }
 
 // createLink takes a model.Link. Only the editable fields count (name,
-// note, valid_from, valid_until, templates, extra, one_time); "slug", if
-// set, asks for a custom slug.
+// note, valid_from, valid_until, inactive, templates, extra, one_time);
+// "slug", if set, asks for a custom slug.
 func (s *Server) createLink(w http.ResponseWriter, r *http.Request) {
 	var draft model.Link
 	if !s.decodeAdmin(w, r, &draft) {

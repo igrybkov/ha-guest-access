@@ -27,9 +27,13 @@ type Link struct {
 	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
 	// ValidFrom is when the link starts to work. Zero means at once.
 	ValidFrom time.Time `yaml:"valid_from,omitempty" json:"valid_from,omitzero"`
-	// ValidUntil is when the link stops working. Every link must end.
-	ValidUntil  time.Time `yaml:"valid_until" json:"valid_until"`
-	TemplateIDs []string  `yaml:"templates,omitempty" json:"templates,omitempty"`
+	// ValidUntil is when the link stops working. Every active link must
+	// end. An inactive link may have no end yet.
+	ValidUntil time.Time `yaml:"valid_until,omitempty" json:"valid_until,omitzero"`
+	// Inactive turns the link off, whatever its window. Guests can't use
+	// it. The window is kept, so the admin can turn it on again.
+	Inactive    bool     `yaml:"inactive,omitempty" json:"inactive,omitempty"`
+	TemplateIDs []string `yaml:"templates,omitempty" json:"templates,omitempty"`
 	// Extra are rules for this link only. Each carries its own access.
 	Extra []Rule `yaml:"extra,omitempty" json:"extra,omitempty"`
 	// EntityOrder orders the guest page group of the extra rules, as
@@ -194,16 +198,20 @@ func (l Link) UsedAt(entityID, action string) (time.Time, bool) {
 // Link statuses, as Status returns them.
 const (
 	StatusActive    = "active"
+	StatusInactive  = "inactive"  // Inactive is set
 	StatusScheduled = "scheduled" // before ValidFrom
 	StatusExpired   = "expired"   // at or after ValidUntil
 	StatusRevoked   = "revoked"
 )
 
-// Status returns the link's status at now. Revoked wins over the window.
+// Status returns the link's status at now. Revoked wins over Inactive,
+// and Inactive wins over the window.
 func (l Link) Status(now time.Time) string {
 	switch {
 	case l.Revoked:
 		return StatusRevoked
+	case l.Inactive:
+		return StatusInactive
 	case !l.ValidFrom.IsZero() && now.Before(l.ValidFrom):
 		return StatusScheduled
 	case !now.Before(l.ValidUntil):
@@ -257,7 +265,9 @@ func (l Link) validate(p *problems, path string) {
 		p.add(join(path, "slug"), "must be 12-128 of A-Z, a-z, 0-9, _ and -")
 	}
 	if l.ValidUntil.IsZero() {
-		p.add(join(path, "valid_until"), "is required")
+		if !l.Inactive {
+			p.add(join(path, "valid_until"), "is required")
+		}
 	} else if !l.ValidFrom.IsZero() && !l.ValidUntil.After(l.ValidFrom) {
 		p.add(join(path, "valid_until"), "must be after valid_from")
 	}

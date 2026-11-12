@@ -294,11 +294,22 @@ Both are plain text. An empty one falls back to the global text.
 
 ### The window
 
-- `valid_until` is required. Every link ends.
+- `valid_until` is required on an active link. Every active link ends.
 - `valid_from` is optional. Before it, the link does not work.
 - Outside the window the guest sees that the link is not active. Nothing runs.
 - The window applies to everything on the link, whatever the rules say.
 - A guest's open page stops getting updates within `streams.recheck_s` seconds after the link ends.
+
+### Inactive links
+
+Pick **Inactive** under **When it works** to save a link that does not work yet. Use it to set up a link before you know the dates, or to pause a link.
+
+- An inactive link never works for guests, whatever its window. The guest sees that the link is not active, as outside the window. Nothing runs, and no one-time use, device request or password try counts.
+- An inactive link may have no `valid_until`. Any dates it has stay as they are.
+- To turn it on, open the link and pick another preset, or edit the dates. The link then needs a `valid_until` again.
+- Turning a link off ends a guest's open page within `streams.recheck_s` seconds. Sessions and approved devices come back when you turn it on again, while the window still holds.
+- The **Links** screen shows it as **Inactive**. A revoked link stays **Revoked**.
+- In `links.yaml` it has `inactive: true`.
 
 ### Time zones
 
@@ -790,7 +801,7 @@ Pending device requests live in memory only. They are lost on a restart. Their H
 
 **The admin screen says "access only through Home Assistant".** Open the app from the HA sidebar. The admin port accepts only the HA proxy.
 
-**A link says it is not active.** The link has ended, has not started, or was revoked. Check its window on the **Links** screen.
+**A link says it is not active.** The link has ended, has not started, is set inactive, or was revoked. Check its status and window on the **Links** screen.
 
 **A guest gets 404.** The slug is wrong, or it was rotated. Send the new URL. A link in `links.yaml` that a hand edit broke also gives 404: the app never serves a link that does not validate. The **Links** screen marks it and lists its problems, and the log has one warning for it.
 
