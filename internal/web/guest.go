@@ -380,7 +380,7 @@ func (s *Server) servable(l model.Link) bool {
 	if msg := err.Error(); s.badLinks[l.ID] != msg {
 		s.badLinks[l.ID] = msg
 		s.log.Warn("a link in links.yaml does not validate; guests get not found until it is fixed",
-			"link", l.ID, "name", l.Name, "problems", msg)
+			"link", l.ID, "name", l.DisplayName(), "problems", msg)
 	}
 	return false
 }

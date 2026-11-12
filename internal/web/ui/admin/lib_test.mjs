@@ -5,7 +5,7 @@ import {
   wildcardOnly, patternProblem, selectorProblems, matchPattern, pickedEntities, actionChoices, searchOptions,
   preset, toLocalInput, fromLocalInput, buildTemplate, buildLink, buildRule, ruleState, linkForm, cleanAccess,
   parseVarValue, slugifyID, normalizeTemplatePath, parentPath, fieldFor, groupProblems,
-  approvalMode, splitTemplates, templateLists, placeItem, dropItem, moveIndex, indexMap, rekeyPath, effectiveOrder,
+  approvalMode, linkLabel, suggestName, NAME_WORDS, splitTemplates, templateLists, placeItem, dropItem, moveIndex, indexMap, rekeyPath, effectiveOrder,
   ruleDomains, rulesPicking, excludeKinds, entityLists, grantRules, excludeEntity, includeEntity, lockedNote, grantedEntities, ownRuleEntities, linkBadges, rotateWarning, grantSummary,
   auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections, settingsWarnings, addMonth, PRESETS,
   linkProblems, removePasswordPrompt, wallToUTC, wallParts, usableZone, browserZone, zoneNote, fmtTime, fmtWindow,
@@ -933,4 +933,23 @@ test('pendingBadge hides at zero and caps big counts', () => {
   assert.equal(pendingBadge(undefined), '');
   assert.equal(pendingBadge(2), '2');
   assert.equal(pendingBadge(150), '99+');
+});
+
+test('linkLabel falls back to Untitled link and the id start', () => {
+  assert.equal(linkLabel({ name: ' Weekend ', id: '0123456789abcdef' }), 'Weekend');
+  assert.equal(linkLabel({ name: '', id: '0123456789abcdef' }), 'Untitled link 012345');
+  assert.equal(linkLabel({ id: 'abc' }), 'Untitled link abc');
+  assert.equal(linkLabel(null), 'Untitled link');
+});
+
+test('suggestName gives an unused friendly name', () => {
+  const { adjectives: a, animals: b } = NAME_WORDS;
+  assert.equal(new Set(a).size * new Set(b).size, 400);
+  assert.equal(suggestName([], () => 0), `${a[0]} ${b[0]}`);
+  // Taken names are skipped, case and spaces aside.
+  assert.equal(suggestName([` ${a[0].toLowerCase()} ${b[0]} `], () => 0), `${a[0]} ${b[1]}`);
+  // All taken: a number is added.
+  const all = a.flatMap((x) => b.map((y) => `${x} ${y}`));
+  assert.match(suggestName(all, () => 0), new RegExp(`^${a[0]} ${b[0]} 2$`));
+  for (let i = 0; i < 50; i++) assert.ok(all.includes(suggestName([])));
 });

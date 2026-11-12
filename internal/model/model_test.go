@@ -243,7 +243,7 @@ func TestLinkValidate(t *testing.T) {
 		{"guest welcome lone CR", with(func(l *Link) { l.GuestWelcome = "a\rb" }), []string{"guest_welcome"}},
 		{"guest welcome tab", with(func(l *Link) { l.GuestWelcome = "a\tb" }), []string{"guest_welcome"}},
 		{"no id", with(func(l *Link) { l.ID = "" }), []string{"id"}},
-		{"blank name", with(func(l *Link) { l.Name = "" }), []string{"name"}},
+		{"blank name is fine", with(func(l *Link) { l.Name = "" }), nil},
 		{"short slug", with(func(l *Link) { l.Slug = "short" }), []string{"slug"}},
 		{"slug with slash", with(func(l *Link) { l.Slug = "abcdefghijkl/x" }), []string{"slug"}},
 		{"slug with space", with(func(l *Link) { l.Slug = "abcdefghijkl x" }), []string{"slug"}},
@@ -690,5 +690,18 @@ func TestTemplateJSONEmptyRulesIsList(t *testing.T) {
 	var back Template
 	if err := json.Unmarshal(b, &back); err != nil || back.ID != "empty" {
 		t.Fatalf("round trip: %v %+v", err, back)
+	}
+}
+
+func TestLinkDisplayName(t *testing.T) {
+	for _, tc := range []struct{ name, id, want string }{
+		{"Weekend", "0123456789abcdef", "Weekend"},
+		{"  Weekend  ", "0123456789abcdef", "Weekend"},
+		{"", "0123456789abcdef", "Untitled link 012345"},
+		{"   ", "abc", "Untitled link abc"},
+	} {
+		if got := (Link{Name: tc.name, ID: tc.id}).DisplayName(); got != tc.want {
+			t.Errorf("DisplayName(%q, %q) = %q, want %q", tc.name, tc.id, got, tc.want)
+		}
 	}
 }

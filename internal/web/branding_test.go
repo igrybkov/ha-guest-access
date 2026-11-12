@@ -47,10 +47,11 @@ func TestStateBranding(t *testing.T) {
 		edit           func(*model.Link)
 		title, welcome string
 	}{
-		{"name and global welcome", nil, secretName, "Global welcome"},
+		{"name never shows; global title and welcome", nil, "Global title", "Global welcome"},
 		{"own title and welcome", func(l *model.Link) { l.GuestTitle, l.GuestWelcome = secretTitle, secretWelcome }, secretTitle, secretWelcome},
-		{"own welcome only", func(l *model.Link) { l.GuestWelcome = "Line 1\nLine 2" }, secretName, "Line 1\nLine 2"},
-		{"blank title falls back", func(l *model.Link) { l.GuestTitle, l.GuestWelcome = "   ", " " }, secretName, "Global welcome"},
+		{"own welcome only", func(l *model.Link) { l.GuestWelcome = "Line 1\nLine 2" }, "Global title", "Line 1\nLine 2"},
+		{"blank title falls back", func(l *model.Link) { l.GuestTitle, l.GuestWelcome = "   ", " " }, "Global title", "Global welcome"},
+		{"no name falls back to the global title", func(l *model.Link) { l.Name, l.GuestTitle = "", "" }, "Global title", "Global welcome"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, withGlobalBranding)

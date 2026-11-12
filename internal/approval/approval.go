@@ -362,7 +362,7 @@ func (m *Manager) RequestAccess(w http.ResponseWriter, r *http.Request, link mod
 			m.mu.Unlock()
 			m.log.Info("device claimed link", "link", link.ID, "device", d.ID, "label", label, "ua", device)
 			m.record(audit.Record{Event: "device.claimed", Result: audit.ResultAllowed, By: model.ApprovedByClaim,
-				LinkID: link.ID, LinkName: link.Name, DeviceID: d.ID, DeviceLabel: label, PasswordLabel: label, Device: device}, c)
+				LinkID: link.ID, LinkName: link.DisplayName(), DeviceID: d.ID, DeviceLabel: label, PasswordLabel: label, Device: device}, c)
 			m.setDeviceCookie(w, link, c, d.ID)
 			writeJSON(w, http.StatusOK, map[string]string{"status": "approved"})
 			return
@@ -385,14 +385,14 @@ func (m *Manager) RequestAccess(w http.ResponseWriter, r *http.Request, link mod
 		}
 		if ok, skipped := m.refused.Allow(link.ID+"|"+reason+"|"+access.LimitKey(c.IP, m.opts.IPv6Prefix), now); ok {
 			m.record(audit.Record{Event: "device.request", Result: audit.ResultDenied, Reason: reason, Count: skipped,
-				LinkID: link.ID, LinkName: link.Name, PasswordLabel: label, Device: device}, c)
+				LinkID: link.ID, LinkName: link.DisplayName(), PasswordLabel: label, Device: device}, c)
 		}
 		w.Header().Set("Retry-After", strconv.Itoa(retry))
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"status": "try_later"})
 		return
 	}
 	m.log.Info("device request", "link", link.ID, "request", req.ID, "code", req.Code, "label", label, "ua", device, "ip", req.IP)
-	m.record(audit.Record{Event: "device.request", Result: audit.ResultOK, LinkID: link.ID, LinkName: link.Name,
+	m.record(audit.Record{Event: "device.request", Result: audit.ResultOK, LinkID: link.ID, LinkName: link.DisplayName(),
 		PasswordLabel: label, Device: device, RequestID: req.ID, Code: req.Code}, c)
 	http.SetCookie(w, &http.Cookie{
 		Name: RequestCookieName(link.ID), Value: req.secret, Path: access.GuestCookiePath,
@@ -431,14 +431,14 @@ func (m *Manager) newRequest(link model.Link, label, device string, c access.Cli
 			CreatedAt: now, ExpiresAt: now.Add(m.opts.PendingTTL),
 		},
 		secret:   randomHex(),
-		linkName: link.Name,
+		linkName: link.DisplayName(),
 	}
 	if c.IP.IsValid() {
 		req.IP = c.IP.String()
 	}
 	m.byID[req.ID], m.bySecret[req.secret] = req, req
 	m.events[linkID] = append(m.events[linkID], now)
-	m.opts.Notifier.created(req.Request, link.Name)
+	m.opts.Notifier.created(req.Request, link.DisplayName())
 	select {
 	case m.wake <- struct{}{}:
 	default:
@@ -453,7 +453,7 @@ func (m *Manager) fire(link model.Link, req Request) {
 	defer cancel()
 	err := m.opts.FireEvent(ctx, EventDeviceRequest, map[string]any{
 		"link_id":    link.ID,
-		"link_name":  link.Name,
+		"link_name":  link.DisplayName(),
 		"request_id": req.ID,
 		"code":       req.Code,
 		"label":      req.Label,
@@ -593,7 +593,7 @@ func (m *Manager) RemoveDevice(linkID, deviceID string) error {
 	defer m.mu.Unlock()
 	rec := audit.Record{Event: "device.revoked", Result: audit.ResultOK, LinkID: linkID, DeviceID: deviceID}
 	if l, err := m.opts.Links.Get(linkID); err == nil {
-		rec.LinkName = l.Name
+		rec.LinkName = l.DisplayName()
 		if d, ok := l.Device(deviceID); ok {
 			rec.DeviceLabel, rec.Device = d.Label, d.Device
 		}
@@ -619,7 +619,7 @@ func (m *Manager) ResetDevices(linkID string) error {
 	defer m.mu.Unlock()
 	rec := audit.Record{Event: "device.reset", Result: audit.ResultOK, LinkID: linkID}
 	if l, err := m.opts.Links.Get(linkID); err == nil {
-		rec.LinkName = l.Name
+		rec.LinkName = l.DisplayName()
 	}
 	if err := m.opts.Links.ResetDevices(linkID); err != nil {
 		return err

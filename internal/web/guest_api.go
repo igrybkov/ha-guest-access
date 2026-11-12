@@ -1,7 +1,6 @@
 package web
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"math"
@@ -98,7 +97,7 @@ func (s *Server) lockout(g *guestReq, ipBlocked, linkSlowed bool) {
 	for _, scope := range scopes {
 		s.log.Warn("password form locked", "link", g.link.ID, "client", g.ipKey(), "scope", scope)
 		s.fire(g.r.Context(), eventLockout, map[string]any{
-			"link_id": g.link.ID, "link_name": g.link.Name, "ip": g.ipKey(), "scope": scope,
+			"link_id": g.link.ID, "link_name": g.link.DisplayName(), "ip": g.ipKey(), "scope": scope,
 		})
 	}
 }
@@ -341,11 +340,13 @@ func (s *Server) plan(ctx context.Context, g *guestReq) (guestPlan, error) {
 }
 
 // guestBranding is the page text of a guest who is in: the link's own
-// title, else its name, and its own welcome, else the global one. Only
-// /state and /events use it, and they run after the password and device
-// checks. So a request with only the URL never sees the link name.
+// title and welcome, each else the global one. The link's name is for
+// the admin only and never reaches guests. Only /state and /events use
+// this, after the password and device checks.
 func guestBranding(gs model.GuestSettings, l model.Link) model.GuestSettings {
-	gs.Title = cmp.Or(strings.TrimSpace(l.GuestTitle), strings.TrimSpace(l.Name))
+	if t := strings.TrimSpace(l.GuestTitle); t != "" {
+		gs.Title = t
+	}
 	if w := strings.TrimSpace(l.GuestWelcome); w != "" {
 		gs.Welcome = w
 	}
@@ -500,7 +501,7 @@ func (s *Server) guestAct(g *guestReq) {
 	s.log.Info("guest action", "link", g.link.ID, "guest", g.label, "entity_id", call.EntityID,
 		"action", req.Action, "template", src.Template, "client", g.ipKey())
 	s.fire(ctx, eventAction, map[string]any{
-		"link_id": g.link.ID, "link_name": g.link.Name, "guest": g.label,
+		"link_id": g.link.ID, "link_name": g.link.DisplayName(), "guest": g.label,
 		"entity_id": call.EntityID, "action": req.Action, "ip": g.ipKey(),
 	})
 	writeJSON(g.w, http.StatusOK, map[string]bool{"ok": true})

@@ -86,8 +86,8 @@ func TestCreate(t *testing.T) {
 func TestCreateErrors(t *testing.T) {
 	s := newStore(t, t.TempDir())
 	mustCreate(t, s, draft(), "custom-slug-one")
-	noName := draft()
-	noName.Name = ""
+	noEnd := draft()
+	noEnd.ValidUntil = time.Time{}
 	for _, tc := range []struct {
 		name  string
 		d     model.Link
@@ -96,9 +96,9 @@ func TestCreateErrors(t *testing.T) {
 	}{
 		{"invalid custom slug", draft(), "Short", func(err error) bool { return errors.Is(err, errBadSlug) }},
 		{"taken custom slug", draft(), "custom-slug-one", func(err error) bool { return errors.Is(err, ErrSlugTaken) }},
-		{"invalid link", noName, "", func(err error) bool {
+		{"invalid link", noEnd, "", func(err error) bool {
 			var ve *model.ValidationError
-			return errors.As(err, &ve) && ve.Problems[0].Path == "name"
+			return errors.As(err, &ve) && ve.Problems[0].Path == "valid_until"
 		}},
 	} {
 		if _, err := s.Create(tc.d, tc.slug); !tc.check(err) {

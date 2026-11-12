@@ -182,7 +182,7 @@ func (s *Server) emitGuest(g *guestReq) {
 	r.Method = g.r.Method
 	r.Route = routeLabel(g.r.URL.Path)
 	if g.link.ID != "" {
-		r.LinkID, r.LinkName = g.link.ID, g.link.Name
+		r.LinkID, r.LinkName = g.link.ID, g.link.DisplayName()
 	}
 	r.PasswordLabel = g.label
 	if g.device != "" {
@@ -310,7 +310,7 @@ func (s *Server) auditAdmin(next http.Handler) http.Handler {
 		}
 		if rec.LinkID != "" && rec.LinkName == "" {
 			if l, err := s.deps.Links.Get(rec.LinkID); err == nil {
-				rec.LinkName = l.Name
+				rec.LinkName = l.DisplayName()
 			}
 		}
 		peer := peerAddr(r.RemoteAddr)

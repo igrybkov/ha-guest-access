@@ -159,7 +159,7 @@ When no rule passes for a pair, the guest does not see the control. A control th
 
 ### Scripts, variables and `guest_link`
 
-To run an HA script, grant `script.run` on the script entity. The app calls `script.turn_on`. It passes the rule's `variables` and one more, `guest_link`: the name of the link. `script.cancel` calls `script.turn_off`.
+To run an HA script, grant `script.run` on the script entity. The app calls `script.turn_on`. It passes the rule's `variables` and one more, `guest_link`: the name of the link (or "Untitled link" and the start of its id). `script.cancel` calls `script.turn_off`.
 
 ```yaml
 rules:
@@ -281,14 +281,16 @@ A link may have no templates and no rules yet. It is valid and grants nothing: t
 
 ### Title and welcome
 
-Once a guest is in, the guest page shows the link's name as its title. You can set two optional texts on the link:
+A link's name is for you only. Guests never see it. A new link gets a friendly made-up name, such as "Sleepy Otter", which you can change or clear (↻ suggests another). A link with no name shows as "Untitled link" and the start of its id in the admin, the log and notifications.
 
-- **Title for the guest** (`guest_title`): shows in place of the name. At most 120 bytes, one line.
+Once a guest is in, the guest page shows the global `guest.title` and `guest.welcome`, unless the link sets its own:
+
+- **Title for the guest** (`guest_title`): shows in place of the global `guest.title`. At most 120 bytes, one line.
 - **Welcome message** (`guest_welcome`): shows in place of the global `guest.welcome`. At most 1000 bytes. Line breaks show.
 
-Both are plain text. An empty one falls back to the name or the global welcome.
+Both are plain text. An empty one falls back to the global text.
 
-"In" means the guest passed the password and device approval, if the link has them. Before that, the page shows the global `guest.title` and `guest.welcome`. The password form, the device approval screen and the "link not active" screen never show the link's name, title or welcome. Someone with only the URL does not learn them.
+"In" means the guest passed the password and device approval, if the link has them. Before that, the page always shows the global `guest.title` and `guest.welcome`. The password form, the device approval screen and the "link not active" screen never show the link's own title or welcome. Someone with only the URL does not learn them.
 
 ### The window
 
@@ -631,7 +633,7 @@ Set these in the app's Configuration tab. Saving restarts the app. Each row show
 | `home_radius_default_m` | `300` | The near-home radius, in meters, that the template editor suggests. |
 | `music_assistant.timeout_ms` | `2000` | How long to wait for Music Assistant, in milliseconds. |
 | `music_assistant.check_interval_min` | `60` | Minutes between checks that Music Assistant takes the token. The app also checks once at start. `0` checks at start only. |
-| `guest.title` | `Welcome` | Title of the guest page before the guest is in (password, device approval, link not active). Plain text. After that, the link's own title or name shows. See **Title and welcome**. |
+| `guest.title` | `Welcome` | Title of the guest page. After the guest is in, a link's own title replaces it. Plain text. See **Title and welcome**. |
 | `guest.slider_interval_ms` | `300` | Least milliseconds between two values the page sends while a slider moves. The final value always goes. |
 | `guest.not_found_title` | `This link doesn't work` | Heading of the page a browser gets for the bare address, an unknown path or a link that does not exist. Plain text. The status stays 404. |
 | `guest.not_found_message` | `Ask the person who sent it for a new one.` | Text under that heading. Plain text. |

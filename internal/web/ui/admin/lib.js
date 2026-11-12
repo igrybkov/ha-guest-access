@@ -410,6 +410,37 @@ export function buildLink(f, { create = false } = {}) {
   return l;
 }
 
+// linkLabel names a link in the admin. A link may have no name; it then
+// shows as "Untitled link" and the start of its id, like the server does.
+export function linkLabel(l) {
+  const n = ((l && l.name) || '').trim();
+  return n || `Untitled link ${((l && l.id) || '').slice(0, 6)}`.trim();
+}
+
+// NAME_WORDS make friendly names for new links, such as "Sleepy Otter".
+// 20 by 20 gives 400 names.
+export const NAME_WORDS = {
+  adjectives: ['Sleepy', 'Fuzzy', 'Jolly', 'Sneaky', 'Bouncy', 'Grumpy', 'Cosmic', 'Dapper', 'Wobbly', 'Cheeky',
+    'Snoozy', 'Breezy', 'Plucky', 'Zesty', 'Giggly', 'Mellow', 'Sparkly', 'Peppy', 'Toasty', 'Curious'],
+  animals: ['Otter', 'Penguin', 'Corgi', 'Llama', 'Panda', 'Walrus', 'Hedgehog', 'Narwhal', 'Badger', 'Koala',
+    'Puffin', 'Sloth', 'Wombat', 'Capybara', 'Raccoon', 'Moose', 'Gecko', 'Alpaca', 'Lemur', 'Platypus'],
+};
+
+// suggestName picks a friendly name that no link in taken uses. rand
+// returns a number in [0, 1), like Math.random. When all are taken, it
+// adds a number.
+export function suggestName(taken = [], rand = Math.random) {
+  const { adjectives: a, animals: b } = NAME_WORDS;
+  const used = new Set(taken.map((n) => (n || '').trim().toLowerCase()));
+  const all = a.flatMap((x) => b.map((y) => `${x} ${y}`));
+  const free = all.filter((n) => !used.has(n.toLowerCase()));
+  if (free.length) return free[Math.floor(rand() * free.length)];
+  for (let i = 2; ; i++) {
+    const n = `${all[Math.floor(rand() * all.length)]} ${i}`;
+    if (!used.has(n.toLowerCase())) return n;
+  }
+}
+
 // linkForm is the editor state for a LinkView (or a new link).
 export function linkForm(v = {}) {
   return {

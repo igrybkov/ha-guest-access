@@ -5,7 +5,7 @@ import {
 } from './dom.js';
 import {
   paths, PRESETS, preset, toLocalInput, fromLocalInput, zoneNote, fmtTime, fmtWindow, buildLink, linkForm,
-  approvalMode, splitTemplates, templateLists, placeItem, dropItem, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
+  approvalMode, linkLabel, suggestName, splitTemplates, templateLists, placeItem, dropItem, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
   linkProblems, brokenLinkNote, removePasswordPrompt, ownRuleEntities,
 } from './lib.js';
 import { Slots, ruleEditor, loadInventory, entityEditor, moveRule } from './rules.js';
@@ -20,10 +20,10 @@ export async function render(view, rest) {
 // ---- Shared actions ----
 
 async function revoke(l, btn, after) {
-  if (!(await ask(`Revoke ${l.name}?`, 'The link stops working at once. This cannot be undone.', { ok: 'Revoke', danger: true }))) return;
+  if (!(await ask(`Revoke ${linkLabel(l)}?`, 'The link stops working at once. This cannot be undone.', { ok: 'Revoke', danger: true }))) return;
   await run(btn, async () => {
     await post(paths.revoke(l.id), {});
-    toast(`Revoked ${l.name}`);
+    toast(`Revoked ${linkLabel(l)}`);
     after();
   });
 }
@@ -31,7 +31,7 @@ async function revoke(l, btn, after) {
 async function rotate(l, btn, after) {
   const warn = rotateWarning(l);
   const msg = `The old URL stops working at once. Send the new one to your guests.${warn ? ` ${warn}` : ''}`;
-  if (!(await ask(`New URL for ${l.name}?`, msg, { ok: 'Make new URL', danger: true }))) return;
+  if (!(await ask(`New URL for ${linkLabel(l)}?`, msg, { ok: 'Make new URL', danger: true }))) return;
   await run(btn, async () => {
     await post(paths.rotate(l.id), {});
     toast('New URL made');
@@ -40,10 +40,10 @@ async function rotate(l, btn, after) {
 }
 
 async function remove(l, btn, after) {
-  if (!(await ask(`Delete ${l.name}?`, 'The link stops working and its history is gone. This cannot be undone.', { ok: 'Delete', danger: true }))) return;
+  if (!(await ask(`Delete ${linkLabel(l)}?`, 'The link stops working and its history is gone. This cannot be undone.', { ok: 'Delete', danger: true }))) return;
   await run(btn, async () => {
     await del(paths.link(l.id));
-    toast(`Deleted ${l.name}`);
+    toast(`Deleted ${linkLabel(l)}`);
     after();
   });
 }
@@ -67,7 +67,7 @@ async function list(view) {
   const rows = links.map((l) => h('tr', {},
     h('td', {}, h('span', { class: `status ${l.status}`, text: STATUS_LABELS[l.status] || l.status })),
     h('td', {},
-      h('a', { class: 'title', href: `#/links/edit/${encodeURIComponent(l.id)}`, text: l.name }),
+      h('a', { class: 'title', href: `#/links/edit/${encodeURIComponent(l.id)}`, text: linkLabel(l) }),
       h('div', {}, linkBadges(l).map((b) => h('span', { class: 'badge', text: b }))),
       linkProblems(l).length > 0 && h('div', { class: 'error small', text: 'Does not validate: guests get not found' }),
       l.slug_warning && h('div', { class: 'warning small', text: 'Short custom URL' }),
@@ -91,14 +91,18 @@ async function list(view) {
 
 async function editor(view, id) {
   const isNew = !id;
-  const [linkView, tpls, catalog, inv] = await Promise.all([
+  const [linkView, tpls, catalog, inv, others] = await Promise.all([
     isNew ? null : get(paths.link(id)),
     get(paths.templates),
     get(paths.catalog),
     loadInventory(),
+    isNew ? get(paths.links).catch(() => ({ links: [] })) : null,
   ]);
   const templates = tpls.templates || [];
   const f = linkForm(linkView || {});
+  // A new link starts with a friendly name that no other link uses.
+  const takenNames = ((others && others.links) || []).map((l) => l.name);
+  if (isNew) f.name = suggestName(takenNames);
   // A template the link names but that no longer exists is dropped from
   // the form, or every save would fail.
   const { keep, missing: missingTpls } = splitTemplates(f.templates, templates);
@@ -107,14 +111,17 @@ async function editor(view, id) {
   const reload = () => editor(view, id);
 
   // Name and note.
-  const name = h('input', { value: f.name, required: true });
+  const name = h('input', { value: f.name });
   name.addEventListener('input', () => { f.name = name.value; schedule(); });
+  const reroll = h('button', {
+    type: 'button', class: 'icon', text: '↻', 'aria-label': 'Suggest another name',
+    onclick: () => { name.value = f.name = suggestName([...takenNames, f.name]); name.dispatchEvent(new Event('input')); },
+  });
   const note = h('textarea', { rows: 2, placeholder: 'Only you see this.' });
   note.value = f.note;
   note.addEventListener('input', () => { f.note = note.value; });
-  // Guest page text. Empty falls back to the name and the global welcome.
-  const guestTitle = h('input', { value: f.guest_title, placeholder: f.name });
-  name.addEventListener('input', () => { guestTitle.placeholder = name.value; });
+  // Guest page text. Empty falls back to the global title and welcome.
+  const guestTitle = h('input', { value: f.guest_title, placeholder: 'The title in Settings' });
   guestTitle.addEventListener('input', () => { f.guest_title = guestTitle.value; });
   const guestWelcome = h('textarea', { rows: 2, placeholder: settings().guest?.welcome || '' });
   guestWelcome.value = f.guest_welcome;
@@ -287,7 +294,7 @@ async function editor(view, id) {
       }
       try {
         const saved = isNew ? await post(paths.links, body) : await put(paths.link(id), body);
-        toast(saved.slug_warning ? `Saved ${saved.name}. ${saved.slug_warning}` : `Saved ${saved.name}`);
+        toast(saved.slug_warning ? `Saved ${linkLabel(saved)}. ${saved.slug_warning}` : `Saved ${linkLabel(saved)}`);
         if (isNew) location.hash = `#/links/edit/${encodeURIComponent(saved.id)}`;
         else reload();
       } catch (e) {
@@ -300,7 +307,7 @@ async function editor(view, id) {
     });
   } },
   h('div', { class: 'toolbar' }, back('#/links', 'Links'),
-    h('h1', { text: isNew ? 'New link' : f.name }),
+    h('h1', { text: isNew ? 'New link' : linkLabel({ name: f.name, id }) }),
     linkView && h('span', { class: `status ${linkView.status}`, text: STATUS_LABELS[linkView.status] || linkView.status })),
   linkView && linkProblems(linkView).length > 0 && h('div', { class: 'error' },
     h('p', { text: brokenLinkNote }), h('ul', {}, linkProblems(linkView).map((text) => h('li', { text })))),
@@ -309,8 +316,8 @@ async function editor(view, id) {
   slots.top,
   h('div', { class: 'cols' },
     h('div', { class: 'stack' },
-      h('div', {}, field('Name', name, 'Guests see this name after they open the link.'), slots.slot('name')),
-      h('div', {}, field('Title for the guest', guestTitle, 'Optional. Shows in place of the name.'), slots.slot('guest_title')),
+      h('div', {}, field('Name', h('div', { class: 'row name-row' }, name, reroll), 'Optional. Only you see it.'), slots.slot('name')),
+      h('div', {}, field('Title for the guest', guestTitle, 'Optional. Guests see it after they open the link. Empty uses the title in Settings.'), slots.slot('guest_title')),
       h('div', {}, field('Welcome message', guestWelcome, 'Optional. Shows in place of the global welcome.'), slots.slot('guest_welcome')),
       h('div', {}, field('Note', note), slots.slot('note')),
       h('fieldset', {}, h('legend', { text: 'When it works' }),

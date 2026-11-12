@@ -1,14 +1,14 @@
 // Activity screen: the audit log, newest first. Most fields come from
 // guests, so everything goes in as text only.
 import { h, fill, get, table, select, haZone } from './dom.js';
-import { paths, fmtTime, AUDIT_GROUPS, auditQuery, auditKeep, auditWho, auditWhat, auditResult, isDenied, auditOffText } from './lib.js';
+import { paths, fmtTime, AUDIT_GROUPS, auditQuery, auditKeep, auditWho, auditWhat, auditResult, isDenied, auditOffText, linkLabel } from './lib.js';
 
 const PAGE = 50;
 
 export async function render(view, rest, params) {
   const state = { link: params.get('link') || '', group: params.get('group') || '', limit: PAGE };
   const { links } = await get(paths.links).catch(() => ({ links: [] }));
-  const linkSel = select([['', 'All links'], ...links.map((l) => [l.id, l.name])], state.link, { 'aria-label': 'Link' });
+  const linkSel = select([['', 'All links'], ...links.map((l) => [l.id, linkLabel(l)])], state.link, { 'aria-label': 'Link' });
   const groupSel = select(AUDIT_GROUPS, state.group, { 'aria-label': 'Events' });
   const body = h('div', {}, h('p', { class: 'muted', text: 'Loading…' }));
   const more = h('button', { type: 'button', text: 'Load more', hidden: true });

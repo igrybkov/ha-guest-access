@@ -231,7 +231,7 @@ func (s *Server) deleteTemplate(w http.ResponseWriter, r *http.Request) {
 	if ls, err := s.deps.Links.List(); err == nil {
 		for _, l := range ls.Links {
 			if slices.Contains(l.TemplateIDs, id) {
-				used = append(used, l.Name)
+				used = append(used, l.DisplayName())
 			}
 		}
 	}

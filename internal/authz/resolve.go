@@ -270,7 +270,7 @@ func (r *resolver) addRule(template string, i int, rule model.Rule, acc model.Ac
 					src.Variables = map[string]any{}
 				}
 				// Set last, so a template can't spoof it.
-				src.Variables["guest_link"] = r.link.Name
+				src.Variables["guest_link"] = r.link.DisplayName()
 			}
 			g.Sources = append(g.Sources, src)
 			r.grants[key] = g

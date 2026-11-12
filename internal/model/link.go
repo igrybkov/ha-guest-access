@@ -238,12 +238,20 @@ func (l Link) Validate() error {
 	return p.err()
 }
 
+// DisplayName is the link's name, or "Untitled link" and the start of
+// its id when the name is empty. Logs, audit records, notifications and
+// the admin use it. The guest page does not: it falls back to the global
+// title instead.
+func (l Link) DisplayName() string {
+	if n := strings.TrimSpace(l.Name); n != "" {
+		return n
+	}
+	return "Untitled link " + l.ID[:min(6, len(l.ID))]
+}
+
 func (l Link) validate(p *problems, path string) {
 	if !idRe.MatchString(l.ID) {
 		p.add(join(path, "id"), "must be 1-64 of a-z, 0-9, _ and -")
-	}
-	if strings.TrimSpace(l.Name) == "" {
-		p.add(join(path, "name"), "is empty")
 	}
 	if !slugRe.MatchString(l.Slug) {
 		p.add(join(path, "slug"), "must be 12-128 of A-Z, a-z, 0-9, _ and -")

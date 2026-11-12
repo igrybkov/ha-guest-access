@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- A link's name is optional and for the admin only. Guests no longer see
+  it: the guest page shows the link's own title, else the global
+  `guest.title`. A new link starts with a friendly made-up name such as
+  "Sleepy Otter" (↻ suggests another). A link with no name shows as
+  "Untitled link" and the start of its id in the admin, the log, HA
+  notifications and the `guest_link` script variable.
+
 ## 0.3.0
 
 - Admin: two lists with drag and drop (mouse, touch and keyboard) set

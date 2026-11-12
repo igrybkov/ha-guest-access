@@ -25,7 +25,7 @@ func (s *Server) listPending(w http.ResponseWriter, r *http.Request) {
 	names := map[string]string{}
 	if ls, err := s.deps.Links.List(); err == nil {
 		for _, l := range ls.Links {
-			names[l.ID] = l.Name
+			names[l.ID] = l.DisplayName()
 		}
 	}
 	out := make([]pendingView, 0, len(reqs))

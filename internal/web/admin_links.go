@@ -138,9 +138,9 @@ func (s *Server) createLink(w http.ResponseWriter, r *http.Request) {
 		s.writeAdminErr(w, r, err)
 		return
 	}
-	s.log.Info("link created", "link", l.ID, "name", l.Name)
+	s.log.Info("link created", "link", l.ID, "name", l.DisplayName())
 	rec := adminAudit(r)
-	rec.LinkID, rec.LinkName = l.ID, l.Name
+	rec.LinkID, rec.LinkName = l.ID, l.DisplayName()
 	s.writeLink(w, r, http.StatusCreated, l)
 }
 
@@ -163,7 +163,7 @@ func (s *Server) updateLink(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteLink(w http.ResponseWriter, r *http.Request) {
 	if l, err := s.deps.Links.Get(r.PathValue("id")); err == nil {
-		adminAudit(r).LinkName = l.Name
+		adminAudit(r).LinkName = l.DisplayName()
 	}
 	if err := s.deps.Links.Delete(r.PathValue("id")); err != nil {
 		s.writeAdminErr(w, r, err)
