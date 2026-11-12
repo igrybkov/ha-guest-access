@@ -47,12 +47,15 @@ func TestBuild(t *testing.T) {
 	}
 	for id, want := range map[string]model.Entity{
 		// No own area: the device's area applies later, in the resolver.
-		"media_player.guest": {ID: "media_player.guest", DeviceID: "dev1", Name: "Speaker"},
+		// The friendly name wins over the original name: it carries the
+		// device's name_by_user.
+		"media_player.guest": {ID: "media_player.guest", DeviceID: "dev1", Name: "Guest speaker"},
 		// Own area overrides; a disabled device disables its entities.
 		"light.lamp": {ID: "light.lamp", DeviceID: "dev2", AreaID: "guest_room", Name: "Lamp", Disabled: true},
 		// No registry name: the friendly name from the state.
-		"switch.heater":  {ID: "switch.heater", Labels: []string{"guest"}, Hidden: true, Name: "Heater"},
-		"sensor.battery": {ID: "sensor.battery", DeviceID: "dev1", EntityCategory: "diagnostic", Disabled: true},
+		"switch.heater": {ID: "switch.heater", Labels: []string{"guest"}, Hidden: true, Name: "Heater"},
+		// No state and no names: the device's display name.
+		"sensor.battery": {ID: "sensor.battery", DeviceID: "dev1", EntityCategory: "diagnostic", Disabled: true, Name: "Guest speaker"},
 	} {
 		got := inv.Entities[id]
 		if got.ID != want.ID || got.DeviceID != want.DeviceID || got.AreaID != want.AreaID || got.Name != want.Name ||

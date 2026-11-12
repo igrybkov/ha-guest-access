@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Entity names follow HA's display name (`friendly_name`), so renames
+  you made in HA show on the guest page and in the admin. Before, an
+  entity with no name of its own showed its integration's original
+  name, ignoring a renamed device. A device rename now refreshes the
+  names at once.
+
 ## 0.4.0
 
 - Admin: a Copy URL button on each link in the Links list. New URL

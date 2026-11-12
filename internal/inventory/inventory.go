@@ -4,6 +4,7 @@
 package inventory
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -92,7 +93,9 @@ func (c *Cache) SetMaxAge(d time.Duration) {
 // returns once subscribed. Watch needs Run.
 func (c *Cache) Run(ctx context.Context) error {
 	for _, typ := range registryEvents {
-		dropStates := typ == "entity_registry_updated"
+		// Entity names come from friendly_name, which an entity or device
+		// rename changes. So those events refetch the states too.
+		dropStates := typ == "entity_registry_updated" || typ == "device_registry_updated"
 		if err := c.client.SubscribeEvents(ctx, typ, func(ha.Event) {
 			c.Invalidate()
 			if dropStates {
@@ -258,8 +261,10 @@ func (c *Cache) Inventory(ctx context.Context) (model.Inventory, error) {
 //   - Entity.AreaID is the entity's own area; empty means its device's.
 //   - Hidden means hidden_by is set.
 //   - Disabled means the entity's disabled_by is set, or its device's.
-//   - Name is the registry name, else the original name, else the
-//     friendly_name attribute of its state.
+//   - Name is the friendly_name attribute of its state: HA builds it from
+//     the user's renames, the device's name_by_user included. With no
+//     state, it is the registry name, else the original name, else the
+//     device's name.
 //   - An entity with a state but no registry entry is included with its
 //     id and friendly name only: no device, area or labels, not hidden,
 //     not disabled.
@@ -318,12 +323,9 @@ func build(ctx context.Context, client ha.Client, states []ha.State) (model.Inve
 		}
 	}
 	for _, e := range entities {
-		name := e.Name
-		if name == "" {
-			name = e.OriginalName
-		}
-		if name == "" {
-			name = friendly[e.EntityID]
+		name := cmp.Or(friendly[e.EntityID], e.Name, e.OriginalName)
+		if name == "" && e.DeviceID != "" {
+			name = inv.Devices[e.DeviceID].DisplayName()
 		}
 		inv.Entities[e.EntityID] = model.Entity{
 			ID:             e.EntityID,
