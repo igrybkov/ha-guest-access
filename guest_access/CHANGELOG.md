@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.1
 
 - Fix: a template with **Party** on and no rules now shows the Music
   Assistant party link. Before, the party link needed a rule whose
