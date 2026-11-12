@@ -204,6 +204,12 @@ func TestAuditEntityText(t *testing.T) {
 	if r := recs[1]; r.Event != "admin.entity_text.update" || r.Result != "failed" || r.Reason != "invalid" {
 		t.Errorf("failed record = %+v", r)
 	}
+	raw, _ := os.ReadFile(ah.path)
+	for name, out := range map[string]string{"file": string(raw), "log": ah.log.String()} {
+		if strings.Contains(out, "Secret lamp name") {
+			t.Errorf("%s holds the text", name)
+		}
+	}
 }
 
 // The guest page shows the admin's name and description. Order by name
