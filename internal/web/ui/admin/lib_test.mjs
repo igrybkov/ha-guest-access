@@ -10,6 +10,7 @@ import {
   auditQuery, auditKeep, auditWho, auditWhat, auditResult, paths, settingsSections, settingsWarnings, addMonth, PRESETS,
   linkProblems, removePasswordPrompt, wallToUTC, wallParts, usableZone, browserZone, zoneNote, fmtTime, fmtWindow,
   PENDING_ROUTE, wantsPending, haRoutePath, pollMs, ago, pendingRows, pendingBadge,
+  pickPreset, formPreset, needsEnd, INACTIVE_HINT, STATUS_LABELS,
 } from './lib.js';
 
 // ---- Patterns ----
@@ -214,6 +215,37 @@ test('custom is no preset', () => {
   assert.equal(preset('custom', new Date(), CHI), null);
 });
 
+test('inactive is the last preset and sets no window', () => {
+  assert.deepEqual(PRESETS.at(-1), ['inactive', 'Inactive']);
+  assert.equal(preset('inactive', new Date(), CHI), null);
+  assert.match(INACTIVE_HINT, /pick when it works/);
+});
+
+test('pickPreset: inactive keeps the dates, any other preset turns the link on', () => {
+  const now = utc('2026-11-11T16:00:00Z');
+  const f = { ...linkForm(), valid_from: '2026-11-20T10:00:00Z', valid_until: '2026-11-22T10:00:00Z' };
+  assert.equal(pickPreset(f, 'inactive', now, CHI), null);
+  assert.equal(f.inactive, true);
+  assert.equal(f.valid_from, '2026-11-20T10:00:00Z');
+  assert.equal(f.valid_until, '2026-11-22T10:00:00Z');
+  assert.equal(formPreset(f), 'inactive');
+
+  const w = pickPreset(f, 'week', now, CHI);
+  assert.equal(f.inactive, false);
+  assert.equal(f.valid_from, null);
+  assert.equal(f.valid_until, iso(w.until));
+  assert.equal(formPreset(f), 'custom');
+
+  pickPreset(f, 'inactive', now, CHI);
+  assert.equal(pickPreset(f, 'custom', now, CHI), null);
+  assert.equal(f.inactive, false, 'custom turns the link on');
+  assert.equal(f.valid_until, iso(w.until), 'custom keeps the dates');
+
+  const empty = linkForm();
+  pickPreset(empty, 'inactive', now, CHI);
+  assert.equal(empty.valid_until, null, 'inactive works with no dates');
+});
+
 test('an empty or unknown zone falls back to the browser zone', () => {
   const now = utc('2026-11-14T00:00:00Z');
   const here = browserZone();
@@ -245,11 +277,20 @@ test('fmtTime and fmtWindow show times in the zone', () => {
   assert.equal(fmtWindow({ valid_until: t }, CHI), `until ${fmtTime(t, CHI)}`);
 });
 
+test('fmtWindow handles a missing end or no dates', () => {
+  const a = '2026-11-14T00:00:00Z';
+  const b = '2026-11-16T00:00:00Z';
+  assert.equal(fmtWindow({ valid_from: a, valid_until: b }, CHI), `${fmtTime(a, CHI)} to ${fmtTime(b, CHI)}`);
+  assert.equal(fmtWindow({ valid_from: a, inactive: true }, CHI), `from ${fmtTime(a, CHI)}`);
+  assert.equal(fmtWindow({ inactive: true }, CHI), 'Not set');
+  assert.equal(fmtWindow({ valid_until: '0001-01-01T00:00:00Z' }, CHI), 'Not set');
+});
+
 // ---- Builders ----
 
 const TEMPLATE_KEYS = ['id', 'name', 'icon', 'access', 'rules', 'party', 'entity_order'];
 const RULE_KEYS = ['select', 'exclude', 'actions', 'access', 'variables'];
-const LINK_EDIT_KEYS = ['name', 'note', 'guest_title', 'guest_welcome', 'valid_from', 'valid_until', 'templates', 'extra', 'entity_order', 'one_time', 'approval', 'slug'];
+const LINK_EDIT_KEYS = ['name', 'note', 'guest_title', 'guest_welcome', 'valid_from', 'valid_until', 'inactive', 'templates', 'extra', 'entity_order', 'one_time', 'approval', 'slug'];
 const only = (obj, keys) => Object.keys(obj).forEach((k) => assert.ok(keys.includes(k), `unexpected key ${k}`));
 
 test('buildTemplate sends only model fields, and drops empty parts', () => {
@@ -351,6 +392,27 @@ test('buildLink leaves out a missing end, so the form can flag it', () => {
   const body = buildLink({ ...linkForm(), name: 'x' });
   assert.equal('valid_until' in body, false);
   assert.equal('note' in body, false);
+  assert.equal(needsEnd(body), true);
+});
+
+test('inactive goes from the view to the form and back', () => {
+  assert.equal(linkForm(linkView).inactive, false);
+  assert.equal('inactive' in buildLink(linkForm(linkView)), false, 'active links leave it out');
+  const v = { ...linkView, inactive: true, status: 'inactive' };
+  delete v.valid_until;
+  const f = linkForm(v);
+  assert.equal(f.inactive, true);
+  assert.equal(f.valid_until, null);
+  const body = buildLink(f);
+  only(body, LINK_EDIT_KEYS);
+  assert.equal(body.inactive, true);
+  assert.equal('valid_until' in body, false);
+  assert.equal(needsEnd(body), false, 'an inactive link saves with no end');
+  // A year 1 end from an old server reads as no end.
+  assert.equal(linkForm({ ...v, valid_until: '0001-01-01T00:00:00Z' }).valid_until, null);
+  // Turned on again, the end is needed.
+  assert.equal(needsEnd(buildLink({ ...f, inactive: false })), true);
+  assert.equal(STATUS_LABELS.inactive, 'Inactive');
 });
 
 test('slugifyID', () => {

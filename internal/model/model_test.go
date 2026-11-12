@@ -250,6 +250,10 @@ func TestLinkValidate(t *testing.T) {
 		{"no end", with(func(l *Link) { l.ValidUntil = time.Time{} }), []string{"valid_until"}},
 		{"ends before start", with(func(l *Link) { l.ValidFrom = now.Add(2 * time.Hour) }), []string{"valid_until"}},
 		{"ends at start", with(func(l *Link) { l.ValidFrom = l.ValidUntil }), []string{"valid_until"}},
+		{"inactive with no end", with(func(l *Link) { l.Inactive = true; l.ValidUntil = time.Time{} }), nil},
+		{"inactive with a start and no end", with(func(l *Link) { l.Inactive = true; l.ValidFrom = now; l.ValidUntil = time.Time{} }), nil},
+		{"inactive with a window", with(func(l *Link) { l.Inactive = true; l.ValidFrom = now }), nil},
+		{"inactive ends before start", with(func(l *Link) { l.Inactive = true; l.ValidFrom = now.Add(2 * time.Hour) }), []string{"valid_until"}},
 		{"grants nothing", with(func(l *Link) { l.TemplateIDs = nil }), nil},
 		{"grants nothing, other checks stay", with(func(l *Link) { l.TemplateIDs = nil; l.ValidUntil = time.Time{} }), []string{"valid_until"}},
 		{"empty template id", with(func(l *Link) { l.TemplateIDs = []string{""} }), []string{"templates[0]"}},
@@ -396,6 +400,11 @@ func TestLinkStatus(t *testing.T) {
 		{"no start", Link{ValidUntil: until}, from.Add(-24 * time.Hour), StatusActive},
 		{"revoked inside", Link{ValidFrom: from, ValidUntil: until, Revoked: true}, from.Add(time.Hour), StatusRevoked},
 		{"no end is expired", Link{}, from, StatusExpired},
+		{"inactive inside", Link{ValidFrom: from, ValidUntil: until, Inactive: true}, from.Add(time.Hour), StatusInactive},
+		{"inactive before", Link{ValidFrom: from, ValidUntil: until, Inactive: true}, from.Add(-time.Hour), StatusInactive},
+		{"inactive after", Link{ValidFrom: from, ValidUntil: until, Inactive: true}, until.Add(time.Hour), StatusInactive},
+		{"inactive with no window", Link{Inactive: true}, from, StatusInactive},
+		{"revoked wins over inactive", Link{ValidUntil: until, Inactive: true, Revoked: true}, from, StatusRevoked},
 	} {
 		if got := tc.l.Status(tc.now); got != tc.want {
 			t.Errorf("%s: Status = %s, want %s", tc.name, got, tc.want)
@@ -617,6 +626,38 @@ func TestGuestTextRoundTrip(t *testing.T) {
 		}
 		if l := ls2.Links[0]; l.GuestTitle != "Hi" || l.GuestWelcome != "a\nb" {
 			t.Errorf("%s: %+v", tc.name, l)
+		}
+	}
+}
+
+// inactive survives a round trip. A zero valid_until is left out, so it
+// never shows as year 1 in the admin or in links.yaml.
+func TestInactiveRoundTrip(t *testing.T) {
+	until := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	ls := Links{Version: 1, Links: []Link{{ID: "l1", CreatedAt: until, Inactive: true}, {ID: "l2", CreatedAt: until, ValidUntil: until}}}
+	for _, tc := range []struct {
+		name      string
+		marshal   func(any) ([]byte, error)
+		unmarshal func([]byte, any) error
+	}{
+		{"yaml", yaml.Marshal, yaml.Unmarshal},
+		{"json", json.Marshal, json.Unmarshal},
+	} {
+		b, err := tc.marshal(ls)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for key, want := range map[string]int{"inactive": 1, "valid_until": 1, "0001": 0} {
+			if n := strings.Count(string(b), key); n != want {
+				t.Errorf("%s: %s %d times in %s", tc.name, key, n, b)
+			}
+		}
+		var ls2 Links
+		if err := tc.unmarshal(b, &ls2); err != nil {
+			t.Fatal(err)
+		}
+		if a, b := ls2.Links[0], ls2.Links[1]; !a.Inactive || !a.ValidUntil.IsZero() || b.Inactive || !b.ValidUntil.Equal(until) {
+			t.Errorf("%s: %+v", tc.name, ls2.Links)
 		}
 	}
 }

@@ -233,6 +233,26 @@ func TestDecideExpired(t *testing.T) {
 	}
 }
 
+// A request that waits while the admin sets the link inactive can't be
+// approved.
+func TestDecideInactiveLink(t *testing.T) {
+	e := newEnv(t, Options{})
+	l := e.newLink(manual)
+	e.call(e.m.RequestAccess, l.ID, newBrowser(iPhoneUA), "{}")
+	id := e.requestID(l.ID)
+	edit := e.link(l.ID)
+	edit.Inactive, edit.ValidUntil = true, time.Time{}
+	if _, err := e.links.Update(l.ID, edit); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.m.Decide(id, true); !errors.Is(err, links.ErrInactive) {
+		t.Errorf("Decide on an inactive link = %v", err)
+	}
+	if len(e.link(l.ID).Devices) != 0 {
+		t.Error("device added to an inactive link")
+	}
+}
+
 func TestEventRateCap(t *testing.T) {
 	e := newEnv(t, Options{MaxPending: 100})
 	l := e.newLink(manual)

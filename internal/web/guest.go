@@ -186,7 +186,8 @@ type guestKey struct{}
 //     limiters say. A link that fails policy.ServableLink (a hand edit
 //     of links.yaml broke it) counts as a miss.
 //  3. POST shape: JSON content type and a same-origin Origin header.
-//  4. link.Active(now).
+//  4. link.Active(now). A link the admin set inactive fails it like a
+//     link outside its window.
 //  5. The password session, if the link has passwords.
 //  6. DeviceGate.Admit, on kindGuest routes only.
 //  7. The route's own work.

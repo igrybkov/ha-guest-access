@@ -252,13 +252,39 @@ export function addMonth(d, tz) {
 }
 
 // PRESETS are the window shortcuts. from null means "from now".
+// Inactive is no window: it turns the link off and keeps the dates.
 export const PRESETS = [
   ['today', 'Today'],
   ['weekend', 'This weekend'],
   ['week', '1 week'],
   ['month', '1 month'],
   ['custom', 'Custom'],
+  ['inactive', 'Inactive'],
 ];
+
+// INACTIVE_HINT shows under the presets while Inactive is picked.
+export const INACTIVE_HINT = "Guests can't use it until you pick when it works.";
+
+// pickPreset applies preset name to the link form f at now. Inactive
+// sets f.inactive and leaves the dates as they are. Any other preset
+// clears f.inactive, and a window preset also sets the dates. It returns
+// the window it set, or null.
+export function pickPreset(f, name, now, tz) {
+  f.inactive = name === 'inactive';
+  const w = preset(name, now, tz);
+  if (w) {
+    f.valid_from = w.from ? w.from.toISOString() : null;
+    f.valid_until = w.until.toISOString();
+  }
+  return w;
+}
+
+// formPreset is the preset to show as picked when a form opens.
+export const formPreset = (f) => (f.inactive ? 'inactive' : 'custom');
+
+// needsEnd reports whether a link body can't be saved yet: an active
+// link must end. An inactive one may have no end.
+export const needsEnd = (body) => !body.inactive && !body.valid_until;
 
 // preset returns {from, until} for a preset at now, or null for custom.
 // Days, weekdays and times of day are wall-clock time in tz.
@@ -304,11 +330,15 @@ export function fmtTime(iso, tz) {
   return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: usableZone(tz) });
 }
 
-// fmtWindow describes a link's window in tz.
+// fmtWindow describes a link's window in tz. An inactive link may have
+// no end, or no dates at all.
 export function fmtWindow(link, tz) {
   const from = fmtTime(link.valid_from, tz);
   const until = fmtTime(link.valid_until, tz);
-  return from ? `${from} to ${until}` : `until ${until}`;
+  if (from && until) return `${from} to ${until}`;
+  if (until) return `until ${until}`;
+  if (from) return `from ${from}`;
+  return 'Not set';
 }
 
 // ---- Form builders ----
@@ -404,6 +434,7 @@ export function buildLink(f, { create = false } = {}) {
   if (f.guest_title && f.guest_title.trim()) l.guest_title = f.guest_title.trim();
   if (f.guest_welcome && f.guest_welcome.trim()) l.guest_welcome = f.guest_welcome.trim();
   if (f.valid_from) l.valid_from = new Date(f.valid_from).toISOString();
+  if (f.inactive) l.inactive = true;
   if (f.entity_order?.length) l.entity_order = [...f.entity_order];
   if (!l.valid_until) delete l.valid_until;
   if (create && f.customSlug && f.slug) l.slug = f.slug;
@@ -449,7 +480,8 @@ export function linkForm(v = {}) {
     guest_title: v.guest_title || '',
     guest_welcome: v.guest_welcome || '',
     valid_from: v.valid_from && new Date(v.valid_from).getUTCFullYear() > 1 ? v.valid_from : null,
-    valid_until: v.valid_until || null,
+    valid_until: v.valid_until && new Date(v.valid_until).getUTCFullYear() > 1 ? v.valid_until : null,
+    inactive: !!v.inactive,
     templates: [...(v.templates || [])],
     extra: (v.extra || []).map((r) => ruleState(r, { forceAccess: true })),
     entity_order: [...(v.entity_order || [])],
@@ -744,7 +776,7 @@ export function groupProblems(problems, keys, normalize = (p) => p) {
 
 // ---- Links list ----
 
-export const STATUS_LABELS = { active: 'Active', scheduled: 'Scheduled', expired: 'Expired', revoked: 'Revoked' };
+export const STATUS_LABELS = { active: 'Active', inactive: 'Inactive', scheduled: 'Scheduled', expired: 'Expired', revoked: 'Revoked' };
 
 // brokenLinkNote is what the admin sees on a link that does not
 // validate (a hand edit of links.yaml broke it).

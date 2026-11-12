@@ -406,14 +406,21 @@ func TestNotFoundStillRateLimited(t *testing.T) {
 	}
 }
 
-// A link that exists but is expired or revoked keeps its own answers:
-// the page shell, and 410 from the API.
+// A link that exists but is expired, revoked or set inactive keeps its
+// own answers: the page shell, and 410 from the API.
 func TestNotFoundLeavesInactiveLinks(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		end  func(h *harness, id string)
 	}{
 		{"expired", func(h *harness, _ string) { h.advance(48 * time.Hour) }},
+		{"set inactive", func(h *harness, id string) {
+			l, _ := h.links.Get(id)
+			l.Inactive, l.ValidUntil = true, time.Time{}
+			if _, err := h.links.Update(id, l); err != nil {
+				h.t.Fatal(err)
+			}
+		}},
 		{"revoked", func(h *harness, id string) {
 			if err := h.links.Revoke(id); err != nil {
 				h.t.Fatal(err)

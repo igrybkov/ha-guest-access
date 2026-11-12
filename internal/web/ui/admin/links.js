@@ -4,7 +4,7 @@ import {
   h, fill, get, post, put, del, toast, run, ask, field, check, back, debounce, table, copyText, settings, haZone, APIError,
 } from './dom.js';
 import {
-  paths, PRESETS, preset, toLocalInput, fromLocalInput, zoneNote, fmtTime, fmtWindow, buildLink, linkForm,
+  paths, PRESETS, pickPreset, formPreset, needsEnd, INACTIVE_HINT, toLocalInput, fromLocalInput, zoneNote, fmtTime, fmtWindow, buildLink, linkForm,
   approvalMode, linkLabel, suggestName, splitTemplates, templateLists, placeItem, dropItem, linkBadges, rotateWarning, STATUS_LABELS, grantSummary, auditQuery, auditWho, auditWhat, auditResult, auditOffText,
   linkProblems, brokenLinkNote, removePasswordPrompt, ownRuleEntities,
 } from './lib.js';
@@ -139,16 +139,17 @@ async function editor(view, id) {
   const from = h('input', { type: 'datetime-local', value: f.valid_from ? toLocalInput(new Date(f.valid_from), tz) : '' });
   const until = h('input', { type: 'datetime-local', value: f.valid_until ? toLocalInput(new Date(f.valid_until), tz) : '' });
   const presetBtns = h('div', { class: 'chips', role: 'group', 'aria-label': 'Window presets' });
-  let picked = 'custom';
+  // The hint says so while the link is inactive.
+  const inactiveHint = h('p', { class: 'warning small', role: 'status', text: INACTIVE_HINT });
+  let picked = formPreset(f);
   const markPreset = () => {
     for (const b of presetBtns.children) b.setAttribute('aria-pressed', String(b.dataset.preset === picked));
+    inactiveHint.hidden = !f.inactive;
   };
   const applyPreset = (p) => {
     picked = p;
-    const w = preset(p, new Date(), tz);
+    const w = pickPreset(f, p, new Date(), tz);
     if (w) {
-      f.valid_from = w.from ? w.from.toISOString() : null;
-      f.valid_until = w.until.toISOString();
       from.value = w.from ? toLocalInput(w.from, tz) : '';
       until.value = toLocalInput(w.until, tz);
       schedule();
@@ -156,8 +157,11 @@ async function editor(view, id) {
     markPreset();
   };
   presetBtns.append(...PRESETS.map(([p, label]) => h('button', { type: 'button', 'data-preset': p, text: label, onclick: () => applyPreset(p) })));
+  markPreset();
+  // Editing a date picks Custom, which turns the link on.
   const readWindow = () => {
     picked = 'custom';
+    f.inactive = false;
     markPreset();
     const a = fromLocalInput(from.value, tz);
     const b = fromLocalInput(until.value, tz);
@@ -295,7 +299,7 @@ async function editor(view, id) {
     ev.preventDefault();
     run(save, async () => {
       const body = buildLink({ ...f, extra: current() }, { create: isNew });
-      if (!body.valid_until) {
+      if (needsEnd(body)) {
         slots.show([{ path: 'valid_until', message: 'Pick when the link ends.' }]);
         throw new Error('Pick when the link ends.');
       }
@@ -329,6 +333,7 @@ async function editor(view, id) {
       h('div', {}, field('Note', note), slots.slot('note')),
       h('fieldset', {}, h('legend', { text: 'When it works' }),
         presetBtns,
+        inactiveHint,
         h('p', { class: 'muted small', text: zoneNote(tz) }),
         h('div', { class: 'grid2' },
           h('div', {}, field('From', from, 'Empty means now.'), slots.slot('valid_from')),

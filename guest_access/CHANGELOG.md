@@ -10,6 +10,10 @@
   "Sleepy Otter" (↻ suggests another). A link with no name shows as
   "Untitled link" and the start of its id in the admin, the log, HA
   notifications and the `guest_link` script variable.
+- A link can be saved inactive: pick **Inactive** under "When it
+  works". Guests can't use it, whatever its window, and it needs no end
+  date yet. Pick another preset or edit the dates to turn it on. The
+  Links screen shows it as Inactive.
 
 ## 0.3.0
 
