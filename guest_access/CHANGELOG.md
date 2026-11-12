@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1
 
 - Entity names follow HA's display name (`friendly_name`), so renames
   you made in HA show on the guest page and in the admin. Before, an
